@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
 from typing import Any
-
+import torch.nn as nn
 
 class MyNetworkBlock(torch.nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -72,44 +72,54 @@ print(pipe.split_gm.submod_2)
 #
 # To learn more about `torchrun`, see
 # https://pytorch.org/docs/stable/elastic/run.html
-import os
 
-local_rank = int(os.environ["LOCAL_RANK"])
-world_size = int(os.environ["WORLD_SIZE"])
-
-# PiPPy uses the PyTorch RPC interface. To use RPC, we must call `init_rpc`
-# and inform the RPC framework of this process's rank and the total world
-# size. We can directly pass values `torchrun` provided.`
-#
-# To learn more about the PyTorch RPC framework, see
-# https://pytorch.org/docs/stable/rpc.html
-import torch.distributed.rpc as rpc
-
-rpc.init_rpc(f"worker{local_rank}", rank=local_rank, world_size=world_size)
 
 # PiPPy relies on the concept of a "driver" process. The driver process
 # should be a single process within the RPC group that instantiates the
 # PipelineDriver and issues commands on that object. The other processes
 # in the RPC group will receive commands from this process and execute
 # the pipeline stages
-if local_rank == 0:
-    from pippy.PipelineDriver import PipelineDriverFillDrain
-    from pippy.microbatch import TensorChunkSpec
+
+from pippy.PipelineDriver import PipelineDriverFillDrain
+from pippy.microbatch import TensorChunkSpec
 
     # LossWrapper is a convenient base class you can use to compose your model
     # with the desired loss function for the purpose of pipeline parallel training.
     # Since the loss is executed as part of the pipeline, it cannot reside in the
     # training loop, so you must embed it like this
-    from pippy.IR import LossWrapper
+from pippy.IR import LossWrapper
 
-    class ModelLossWrapper(LossWrapper):
-        def forward(self, x, target):
-            return self.loss_fn(self.module(x), target)
+class ModelLossWrapper(LossWrapper):
+     def forward(self, x, target):
+        return self.loss_fn(self.module(x), target)
 
     # TODO: mean reduction
-    loss_wrapper = ModelLossWrapper(
-        module=mn, loss_fn=torch.nn.MSELoss(reduction="sum")
-    )
+class LAVLoss:
+    def __init__(self):
+        self.prob_criterion = nn.BCEWithLogitsLoss(reduction='none')
+        self.loc_criterion = nn.L1Loss(reduction='none')
+        self.ori_criterion = nn.L1Loss(reduction='none')
+        self.box_criterion = nn.L1Loss(reduction='none')
+        self.spd_criterion = nn.L1Loss(reduction='none')
+
+    def __call__(self, output, target):
+        prob = target[:, :, 0:1]
+        prob_mean = prob.mean()
+        prob_mean = torch.maximum(prob_mean, torch.ones_like(prob_mean) * 1e-7)
+        prob_det = torch.sigmoid(output[:, :, 0] * (1 - 2 * target[:, :, 0]))
+
+        det_loss = (prob_det * self.prob_criterion(output[:, :, 0], target[:, :, 0])).mean() / prob_det.mean()
+        loc_loss = (prob * self.loc_criterion(output[:, :, 1:3], target[:, :, 1:3])).mean() / prob_mean
+        box_loss = (prob * self.box_criterion(output[:, :, 3:5], target[:, :, 3:5])).mean() / prob_mean
+        ori_loss = (prob * self.ori_criterion(output[:, :, 5:7], target[:, :, 5:7])).mean() / prob_mean
+        spd_loss = (prob * self.ori_criterion(output[:, :, 7:8], target[:, :, 7:8])).mean() / prob_mean
+
+        det_loss = 0.4 * det_loss + 0.2 * loc_loss + 0.2 * box_loss + 0.2 * ori_loss
+        return det_loss, spd_loss
+    
+loss_wrapper = ModelLossWrapper(
+    module=mn, loss_fn=torch.nn.MSELoss(reduction="sum")
+)
 
     # Instantiate the `Pipe` similarly to before, but with two differences:
     #   1) We pass in the `loss_wrapper` module to include the loss in the
@@ -118,55 +128,6 @@ if local_rank == 0:
     #      that should mimic the structure of the output of LossWrapper
     #      and has a True value in the position where the loss value will
     #      be. Since LossWrapper returns just the loss, we just pass True
-    pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=True)
-    
-    # We now have two args: `x` and `target`, so specify batch dimension
-    # for both.
-    args_chunk_spec: Any = (TensorChunkSpec(0), TensorChunkSpec(0))
-    kwargs_chunk_spec: Any = {}
-    # The output of our model is now a `loss` value, which is a scalar tensor.
-    # PiPPy's default is to concatenate outputs, but that will not
-    # work with a scalar tensor. So we use a LossReducer instead
-    # to merge together the loss values from each microbatch into a
-    # single unified loss.
-    from pippy.microbatch import LossReducer
-
-    output_chunk_spec: Any = LossReducer(0.0, lambda a, b: a + b)
-
-    # Instantiate the driver as usual.
-    driver = PipelineDriverFillDrain(
-        pipe,
-        64,
-        world_size=world_size,
-        args_chunk_spec=args_chunk_spec,
-        kwargs_chunk_spec=kwargs_chunk_spec,
-        output_chunk_spec=output_chunk_spec,
-    )
-
-    # Instantiate remote Adam optimizers. `instantiate_optimizer` takes the
-    # optimizer class as the first argument, then additional arguments to that
-    # optimizer. Note that the `parameters` argument is omitted; PiPPy will
-    # populate that value for each pipeline stage for you.
-    optimizer = driver.instantiate_optimizer(torch.optim.Adam)
-    # Also instantiate a learning rate scheduler. Note that the `optimizer` argument is
-    # omitted; PiPPy will populate that argument for each pipeline stage
-    lr_scheduler = driver.instantiate_lr_scheduler(
-        torch.optim.lr_scheduler.LinearLR, total_iters=100
-    )
-
-    N_TRAINING_STEPS = 100
-
-    x = torch.randn(512, 512)
-    target = torch.randn(512, 10)
-    for i in range(N_TRAINING_STEPS):
-        optimizer.zero_grad()
-        pipe_loss = driver(x, target)
-        optimizer.step()
-        lr_scheduler.step()
-
-        log_info = f" Training step {i}, loss: {pipe_loss}, LR: {lr_scheduler.get_last_lr()} "
-        print(log_info.center(80, "*"))
-
-    print(" Pipeline parallel model ran successfully! ".center(80, "*"))
-
-rpc.shutdown()
+pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=True)
+print(pipe)    
+   

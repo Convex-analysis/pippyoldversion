@@ -384,6 +384,7 @@ class Tracer(TracerBase):
         # Prefer the O(1) algorithm
         if self.submodule_paths:
             path = self.submodule_paths.get(mod)
+            print(f"path: {path}")
             if path is None:
                 raise NameError("module is not installed as a submodule")
             assert isinstance(path, str)
