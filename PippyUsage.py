@@ -85,7 +85,10 @@ model = create_model(
     checkpoint_path=None,
     freeze_num=-1,
 )
-
+print(" The following model is not warpped with a loss function ".center(80, "+"))
+pipe = Pipe.from_tracing(model)
+print(pipe)
+print(" The following model is warpped with a loss function ".center(80, "*"))
 loss_wrapper = ModelLossWrapper(module=model, loss_fn=MemFuserLoss())
 
 annotate_split_points(model, {
