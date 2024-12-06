@@ -1,3 +1,4 @@
+import logging
 import torch
 from pippy.IR import Pipe, annotate_split_points, PipeSplitWrapper
 from pippy.IR import LossWrapper
@@ -13,6 +14,9 @@ from timm.models import (
     create_model
 )
 from timm.utils import *
+from timm.optim import create_optimizer_v2, optimizer_kwargs
+from timm.scheduler import create_scheduler
+from timm.data import create_carla_dataset, create_carla_loader
 
 class LAVLoss(nn.Module):
     def __init__(self):
@@ -61,6 +65,7 @@ class MemFuserLoss(nn.Module):
         )
         return loss
 
+
 class ModelLossWrapper(LossWrapper):
     def __init__(self, module, loss_fn):
         super(ModelLossWrapper, self).__init__(module, loss_fn)
@@ -70,47 +75,150 @@ class ModelLossWrapper(LossWrapper):
         loss = self.loss_fn(output, target)
         return output, loss
 
-model = create_model(
-    "memfuser_baseline_e1d3",
-    pretrained=False,
-    drop_rate=0.0,
-    drop_connect_rate=None,  # DEPRECATED, use drop_path
-    drop_path_rate=0.1,
-    drop_block_rate=None,
-    global_pool=None,
-    bn_tf=False,
-    bn_momentum=None,
-    bn_eps=None,
-    scriptable=True,
-    checkpoint_path=None,
-    freeze_num=-1,
-)
-print(" The following model is not warpped with a loss function ".center(80, "+"))
-pipe = Pipe.from_tracing(model)
-print(pipe)
-print(" The following model is warpped with a loss function ".center(80, "*"))
-loss_wrapper = ModelLossWrapper(module=model, loss_fn=MemFuserLoss())
 
-annotate_split_points(model, {
-    'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
-})
-output_loss_value_spec = (False, True)
-pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)
-print(pipe)
+def initialize_pipeline(model):
+    print(" The following model is not warpped with a loss function ".center(80, "+"))
+    pipe = Pipe.from_tracing(model)
+    print(pipe)
+    print(" The following model is warpped with a loss function ".center(80, "*"))
+    loss_wrapper = ModelLossWrapper(module=model, loss_fn=MemFuserLoss())
 
-'''
-args_chunk_spec = (TensorChunkSpec(0), TensorChunkSpec(0))
-kwargs_chunk_spec = {}
+    annotate_split_points(model, {
+        'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+    })
+    output_loss_value_spec = (False, True)
+    pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)
+    print(pipe)
 
-output_chunk_spec = LossReducer(0.0, lambda a, b: a + b)
+    #start to initialize the pipeline driver
+    args_chunk_spec = (TensorChunkSpec(0), TensorChunkSpec(0))
+    kwargs_chunk_spec = {}
 
-if torch.distributed.is_initialized():
-    world_size = torch.distributed.get_world_size()
-else:
-    world_size = 1 
+    output_chunk_spec = LossReducer(0.0, lambda a, b: a + b)
 
-driver = PipelineDriverFillDrain(
-        pipe, args_chunk_spec=args_chunk_spec, kwargs_chunk_spec=kwargs_chunk_spec,
-        output_chunk_spec=output_chunk_spec, world_size=world_size)
-'''
+    if torch.distributed.is_initialized():
+        world_size = torch.distributed.get_world_size()
+    else:
+        world_size = 1 
 
+    driver = PipelineDriverFillDrain(
+            pipe, args_chunk_spec=args_chunk_spec, kwargs_chunk_spec=kwargs_chunk_spec,
+            output_chunk_spec=output_chunk_spec, world_size=world_size)
+    return driver
+
+def get_optimizer(args, model, _logger):
+    linear_scaled_lr = (
+        args.lr * args.batch_size * torch.distributed.get_world_size() / 512.0
+    )
+    args.lr = linear_scaled_lr
+    if args.with_backbone_lr:
+        if args.local_rank == 0:
+            _logger.info(
+                "CNN backbone and transformer blocks using different learning rates!"
+            )
+        backbone_linear_scaled_lr = (
+            args.backbone_lr
+            * args.batch_size
+            * torch.distributed.get_world_size()
+            / 512.0
+        )
+        backbone_weights = []
+        other_weights = []
+        for name, weight in model.named_parameters():
+            if "backbone" in name and "lidar" not in name:
+                backbone_weights.append(weight)
+            else:
+                other_weights.append(weight)
+        if args.local_rank == 0:
+            _logger.info(
+                "%d weights in the cnn backbone, %d weights in other modules"
+                % (len(backbone_weights), len(other_weights))
+            )
+        optimizer = create_optimizer_v2(
+            [
+                {"params": other_weights},
+                {"params": backbone_weights, "lr": backbone_linear_scaled_lr},
+            ],
+            **optimizer_kwargs(cfg=args),
+        )
+    else:
+        optimizer = create_optimizer_v2(model, **optimizer_kwargs(cfg=args))
+    return optimizer
+
+def train_one_epochtrain_one_epoch(
+    epoch,
+    model,
+    loader,
+    optimizer,
+    loss_fns,
+    args,
+    writer,
+    lr_scheduler=None,
+    saver=None,
+    output_dir=None,
+    amp_autocast=suppress,
+    loss_scaler=None,
+    model_ema=None,
+    mixup_fn=None,
+):
+    pass
+
+def main():
+    _logger = logging.getLogger("train")
+    model = create_model(
+        "memfuser_baseline_e1d3",
+        pretrained=False,
+        drop_rate=0.0,
+        drop_connect_rate=None,  # DEPRECATED, use drop_path
+        drop_path_rate=0.1,
+        drop_block_rate=None,
+        global_pool=None,
+        bn_tf=False,
+        bn_momentum=None,
+        bn_eps=None,
+        scriptable=True,
+        checkpoint_path=None,
+        freeze_num=-1,
+        )
+
+    pipelineDriver = initialize_pipeline(model)
+
+    #initalize the optimizer for single GPU training
+    optimizer = get_optimizer(args, model, _logger)
+    #initalize the optimizer for pipeline training
+    optimizer_pipe = pipelineDriver.instantiate_optimizer(optimizer)
+    
+    lr_scheduler, num_epochs = create_scheduler(args, optimizer)
+    lr_scheduler_pipe = pipelineDriver.instantiate_lr_scheduler(
+        lr_scheduler, total_iters=num_epochs
+    )
+    
+    #initalize the dataloader
+    dataset_train = create_carla_dataset(
+            args.dataset,
+            root=args.data_dir,
+            towns=args.train_towns,
+            weathers=args.train_weathers,
+            batch_size=args.batch_size,
+            with_lidar=args.with_lidar,
+            with_seg=args.with_seg,
+            with_depth=args.with_depth,
+            multi_view=args.multi_view,
+            augment_prob=args.augment_prob,
+            temporal_frames=args.temporal_frames,
+        )
+    dataset_eval = create_carla_dataset(
+            args.dataset,
+            root=args.data_dir,
+            towns=args.val_towns,
+            weathers=args.val_weathers,
+            batch_size=args.batch_size,
+            with_lidar=args.with_lidar,
+            with_seg=args.with_seg,
+            with_depth=args.with_depth,
+            multi_view=args.multi_view,
+            augment_prob=args.augment_prob,
+            temporal_frames=args.temporal_frames,
+        )
+    
+    
