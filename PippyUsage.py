@@ -1,4 +1,6 @@
 import logging
+import time
+from typing import OrderedDict
 import torch
 from pippy.IR import Pipe, annotate_split_points, PipeSplitWrapper
 from pippy.IR import LossWrapper
@@ -10,13 +12,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from timm.models import (
-    create_model
-)
 from timm.utils import *
 from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler
 from timm.data import create_carla_dataset, create_carla_loader
+from timm.models import (
+    create_model,
+    safe_model_name,
+    resume_checkpoint,
+    load_checkpoint,
+    convert_splitbn_model,
+    model_parameters,
+)
 
 class LAVLoss(nn.Module):
     def __init__(self):
@@ -145,9 +152,9 @@ def get_optimizer(args, model, _logger):
         optimizer = create_optimizer_v2(model, **optimizer_kwargs(cfg=args))
     return optimizer
 
-def train_one_epochtrain_one_epoch(
+def train_one_epoch_pipeline(
     epoch,
-    model,
+    pipelineDriver,
     loader,
     optimizer,
     loss_fns,
@@ -161,7 +168,107 @@ def train_one_epochtrain_one_epoch(
     model_ema=None,
     mixup_fn=None,
 ):
-    pass
+    second_order = hasattr(optimizer, "is_second_order") and optimizer.is_second_order
+    
+    data_time_m = AverageMeter()
+    losses_m = AverageMeter()
+    '''
+    batch_time_m = AverageMeter()
+    losses_waypoints = AverageMeter()
+    losses_traffic = AverageMeter()
+    losses_velocity = AverageMeter()
+    losses_traffic_light_state = AverageMeter()
+    losses_stop_sign = AverageMeter()
+    '''
+
+    pipelineDriver.train()
+
+    end = time.time()
+    last_idx = len(loader) - 1
+    num_updates = epoch * len(loader)
+    for batch_idx, (input, target) in enumerate(loader):
+        last_batch = batch_idx == last_idx
+        data_time_m.update(time.time() - end)
+        if isinstance(input, (tuple, list)):
+            batch_size = input[0].size(0)
+        elif isinstance(input, dict):
+            batch_size = input[list(input.keys())[0]].size(0)
+        else:
+            batch_size = input.size(0)
+        if not args.prefetcher:
+            if isinstance(input, (tuple, list)):
+                input = [x.cuda() for x in input]
+            elif isinstance(input, dict):
+                for key in input:
+                    if isinstance(input[key], list):
+                        continue
+                    input[key] = input[key].cuda()
+            else:
+                input = input.cuda()
+            if isinstance(target, (tuple, list)):
+                target = [x.cuda() for x in target]
+            elif isinstance(target, dict):
+                for key in target:
+                    target[key] = target[key].cuda()
+            else:
+                target = target.cuda()
+
+        with amp_autocast():
+            output, loss = pipelineDriver(input, target)
+            
+        '''
+        loss_traffic, loss_velocity = loss_fns["traffic"](output[0], target[4])
+            loss_waypoints = loss_fns["waypoints"](output[1], target[1])
+            on_road_mask = target[2] < 0.5
+            loss_traffic_light_state = loss_fns["cls"](output[2], target[3])
+            loss_stop_sign = loss_fns["stop_cls"](output[3], target[6])
+            loss = (
+                loss_traffic * 0.5
+                + loss_waypoints * 0.5
+                + loss_velocity * 0.05
+                + loss_traffic_light_state * 0.1
+                + loss_stop_sign * 0.01
+            )
+        if not args.distributed:
+            losses_traffic.update(loss_traffic.item(), batch_size)
+            losses_waypoints.update(loss_waypoints.item(), batch_size)
+            losses_m.update(loss.item(), batch_size)
+        '''
+        optimizer.zero_grad()
+        if loss_scaler is not None:
+            loss_scaler(
+                loss,
+                optimizer,
+                clip_grad=args.clip_grad,
+                clip_mode=args.clip_mode,
+                parameters=model_parameters(
+                    pipelineDriver, exclude_head="agc" in args.clip_mode
+                ),
+                create_graph=second_order,
+            )
+        else:
+            loss.backward(create_graph=second_order)
+            if args.clip_grad is not None:
+                dispatch_clip_grad(
+                    model_parameters(pipelineDriver, exclude_head="agc" in args.clip_mode),
+                    value=args.clip_grad,
+                    mode=args.clip_mode,
+                )
+            optimizer.step()
+
+        if model_ema is not None:
+            model_ema.update(pipelineDriver)
+
+        if lr_scheduler is not None:
+            lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
+
+        end = time.time()
+        # end for
+
+    if hasattr(optimizer, "sync_lookahead"):
+        optimizer.sync_lookahead()
+
+    return OrderedDict([("loss", losses_m.avg)])
 
 def main():
     _logger = logging.getLogger("train")
@@ -219,6 +326,26 @@ def main():
             multi_view=args.multi_view,
             augment_prob=args.augment_prob,
             temporal_frames=args.temporal_frames,
+        )
+    
+    NUM_ITERATIONs = 100
+
+    for i in range(NUM_ITERATIONs):
+        train_one_epoch_pipeline(
+            i,
+            pipelineDriver,
+            dataset_train,
+            optimizer_pipe,
+            MemFuserLoss(),
+            args,
+            writer=None,
+            lr_scheduler=lr_scheduler_pipe,
+            saver=None,
+            output_dir=None,
+            amp_autocast=suppress,
+            loss_scaler=None,
+            model_ema=None,
+            mixup_fn=None,
         )
     
     
