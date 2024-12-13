@@ -33,35 +33,8 @@ class MyNetwork(torch.nn.Module):
 
         return self.output_proj(x)
 
-#加载库
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchvision.datasets as datasets
-import torchvision.transforms as transforms
 
-# 定义LeNet-5模型
-class LeNet5(nn.Module):
-    def __init__(self):
-        super(LeNet5, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=6, kernel_size=5, stride=1)
-        self.pool1 = nn.AvgPool2d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv2d(in_channels=6, out_channels=16, kernel_size=5, stride=1)
-        self.pool2 = nn.AvgPool2d(kernel_size=2, stride=2)
-        self.fc1 = nn.Linear(in_features=16 * 4 * 4, out_features=120)
-        self.fc2 = nn.Linear(in_features=120, out_features=84)
-        self.fc3 = nn.Linear(in_features=84, out_features=10)
-        
-    def forward(self, x):
-        x = self.pool1(torch.relu(self.conv1(x)))
-        x = self.pool2(torch.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 4 * 4)
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x 
-    
-mn = LeNet5()
+mn = MyNetwork(512, [512, 1024, 256])
 
 for key, value in mn.named_parameters():
     print(key, value.shape)
@@ -173,6 +146,7 @@ if local_rank == 0:
     torch.testing.assert_close(output, reference_output)
 
     print(" Pipeline parallel model ran successfully! ".center(80, "*"))
-
+else:
+    print(f"Worker {local_rank} is waiting for commands...")
 
 rpc.shutdown()

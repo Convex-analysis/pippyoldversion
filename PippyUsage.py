@@ -347,5 +347,7 @@ def main():
             model_ema=None,
             mixup_fn=None,
         )
+
+#run_pippy(main, args)    
     
     
