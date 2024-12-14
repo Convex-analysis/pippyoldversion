@@ -163,7 +163,7 @@ def train_one_epoch_pipeline(
     lr_scheduler=None,
     saver=None,
     output_dir=None,
-    amp_autocast=suppress,
+    amp_autocast=None,
     loss_scaler=None,
     model_ema=None,
     mixup_fn=None,
@@ -289,7 +289,7 @@ def main():
         )
 
     pipelineDriver = initialize_pipeline(model)
-
+    '''
     #initalize the optimizer for single GPU training
     optimizer = get_optimizer(args, model, _logger)
     #initalize the optimizer for pipeline training
@@ -347,5 +347,6 @@ def main():
             model_ema=None,
             mixup_fn=None,
         )
-    
-    
+ '''   
+if __name__ == "__main__":
+    main()
