@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import torch
 from typing import Any
-
+from pippy.IR import annotate_split_points, PipeSplitWrapper, Pipe
 
 class MyNetworkBlock(torch.nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -35,15 +35,10 @@ class MyNetwork(torch.nn.Module):
 
 
 mn = MyNetwork(512, [512, 1024, 256])
-
-from pippy.IR import Pipe
+dev_id = torch.cuda.current_device()
+mn.to(f'cuda:{dev_id}')
 
 pipe = Pipe.from_tracing(mn)
-print(pipe)
-print(pipe.split_gm.submod_0)
-
-
-from pippy.IR import annotate_split_points, PipeSplitWrapper
 
 annotate_split_points(
     mn,
@@ -52,6 +47,11 @@ annotate_split_points(
         "layer1": PipeSplitWrapper.SplitPoint.END,
     },
 )
+
+'''
+from pippy.IR import Pipe
+
+
 
 pipe = Pipe.from_tracing(mn)
 print(" pipe ".center(80, "*"))
@@ -62,6 +62,7 @@ print(" submod1 ".center(80, "*"))
 print(pipe.split_gm.submod_1)
 print(" submod2 ".center(80, "*"))
 print(pipe.split_gm.submod_2)
+'''
 
 
 # To run a distributed training job, we must launch the script in multiple

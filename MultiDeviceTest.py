@@ -1,26 +1,20 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
-import argparse
+import torch
 import os
+import argparse
 from functools import reduce
 
-import torch
 from torch import optim
 from torch.nn.functional import cross_entropy
-from torchvision import datasets, transforms  # type: ignore
-from tqdm import tqdm  # type: ignore
+from torchvision import datasets, transforms
+from tqdm import tqdm
 
-import pippy.fx
 from pippy import run_pippy
 from pippy.IR import MultiUseParameterConfig, Pipe, LossWrapper, PipeSplitWrapper, annotate_split_points
-from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, PipelineDriverInterleaved1F1B, \
-    PipelineDriverBase
-from pippy.events import EventsContext
-from pippy.microbatch import sum_reducer, TensorChunkSpec
+from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, PipelineDriverInterleaved1F1B, PipelineDriverBase
+from pippy.microbatch import TensorChunkSpec, sum_reducer
+from pippy.visualizer import events_to_json, EventsContext
 from pippy.visualizer import events_to_json
-from resnet import ResNet18
-
-PROFILING_ENABLED = True
-CHECK_NUMERIC_EQUIVALENCE = True
+from examples.resnet import ResNet18
 
 schedules = {
     'FillDrain': PipelineDriverFillDrain,
@@ -28,10 +22,7 @@ schedules = {
     'Interleaved1F1B': PipelineDriverInterleaved1F1B,
 }
 
-pippy.fx.Tracer.proxy_buffer_attributes = True
-
-USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
-
+USE_TQDM = True  # Define USE_TQDM variable
 
 def run_master(_, args):
     MULTI_USE_PARAM_CONFIG = MultiUseParameterConfig.REPLICATE if args.replicate else MultiUseParameterConfig.TRANSMIT
@@ -62,16 +53,12 @@ def run_master(_, args):
         def forward(self, input, target):
             output = self.module(input)
             loss = self.loss_fn(output, target)
-            # Here we use a dict with the "loss" keyword so that PiPPy can automatically find the loss field when
-            # generating the backward pass
             return {"output": output, "loss": loss}
 
     model = ResNet18()
 
     annotate_split_points(model, {
-        'layer1': PipeSplitWrapper.SplitPoint.END,
-        'layer2': PipeSplitWrapper.SplitPoint.END,
-        'layer3': PipeSplitWrapper.SplitPoint.END,
+        'layer1': PipeSplitWrapper.SplitPoint.END
     })
 
     wrapper = OutputLossWrapper(model, cross_entropy)
@@ -138,10 +125,8 @@ def run_master(_, args):
         print(f"Saved {pipe_visualized_filename}")
     print('Finished')
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--world_size', type=int, default=int(os.getenv("WORLD_SIZE", 5)))
     parser.add_argument('--rank', type=int, default=int(os.getenv("RANK", -1)))
     parser.add_argument('--master_addr', type=str, default=os.getenv('MASTER_ADDR', 'localhost'))
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
@@ -156,6 +141,6 @@ if __name__ == "__main__":
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
-    args.world_size = 2  # "This program requires exactly 4 workers + 1 master"
+    args.world_size = 5  # This program requires exactly 4 workers + 1 master
 
     run_pippy(run_master, args)
