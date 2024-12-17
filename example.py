@@ -52,19 +52,21 @@ annotate_split_points(
     mn,
     {
         "layer0": PipeSplitWrapper.SplitPoint.END,
-        "layer1": PipeSplitWrapper.SplitPoint.END,
+        #"layer1": PipeSplitWrapper.SplitPoint.END,
     },
 )
 
 pipe = Pipe.from_tracing(mn)
 print(" pipe ".center(80, "*"))
 print(pipe)
+'''
 print(" submod0 ".center(80, "*"))
 print(pipe.split_gm.submod_0)
 print(" submod1 ".center(80, "*"))
 print(pipe.split_gm.submod_1)
 print(" submod2 ".center(80, "*"))
 print(pipe.split_gm.submod_2)
+'''
 
 
 # To run a distributed training job, we must launch the script in multiple
@@ -79,7 +81,7 @@ import os
 
 local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
-
+print(f"The world size is {world_size}")
 # PiPPy uses the PyTorch RPC interface. To use RPC, we must call `init_rpc`
 # and inform the RPC framework of this process's rank and the total world
 # size. We can directly pass values `torchrun` provided.`
@@ -87,15 +89,16 @@ world_size = int(os.environ["WORLD_SIZE"])
 # To learn more about the PyTorch RPC framework, see
 # https://pytorch.org/docs/stable/rpc.html
 import torch.distributed.rpc as rpc
-
+print(f"Running on rank {local_rank}")
 rpc.init_rpc(f"worker{local_rank}", rank=local_rank, world_size=world_size)
-
+print(f"Initialized RPC on worker{local_rank}")
 # PiPPy relies on the concept of a "driver" process. The driver process
 # should be a single process within the RPC group that instantiates the
 # PipelineDriver and issues commands on that object. The other processes
 # in the RPC group will receive commands from this process and execute
 # the pipeline stages
 if local_rank == 0:
+    print("Running on master driver rank")
     # We are going to use the PipelineDriverFillDrain class. This class
     # provides an interface for executing the `Pipe` in a style similar
     # to the GPipe fill-drain schedule. To learn more about GPipe and

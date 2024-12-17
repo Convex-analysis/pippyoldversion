@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import argparse
 import os
+import sys
 from functools import reduce
 
 import torch
@@ -10,7 +11,8 @@ from torchvision import datasets, transforms  # type: ignore
 from tqdm import tqdm  # type: ignore
 
 import pippy.fx
-from pippy import run_pippy
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from ...pippy import run_pippy
 from pippy.IR import MultiUseParameterConfig, Pipe, LossWrapper, PipeSplitWrapper, annotate_split_points
 from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, PipelineDriverInterleaved1F1B, \
     PipelineDriverBase
@@ -39,7 +41,7 @@ def run_master(_, args):
     print("Using schedule:", args.schedule)
     print("Using device:", args.device)
 
-    number_of_workers = 4
+    number_of_workers = 2
     all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
     chunks = len(all_worker_ranks)
     batch_size = args.batch_size * chunks
@@ -70,8 +72,8 @@ def run_master(_, args):
 
     annotate_split_points(model, {
         'layer1': PipeSplitWrapper.SplitPoint.END,
-        'layer2': PipeSplitWrapper.SplitPoint.END,
-        'layer3': PipeSplitWrapper.SplitPoint.END,
+        #'layer2': PipeSplitWrapper.SplitPoint.END,
+        #'layer3': PipeSplitWrapper.SplitPoint.END,
     })
 
     wrapper = OutputLossWrapper(model, cross_entropy)
@@ -157,5 +159,5 @@ if __name__ == "__main__":
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
     args.world_size = 2  # "This program requires exactly 4 workers + 1 master"
-
+    print(torch.cuda.is_available())
     run_pippy(run_master, args)
