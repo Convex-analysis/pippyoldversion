@@ -30,6 +30,7 @@ Reference:
 [1] Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun
     Deep Residual Learning for Image Recognition. arXiv:1512.03385
 '''
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -117,7 +118,8 @@ class ResNet(nn.Module):
             layers.append(block(self.in_planes, planes, stride))
             self.in_planes = planes * block.expansion
         return nn.Sequential(*layers)
-
+    
+    #@torch.autocast(device_type="cuda")
     def forward(self, x):
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)

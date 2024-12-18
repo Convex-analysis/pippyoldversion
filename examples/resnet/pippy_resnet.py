@@ -19,7 +19,7 @@ from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, Pi
 from pippy.events import EventsContext
 from pippy.microbatch import sum_reducer, TensorChunkSpec
 from pippy.visualizer import events_to_json
-from resnet import ResNet18
+from resnet import ResNet34
 
 PROFILING_ENABLED = True
 CHECK_NUMERIC_EQUIVALENCE = True
@@ -55,13 +55,17 @@ def run_master(_, args):
     train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
     valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
 
-    train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size)
-    valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
+    valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
+
+    train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
+    valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size, sampler=valid_sampler)
 
     class OutputLossWrapper(LossWrapper):
         def __init__(self, module, loss_fn):
             super().__init__(module, loss_fn)
 
+        @torch.autocast(device_type="cuda")
         def forward(self, input, target):
             output = self.module(input)
             loss = self.loss_fn(output, target)
@@ -69,7 +73,7 @@ def run_master(_, args):
             # generating the backward pass
             return {"output": output, "loss": loss}
 
-    model = ResNet18()
+    model = ResNet34()
 
     annotate_split_points(model, {
         'layer1': PipeSplitWrapper.SplitPoint.END,
@@ -96,6 +100,8 @@ def run_master(_, args):
         "train": train_dataloader,
         "valid": valid_dataloader
     }
+
+    
 
     this_file_name = os.path.splitext(os.path.basename(__file__))[0]
     pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
@@ -150,9 +156,9 @@ if __name__ == "__main__":
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
     parser.add_argument('--max_epochs', type=int, default=10)
-    parser.add_argument('--batch_size', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=25)
 
-    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
+    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
