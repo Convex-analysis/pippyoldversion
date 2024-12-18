@@ -12,7 +12,7 @@ from tqdm import tqdm  # type: ignore
 
 import pippy.fx
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from ...pippy import run_pippy
+from pippy import run_pippy
 from pippy.IR import MultiUseParameterConfig, Pipe, LossWrapper, PipeSplitWrapper, annotate_split_points
 from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, PipelineDriverInterleaved1F1B, \
     PipelineDriverBase
@@ -42,7 +42,8 @@ def run_master(_, args):
     print("Using device:", args.device)
 
     number_of_workers = 2
-    all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
+    #all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
+    all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
     chunks = len(all_worker_ranks)
     batch_size = args.batch_size * chunks
 
