@@ -84,13 +84,17 @@ class ModelLossWrapper(LossWrapper):
 
 
 def initialize_pipeline(model):
+    '''
     print(" The following model is not warpped with a loss function ".center(80, "+"))
     pipe = Pipe.from_tracing(model)
     print(pipe)
     print(" The following model is warpped with a loss function ".center(80, "*"))
+    '''
     loss_wrapper = ModelLossWrapper(module=model, loss_fn=MemFuserLoss())
 
     annotate_split_points(model, {
+        #'position_encoding': PipeSplitWrapper.SplitPoint.END,
+        'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
         'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
     })
     output_loss_value_spec = (False, True)
