@@ -42,8 +42,8 @@ def run_master(_, args):
     print("Using device:", args.device)
 
     number_of_workers = 2
-    #all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
-    all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
+    all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
+    #all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
     chunks = len(all_worker_ranks)
     batch_size = args.batch_size * chunks
 
