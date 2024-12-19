@@ -76,8 +76,8 @@ def run_master(_, args):
     model = ResNet34()
 
     annotate_split_points(model, {
-        'layer1': PipeSplitWrapper.SplitPoint.END,
-        #'layer2': PipeSplitWrapper.SplitPoint.END,
+        #'layer1': PipeSplitWrapper.SplitPoint.END,
+        'layer2': PipeSplitWrapper.SplitPoint.END,
         #'layer3': PipeSplitWrapper.SplitPoint.END,
     })
 
@@ -156,14 +156,14 @@ if __name__ == "__main__":
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
     parser.add_argument('--max_epochs', type=int, default=10)
-    parser.add_argument('--batch_size', type=int, default=25)
+    parser.add_argument('--batch_size', type=int, default=32)
 
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
-    parser.add_argument('--num_worker_threads', type=int, default=32)
+    parser.add_argument('--num_worker_threads', type=int, default=64)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
     #args.world_size = 2  # "This program requires exactly 4 workers + 1 master"
