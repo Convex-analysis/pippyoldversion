@@ -4,7 +4,7 @@ import sys
 
 def main(node_rank):
     # Set environment variables
-    os.environ["MASTER_ADDR"] = "192.168.2.14"
+    os.environ["MASTER_ADDR"] = "192.168.2.10"
     os.environ["MASTER_PORT"] = "29500"
     os.environ["WORLD_SIZE"] = "2"
     os.environ["NODE_RANK"] = str(node_rank)
