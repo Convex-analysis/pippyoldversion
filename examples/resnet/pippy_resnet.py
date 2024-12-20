@@ -163,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
-    parser.add_argument('--num_worker_threads', type=int, default=64)
+    parser.add_argument('--num_worker_threads', type=int, default=512)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
     #args.world_size = 2  # "This program requires exactly 4 workers + 1 master"
