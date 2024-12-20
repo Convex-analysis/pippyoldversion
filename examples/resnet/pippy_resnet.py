@@ -56,8 +56,8 @@ def run_master(_, args):
     train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
     valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
-    valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank, pin_memory=True)
+    valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank, pin_memory=True)
 
     train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
     valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size, sampler=valid_sampler)
@@ -77,8 +77,8 @@ def run_master(_, args):
     model = ResNet34()
 
     annotate_split_points(model, {
-        #'layer1': PipeSplitWrapper.SplitPoint.END,
-        'layer2': PipeSplitWrapper.SplitPoint.END,
+        'layer1': PipeSplitWrapper.SplitPoint.END,
+        #'layer2': PipeSplitWrapper.SplitPoint.END,
         #'layer3': PipeSplitWrapper.SplitPoint.END,
     })
 
