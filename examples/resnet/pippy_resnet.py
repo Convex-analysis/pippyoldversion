@@ -3,6 +3,7 @@ import argparse
 import os
 import sys
 from functools import reduce
+import psutil
 
 import torch
 from torch import optim
@@ -109,6 +110,8 @@ def run_master(_, args):
 
     for epoch in range(args.max_epochs):
         print(f"Epoch: {epoch + 1}")
+        process = psutil.Process(os.getpid())
+        print(f"Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
         for k, dataloader in loaders.items():
             epoch_correct = 0
             epoch_all = 0
