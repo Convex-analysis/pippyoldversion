@@ -41,7 +41,7 @@ def run_master(_, args):
     print(f'REPLICATE config: {args.replicate} -> {MULTI_USE_PARAM_CONFIG}')
     print("Using schedule:", args.schedule)
     print("Using device:", args.device)
-    if args.rank == 0:
+    if args.rank != -1:
         number_of_workers = 2
         all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
         #all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
@@ -77,8 +77,9 @@ def run_master(_, args):
         model = ResNet34()
 
         annotate_split_points(model, {
-            'layer1': PipeSplitWrapper.SplitPoint.END,
+            #'layer1': PipeSplitWrapper.SplitPoint.END,
             #'layer2': PipeSplitWrapper.SplitPoint.END,
+            'layer2.0.bn1': PipeSplitWrapper.SplitPoint.END,
             #'layer3': PipeSplitWrapper.SplitPoint.END,
         })
 
