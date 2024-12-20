@@ -41,114 +41,114 @@ def run_master(_, args):
     print(f'REPLICATE config: {args.replicate} -> {MULTI_USE_PARAM_CONFIG}')
     print("Using schedule:", args.schedule)
     print("Using device:", args.device)
+    if args.rank == 0:
+        number_of_workers = 2
+        all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
+        #all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
+        chunks = len(all_worker_ranks)
+        batch_size = args.batch_size * chunks
 
-    number_of_workers = 2
-    all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
-    #all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
-    chunks = len(all_worker_ranks)
-    batch_size = args.batch_size * chunks
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
+        train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+        valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
 
-    train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-    valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
+        valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
-    valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
+        train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, sampler=train_sampler, pin_memory=True)
+        valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size, sampler=valid_sampler, pin_memory=True)
 
-    train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, sampler=train_sampler, pin_memory=True)
-    valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size, sampler=valid_sampler, pin_memory=True)
+        class OutputLossWrapper(LossWrapper):
+            def __init__(self, module, loss_fn):
+                super().__init__(module, loss_fn)
 
-    class OutputLossWrapper(LossWrapper):
-        def __init__(self, module, loss_fn):
-            super().__init__(module, loss_fn)
+            @torch.autocast(device_type="cuda")
+            def forward(self, input, target):
+                output = self.module(input)
+                loss = self.loss_fn(output, target)
+                # Here we use a dict with the "loss" keyword so that PiPPy can automatically find the loss field when
+                # generating the backward pass
+                return {"output": output, "loss": loss}
 
-        @torch.autocast(device_type="cuda")
-        def forward(self, input, target):
-            output = self.module(input)
-            loss = self.loss_fn(output, target)
-            # Here we use a dict with the "loss" keyword so that PiPPy can automatically find the loss field when
-            # generating the backward pass
-            return {"output": output, "loss": loss}
+        model = ResNet34()
 
-    model = ResNet34()
+        annotate_split_points(model, {
+            'layer1': PipeSplitWrapper.SplitPoint.END,
+            #'layer2': PipeSplitWrapper.SplitPoint.END,
+            #'layer3': PipeSplitWrapper.SplitPoint.END,
+        })
 
-    annotate_split_points(model, {
-        'layer1': PipeSplitWrapper.SplitPoint.END,
-        #'layer2': PipeSplitWrapper.SplitPoint.END,
-        #'layer3': PipeSplitWrapper.SplitPoint.END,
-    })
+        wrapper = OutputLossWrapper(model, cross_entropy)
 
-    wrapper = OutputLossWrapper(model, cross_entropy)
+        pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
+        pipe.to(args.device)
 
-    pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
-    pipe.to(args.device)
+        output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
+        pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
+                                                                len(all_worker_ranks),
+                                                                all_ranks=all_worker_ranks,
+                                                                output_chunk_spec=output_chunk_spec,
+                                                                _record_mem_dumps=bool(args.record_mem_dumps),
+                                                                checkpoint=bool(args.checkpoint))
 
-    output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
-    pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
-                                                               len(all_worker_ranks),
-                                                               all_ranks=all_worker_ranks,
-                                                               output_chunk_spec=output_chunk_spec,
-                                                               _record_mem_dumps=bool(args.record_mem_dumps),
-                                                               checkpoint=bool(args.checkpoint))
+        optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
 
-    optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
+        loaders = {
+            "train": train_dataloader,
+            "valid": valid_dataloader
+        }
 
-    loaders = {
-        "train": train_dataloader,
-        "valid": valid_dataloader
-    }
+        
 
-    
+        this_file_name = os.path.splitext(os.path.basename(__file__))[0]
+        pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
+        batches_events_contexts = []
 
-    this_file_name = os.path.splitext(os.path.basename(__file__))[0]
-    pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
-    batches_events_contexts = []
-
-    for epoch in range(args.max_epochs):
-        print(f"Epoch: {epoch + 1}")
-        process = psutil.Process(os.getpid())
-        print(f"Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
-        for k, dataloader in loaders.items():
-            epoch_correct = 0
-            epoch_all = 0
-            for i, (x_batch, y_batch) in enumerate(tqdm(dataloader) if USE_TQDM else dataloader):
-                x_batch = x_batch.to(args.device)
-                y_batch = y_batch.to(args.device)
-                if k == "train":
-                    pipe_driver.train()
-                    optimizer.zero_grad()
-                    outp, _ = pipe_driver(x_batch, y_batch)
-                    preds = outp.argmax(-1)
-                    correct = (preds == y_batch).sum()
-                    all = len(y_batch)
-                    epoch_correct += correct.item()
-                    epoch_all += all
-                    optimizer.step()
-                else:
-                    pipe_driver.eval()
-                    with torch.no_grad():
+        for epoch in range(args.max_epochs):
+            print(f"Epoch: {epoch + 1}")
+            process = psutil.Process(os.getpid())
+            print(f"Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
+            for k, dataloader in loaders.items():
+                epoch_correct = 0
+                epoch_all = 0
+                for i, (x_batch, y_batch) in enumerate(tqdm(dataloader) if USE_TQDM else dataloader):
+                    x_batch = x_batch.to(args.device)
+                    y_batch = y_batch.to(args.device)
+                    if k == "train":
+                        pipe_driver.train()
+                        optimizer.zero_grad()
                         outp, _ = pipe_driver(x_batch, y_batch)
                         preds = outp.argmax(-1)
                         correct = (preds == y_batch).sum()
                         all = len(y_batch)
                         epoch_correct += correct.item()
                         epoch_all += all
+                        optimizer.step()
+                    else:
+                        pipe_driver.eval()
+                        with torch.no_grad():
+                            outp, _ = pipe_driver(x_batch, y_batch)
+                            preds = outp.argmax(-1)
+                            correct = (preds == y_batch).sum()
+                            all = len(y_batch)
+                            epoch_correct += correct.item()
+                            epoch_all += all
 
-                if args.visualize:
-                    batches_events_contexts.append(pipe_driver.retrieve_events())
-            print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
+                    if args.visualize:
+                        batches_events_contexts.append(pipe_driver.retrieve_events())
+                print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
 
-    if args.visualize:
-        all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
-                                                    batches_events_contexts, EventsContext())
-        with open(pipe_visualized_filename, "w") as f:
-            f.write(events_to_json(all_events_contexts))
-        print(f"Saved {pipe_visualized_filename}")
-    print('Finished')
+        if args.visualize:
+            all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
+                                                        batches_events_contexts, EventsContext())
+            with open(pipe_visualized_filename, "w") as f:
+                f.write(events_to_json(all_events_contexts))
+            print(f"Saved {pipe_visualized_filename}")
+        print('Finished')
 
 
 if __name__ == "__main__":
