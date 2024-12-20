@@ -56,11 +56,11 @@ def run_master(_, args):
     train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
     valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank, pin_memory=True)
-    valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank, pin_memory=True)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
+    valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
 
-    train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, sampler=train_sampler)
-    valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size, sampler=valid_sampler)
+    train_dataloader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, sampler=train_sampler, pin_memory=True)
+    valid_dataloader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size, sampler=valid_sampler, pin_memory=True)
 
     class OutputLossWrapper(LossWrapper):
         def __init__(self, module, loss_fn):
@@ -159,14 +159,14 @@ if __name__ == "__main__":
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
     parser.add_argument('--max_epochs', type=int, default=10)
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=64)
 
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
-    parser.add_argument('--num_worker_threads', type=int, default=512)
+    parser.add_argument('--num_worker_threads', type=int, default=16)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
     #args.world_size = 2  # "This program requires exactly 4 workers + 1 master"
