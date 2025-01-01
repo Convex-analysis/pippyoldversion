@@ -41,7 +41,7 @@ def run_master(_, args):
     print(f'REPLICATE config: {args.replicate} -> {MULTI_USE_PARAM_CONFIG}')
     print("Using schedule:", args.schedule)
     print("Using device:", args.device)
-    if args.rank != -1:
+    if args.rank == 0:
         number_of_workers = 2
         all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
         #all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
