@@ -41,10 +41,10 @@ def run_master(_, args):
     print(f'REPLICATE config: {args.replicate} -> {MULTI_USE_PARAM_CONFIG}')
     print("Using schedule:", args.schedule)
     print("Using device:", args.device)
-    if args.rank != -1:
+    if args.rank == 0:
         number_of_workers = 2
-        all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
-        #all_worker_ranks = list(range(0, number_of_workers))  # exclude master rank = 0
+        #all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
+        all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
         chunks = len(all_worker_ranks)
         batch_size = args.batch_size * chunks
 
@@ -79,8 +79,8 @@ def run_master(_, args):
         annotate_split_points(model, {
             #'layer1': PipeSplitWrapper.SplitPoint.END,
             #'layer2': PipeSplitWrapper.SplitPoint.END,
-            'layer2.0': PipeSplitWrapper.SplitPoint.END,
-            #'layer3': PipeSplitWrapper.SplitPoint.END,
+            #'layer2.0': PipeSplitWrapper.SplitPoint.END,
+            'layer3': PipeSplitWrapper.SplitPoint.BEGINNING,
         })
 
         wrapper = OutputLossWrapper(model, cross_entropy)
@@ -142,7 +142,6 @@ def run_master(_, args):
                     if args.visualize:
                         batches_events_contexts.append(pipe_driver.retrieve_events())
                 print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
-
         if args.visualize:
             all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
                                                         batches_events_contexts, EventsContext())
@@ -150,6 +149,11 @@ def run_master(_, args):
                 f.write(events_to_json(all_events_contexts))
             print(f"Saved {pipe_visualized_filename}")
         print('Finished')
+
+    else:
+        print("This is a worker rank")
+        print(f"Current Memory usage in this node is : {process.memory_info().rss / 1024 / 1024} MB")
+        
 
 
 if __name__ == "__main__":
@@ -162,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_epochs', type=int, default=10)
     parser.add_argument('--batch_size', type=int, default=64)
 
-    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
+    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
