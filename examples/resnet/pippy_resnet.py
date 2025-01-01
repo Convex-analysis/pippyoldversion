@@ -116,7 +116,12 @@ def run_master(_, args):
             for k, dataloader in loaders.items():
                 epoch_correct = 0
                 epoch_all = 0
+                # Randomly select num_batches_to_process batches data
+                num_batches_to_process = 10  # Change this value to the desired number of batches
+                indices = torch.randperm(len(dataloader))[:num_batches_to_process]
                 for i, (x_batch, y_batch) in enumerate(tqdm(dataloader) if USE_TQDM else dataloader):
+                    if i not in indices:
+                        continue
                     x_batch = x_batch.to(args.device)
                     y_batch = y_batch.to(args.device)
                     if k == "train":
