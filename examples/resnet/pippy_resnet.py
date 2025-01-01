@@ -79,7 +79,7 @@ def run_master(_, args):
         annotate_split_points(model, {
             #'layer1': PipeSplitWrapper.SplitPoint.END,
             #'layer2': PipeSplitWrapper.SplitPoint.END,
-            'layer2.0.bn1': PipeSplitWrapper.SplitPoint.END,
+            'layer2.0': PipeSplitWrapper.SplitPoint.END,
             #'layer3': PipeSplitWrapper.SplitPoint.END,
         })
 
