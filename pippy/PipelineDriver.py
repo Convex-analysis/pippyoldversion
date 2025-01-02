@@ -198,6 +198,8 @@ class RefcountedFuture:
         return self.refcount == 0
 
 
+import psutil  # Add this import
+
 class RankWorker(EventRecorder):
     """
     RankWorker is the underlying WorkItem processing engine for pipeline stages
@@ -235,6 +237,10 @@ class RankWorker(EventRecorder):
         self._record_mem_dumps = _record_mem_dumps
         self.checkpoint = checkpoint
 
+        # Log memory usage
+        process = psutil.Process(os.getpid())
+        print(f"[{rank}] Memory usage before initializing stage executors: {process.memory_info().rss / 1024 ** 2} MB")
+
         # Maximum outstanding micro-batches of the pipeline schedule
         self.max_outstanding = max_outstanding
         # Keeps track of the outstanding micro-batches in current rank executor
@@ -256,6 +262,9 @@ class RankWorker(EventRecorder):
         )
         self.worker_thread.start()
 
+        # Log memory usage after initialization
+        print(f"[{rank}] Memory usage after initializing stage executors: {process.memory_info().rss / 1024 ** 2} MB")
+
     def create_stage_executor(self, stage_id, mod, mod_name):
         if stage_id in self.stage_executors:
             raise AssertionError(
@@ -269,7 +278,7 @@ class RankWorker(EventRecorder):
         if mod is None:
             with Pipe.stage_init_cv:
                 defer_called = Pipe.stage_init_cv.wait_for(
-                    Pipe.is_stage_init_deferred,
+                    Pipe.is_stage_init_deferred(),
                     timeout=100,  # stop waiting after 100s
                 )
                 if not defer_called:
@@ -339,6 +348,10 @@ class RankWorker(EventRecorder):
             logging.debug(
                 f"[{self.rank}][{work_item.microbatch_id}] Got WorkItem {work_item}"
             )
+
+            # Log memory usage before processing the work item
+            process = psutil.Process(os.getpid())
+            print(f"[{self.rank}] Memory usage before processing work item: {process.memory_info().rss / 1024 ** 2} MB")
 
             work_item.state = SchedState.RUNNING
             args_value_refs = work_item.args
@@ -577,6 +590,10 @@ class RankWorker(EventRecorder):
                 stage_executor._record_dumps_on_all_peer_executors(
                     f"M{id}_finish", finish_ts
                 )
+
+            # Log memory usage after processing the work item
+            process = psutil.Process(os.getpid())
+            print(f"[{self.rank}] Memory usage after processing work item: {process.memory_info().rss / 1024 ** 2} MB")
 
     # For work item marked with runlist_key, update its operand list with value
     def update_run_list(self, runlist_key, arg_idx, value):
@@ -835,7 +852,7 @@ class PipeStageExecutor(EventRecorder):
             else:
                 # For non-tensor (e.g. a value or a size vector), we use RPC to spawn asynchronous data transfer
                 logging.debug(
-                    f"[{self.stage_id}][{cur_microbatch}] Launching RPC data transfer for "
+                    f"[{self.stage_id}][{microbatch}] Launching RPC data transfer for "
                     f"ValueReference {arg_idx} {value_ref_arg}"
                 )
                 self.async_transfer(
@@ -1393,12 +1410,12 @@ class PipelineDriverBase(torch.nn.Module):
 
         # Log memory usage
         process = psutil.Process(os.getpid())
-        logging.info(f"Memory usage before initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
+        print(f"Memory usage before initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
 
         self._init_remote_executors()
 
         # Log memory usage after initialization
-        logging.info(f"Memory usage after initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
+        print(f"Memory usage after initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
 
     def _init_remote_executors(self):
         self.rank_worker_rrefs: Dict[int, torch.distributed.rpc.RRef] = {}
@@ -2288,3 +2305,4 @@ class PipelineDriverInterleaved1F1B(PipelineDriver1F1B):
             use_c10d=use_c10d,
             loss_reducer=loss_reducer,
         )
+
