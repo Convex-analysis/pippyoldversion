@@ -4,6 +4,7 @@ import operator
 import threading
 import time
 import warnings
+import os
 from enum import Enum
 from inspect import Parameter, Signature
 from typing import Any, Callable, Dict, List, Tuple, Optional
@@ -1343,6 +1344,8 @@ class PipelineLRScheduler(torch.optim.lr_scheduler._LRScheduler):
         raise NotImplementedError
 
 
+import psutil  # Add this import
+
 class PipelineDriverBase(torch.nn.Module):
     def __init__(
         self,
@@ -1387,6 +1390,15 @@ class PipelineDriverBase(torch.nn.Module):
         self.optimizer_inited = False
         self.checkpoint = checkpoint
         self.use_c10d = use_c10d
+
+        # Log memory usage
+        process = psutil.Process(os.getpid())
+        logging.info(f"Memory usage before initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
+
+        self._init_remote_executors()
+
+        # Log memory usage after initialization
+        logging.info(f"Memory usage after initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
 
     def _init_remote_executors(self):
         self.rank_worker_rrefs: Dict[int, torch.distributed.rpc.RRef] = {}

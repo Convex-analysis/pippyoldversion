@@ -20,7 +20,7 @@ from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, Pi
 from pippy.events import EventsContext
 from pippy.microbatch import sum_reducer, TensorChunkSpec
 from pippy.visualizer import events_to_json
-from resnet import ResNet34
+from resnet import ResNet50, ResNet34, ResNet101, ResNet152
 
 PROFILING_ENABLED = True
 CHECK_NUMERIC_EQUIVALENCE = True
@@ -77,10 +77,10 @@ def run_master(_, args):
         model = ResNet34()
 
         annotate_split_points(model, {
-            #'layer1': PipeSplitWrapper.SplitPoint.END,
+            'layer1': PipeSplitWrapper.SplitPoint.END,
             #'layer2': PipeSplitWrapper.SplitPoint.END,
             #'layer2.0': PipeSplitWrapper.SplitPoint.END,
-            'layer3': PipeSplitWrapper.SplitPoint.BEGINNING,
+            #'layer3': PipeSplitWrapper.SplitPoint.BEGINNING,
         })
 
         wrapper = OutputLossWrapper(model, cross_entropy)
@@ -89,6 +89,8 @@ def run_master(_, args):
         pipe.to(args.device)
 
         output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
+        process = psutil.Process(os.getpid())
+        print(f"Memory usage before pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
@@ -97,7 +99,7 @@ def run_master(_, args):
                                                                 checkpoint=bool(args.checkpoint))
 
         optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
-
+        print(f"Memory usage after pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
         loaders = {
             "train": train_dataloader,
             "valid": valid_dataloader
@@ -111,7 +113,7 @@ def run_master(_, args):
 
         for epoch in range(args.max_epochs):
             print(f"Epoch: {epoch + 1}")
-            process = psutil.Process(os.getpid())
+            
             print(f"Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
             for k, dataloader in loaders.items():
                 epoch_correct = 0
