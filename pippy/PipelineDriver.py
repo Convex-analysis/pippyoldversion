@@ -851,10 +851,6 @@ class PipeStageExecutor(EventRecorder):
                 batch_refs[arg_idx] = value_ref_arg
             else:
                 # For non-tensor (e.g. a value or a size vector), we use RPC to spawn asynchronous data transfer
-                logging.debug(
-                    f"[{self.stage_id}][{microbatch}] Launching RPC data transfer for "
-                    f"ValueReference {arg_idx} {value_ref_arg}"
-                )
                 self.async_transfer(
                     cur_microbatch, value_ref_arg, arg_idx, output_unique_key
                 )
@@ -1137,6 +1133,7 @@ class PipeStageExecutor(EventRecorder):
         self.lr_scheduler.step(*args, **kwargs)  # type: ignore[union-attr]
 
     def _check_cleanup(self) -> bool:
+        
         if len(self.value_store):
             logging.warning(
                 f"[{self.stage_id}] Unclean value store: {self.value_store}"
@@ -1408,6 +1405,9 @@ class PipelineDriverBase(torch.nn.Module):
         self.checkpoint = checkpoint
         self.use_c10d = use_c10d
 
+        self.communication_overload = 0
+        self.data_transferred_mb = 0
+
         # Log memory usage
         process = psutil.Process(os.getpid())
         print(f"Memory usage before initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
@@ -1416,6 +1416,8 @@ class PipelineDriverBase(torch.nn.Module):
 
         # Log memory usage after initialization
         print(f"Memory usage after initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
+
+
 
     def _init_remote_executors(self):
         self.rank_worker_rrefs: Dict[int, torch.distributed.rpc.RRef] = {}
@@ -1532,6 +1534,7 @@ class PipelineDriverBase(torch.nn.Module):
             self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
                 descr.name
             ][1]
+            self.communication_overload += 1  # Increment communication count
 
         # Inform executors of their peers
         for stage_id, executor in self.stage_to_executor.items():
@@ -1642,6 +1645,10 @@ class PipelineDriverBase(torch.nn.Module):
                     module_name
                 ]
                 module_rref.rpc_sync().set_grad(param_qualname, synced_value)
+                self.communication_overload += 1  # Increment communication count
+                # Calculate data size in MB
+                param_size = grad_value.numel() * grad_value.element_size() / (1024 ** 2)
+                self.data_transferred_mb += param_size
 
     def _retrieve_output_values(self, microbatch_interpreters, last_nodes):
         logging.debug(
@@ -1655,6 +1662,10 @@ class PipelineDriverBase(torch.nn.Module):
         # First kick of async transfers to retrieve ValueReference values
         def initiate_async_transfer(a):
             if isinstance(a, ValueReference):
+                self.communication_overload += 1  # Increment communication count
+                # Calculate data size in MB
+                value_size = a.meta["tensor_meta"].numel() * a.meta["tensor_meta"].element_size() / (1024 ** 2)
+                self.data_transferred_mb += value_size
                 value_ref_executor_rref = self.stage_to_executor[a.stage_id]
                 return value_ref_executor_rref.rpc_async().get_value(
                     "root", "collect", -1, a
@@ -1675,6 +1686,7 @@ class PipelineDriverBase(torch.nn.Module):
     def retrieve_events(self) -> EventsContext:
         events_context = EventsContext()
         for rank, worker_rref in self.rank_worker_rrefs.items():
+            self.communication_overload += 1  # Increment communication count
             events_context.update(worker_rref.rpc_sync().retrieve_events())
         for interp in self.microbatch_interpreters:
             events_context.update(interp.retrieve_events())
@@ -1684,10 +1696,24 @@ class PipelineDriverBase(torch.nn.Module):
         return events_context
 
     def _check_stages_cleanup(self) -> bool:
+        '''
         clean = True
         for executor in self.stage_to_executor.values():
             clean &= executor.rpc_sync()._check_cleanup()
         return clean
+        '''
+        if len(self.value_store):
+            logging.warning(
+                f"[{self.stage_id}] Unclean value store: {self.value_store}"
+            )
+            return False
+        return True
+
+    def get_communication_overload(self):
+        return self.communication_overload
+
+    def get_data_transferred_mb(self):
+        return self.data_transferred_mb
 
 
 class RemoteInterpreter(pippy.fx.Interpreter, EventRecorder):
@@ -1709,6 +1735,8 @@ class RemoteInterpreter(pippy.fx.Interpreter, EventRecorder):
         self.cur_microbatch = cur_microbatch
         self.pc = 0
         self.node_list = list(self.module.graph.nodes)
+        self.communication_overload = 0
+        self.data_transferred_mb = 0
         logging.debug(
             f"[root] RemoteInterpreter created with {len(self.node_list)} nodes"
         )
@@ -1808,6 +1836,10 @@ class RemoteInterpreter(pippy.fx.Interpreter, EventRecorder):
             self.record_event_dependency(
                 from_id=name, to_id=f"R{forward_name}", type="invoke"
             )
+            self.module.communication_overload += 1  # Increment communication count
+            # Calculate data size in MB
+            data_size = sum(arg.numel() * arg.element_size() for arg in args if isinstance(arg, torch.Tensor)) / (1024 ** 2)
+            self.module.data_transferred_mb += data_size
             return ValueReference(stage_id, invocation_key)
         else:
             logging.debug(
@@ -1848,6 +1880,10 @@ class RemoteInterpreter(pippy.fx.Interpreter, EventRecorder):
                     f"[root][{self.cur_microbatch}] Appending getitem tuple to stage {stage_id}: {index_tuple}"
                 )
                 indices.append(index_tuple)
+                self.module.communication_overload += 1  # Increment communication count
+                # Calculate data size in MB
+                data_size = args[0].meta["tensor_meta"].numel() * args[0].meta["tensor_meta"].element_size() / (1024 ** 2)
+                self.module.data_transferred_mb += data_size
                 return ValueReference(stage_id, invocation_key)
         elif target is stage_backward:
             assert "fw_stage" in node.meta
@@ -2109,6 +2145,8 @@ class PipelineDriverFillDrain(PipelineDriverBase):
         self.last_grads = None
 
         self._init_remote_executors()
+
+        
 
     def forward(self, *args, **kwargs):
         if self.single_loss:

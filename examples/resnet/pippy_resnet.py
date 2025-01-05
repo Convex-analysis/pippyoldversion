@@ -4,12 +4,17 @@ import os
 import sys
 from functools import reduce
 import psutil
+import resource
 
-import torch
-from torch import optim
-from torch.nn.functional import cross_entropy
+def set_memory_limit(max_memory_mb):
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    resource.setrlimit(resource.RLIMIT_AS, (max_memory_mb * 1024 * 1024, hard))
+
 from torchvision import datasets, transforms  # type: ignore
 from tqdm import tqdm  # type: ignore
+import torch
+import torch.optim as optim
+from torch.nn.functional import cross_entropy
 
 import pippy.fx
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -35,6 +40,9 @@ pippy.fx.Tracer.proxy_buffer_attributes = True
 
 USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
 
+def log_memory_usage(stage):
+    process = psutil.Process(os.getpid())
+    print(f"[{stage}] Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
 
 def run_master(_, args):
     MULTI_USE_PARAM_CONFIG = MultiUseParameterConfig.REPLICATE if args.replicate else MultiUseParameterConfig.TRANSMIT
@@ -74,7 +82,11 @@ def run_master(_, args):
                 # generating the backward pass
                 return {"output": output, "loss": loss}
 
+        log_memory_usage("Before initializing model")
+
         model = ResNet34()
+
+        log_memory_usage("After initializing model")
 
         annotate_split_points(model, {
             'layer1': PipeSplitWrapper.SplitPoint.END,
@@ -88,6 +100,8 @@ def run_master(_, args):
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
 
+        log_memory_usage("After creating Pipe")
+
         output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
         process = psutil.Process(os.getpid())
         print(f"Memory usage before pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
@@ -99,6 +113,7 @@ def run_master(_, args):
                                                                 checkpoint=bool(args.checkpoint))
 
         optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
+        log_memory_usage("After creating optimizer")
         print(f"Memory usage after pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
         loaders = {
             "train": train_dataloader,
@@ -113,8 +128,8 @@ def run_master(_, args):
 
         for epoch in range(args.max_epochs):
             print(f"Epoch: {epoch + 1}")
+            log_memory_usage(f"Start of epoch {epoch + 1}")
             
-            print(f"Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
             for k, dataloader in loaders.items():
                 epoch_correct = 0
                 epoch_all = 0
@@ -148,7 +163,9 @@ def run_master(_, args):
 
                     if args.visualize:
                         batches_events_contexts.append(pipe_driver.retrieve_events())
+                    log_memory_usage(f"After processing batch {i} in {k} loader")
                 print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
+            log_memory_usage(f"End of epoch {epoch + 1}")
         if args.visualize:
             all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
                                                         batches_events_contexts, EventsContext())
@@ -156,6 +173,9 @@ def run_master(_, args):
                 f.write(events_to_json(all_events_contexts))
             print(f"Saved {pipe_visualized_filename}")
         print('Finished')
+        log_memory_usage("End of training")
+        print(f"Communication overload: {pipe_driver.get_communication_overload()}")
+        print(f"Data transferred: {pipe_driver.get_data_transferred_mb()} MB")
 
     else:
         print("This is a worker rank")
@@ -177,10 +197,16 @@ if __name__ == "__main__":
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
+    ##parser.add_argument("--max_memory_mb", type=int, default=4096, help="Maximum memory usage in MB")
+    
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
+    
     parser.add_argument('--num_worker_threads', type=int, default=16)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
+    
+    # Set memory limit
+    #set_memory_limit(args.max_memory_mb)
     #args.world_size = 2  # "This program requires exactly 4 workers + 1 master"
     print(torch.cuda.is_available())
     run_pippy(run_master, args)
