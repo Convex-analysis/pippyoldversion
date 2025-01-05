@@ -1836,10 +1836,6 @@ class RemoteInterpreter(pippy.fx.Interpreter, EventRecorder):
             self.record_event_dependency(
                 from_id=name, to_id=f"R{forward_name}", type="invoke"
             )
-            self.module.communication_overload += 1  # Increment communication count
-            # Calculate data size in MB
-            data_size = sum(arg.numel() * arg.element_size() for arg in args if isinstance(arg, torch.Tensor)) / (1024 ** 2)
-            self.module.data_transferred_mb += data_size
             return ValueReference(stage_id, invocation_key)
         else:
             logging.debug(
@@ -1880,10 +1876,6 @@ class RemoteInterpreter(pippy.fx.Interpreter, EventRecorder):
                     f"[root][{self.cur_microbatch}] Appending getitem tuple to stage {stage_id}: {index_tuple}"
                 )
                 indices.append(index_tuple)
-                self.module.communication_overload += 1  # Increment communication count
-                # Calculate data size in MB
-                data_size = args[0].meta["tensor_meta"].numel() * args[0].meta["tensor_meta"].element_size() / (1024 ** 2)
-                self.module.data_transferred_mb += data_size
                 return ValueReference(stage_id, invocation_key)
         elif target is stage_backward:
             assert "fw_stage" in node.meta
