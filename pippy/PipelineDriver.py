@@ -1662,10 +1662,10 @@ class PipelineDriverBase(torch.nn.Module):
         # First kick of async transfers to retrieve ValueReference values
         def initiate_async_transfer(a):
             if isinstance(a, ValueReference):
-                self.communication_overload += 1  # Increment communication count
+                #self.communication_overload += 1  # Increment communication count
                 # Calculate data size in MB
-                value_size = a.meta["tensor_meta"].numel() * a.meta["tensor_meta"].element_size() / (1024 ** 2)
-                self.data_transferred_mb += value_size
+                #value_size = a.meta["tensor_meta"].numel() * a.meta["tensor_meta"].element_size() / (1024 ** 2)
+                #self.data_transferred_mb += value_size
                 value_ref_executor_rref = self.stage_to_executor[a.stage_id]
                 return value_ref_executor_rref.rpc_async().get_value(
                     "root", "collect", -1, a
