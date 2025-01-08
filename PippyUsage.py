@@ -59,8 +59,7 @@ pippy.fx.Tracer.proxy_buffer_attributes = True
 USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
 
 def log_memory_usage(stage):
-    process = psutil.Process(os.getpid())
-    print(f"[{stage}] Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
+    print("1:{}".format(torch.cuda.memory_allocated(0)))
 
 
 class LAVLoss(nn.Module):
@@ -448,8 +447,6 @@ def run_master(_, args):
         log_memory_usage("After creating Pipe")
 
         output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
-        process = psutil.Process(os.getpid())
-        print(f"Memory usage before pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
@@ -464,7 +461,6 @@ def run_master(_, args):
         )
         
         log_memory_usage("After creating optimizer")
-        print(f"Memory usage after pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
         
         this_file_name = os.path.splitext(os.path.basename(__file__))[0]
         pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
@@ -501,7 +497,6 @@ def run_master(_, args):
 
     else:
         print("This is a worker rank")
-        print(f"Current Memory usage in this node is : {process.memory_info().rss / 1024 / 1024} MB")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -60,6 +60,9 @@ from pippy.microbatch import (
 
 DEBUG = False
 
+# Configure logging to write to a file
+logging.basicConfig(filename='/home/cailab/xtaWorkspace/pipeline_driver.log', level=logging.INFO, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 class Phase(Enum):
     FORWARD = 0
@@ -147,6 +150,11 @@ class WorkItem:
 
         for arg in args_to_fwd:
             setattr(self, arg, locals()[arg])
+        
+        logging.info(f"Created WorkItem: {self}")
+
+    def __del__(self):
+        logging.info(f"Released WorkItem: {self}")
 
     stage_id: int
     phase: Phase
@@ -237,9 +245,8 @@ class RankWorker(EventRecorder):
         self._record_mem_dumps = _record_mem_dumps
         self.checkpoint = checkpoint
 
-        # Log memory usage
-        process = psutil.Process(os.getpid())
-        print(f"[{rank}] Memory usage before initializing stage executors: {process.memory_info().rss / 1024 ** 2} MB")
+        # Log GPU memory usage
+        print("Inital rank worker:{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
         # Maximum outstanding micro-batches of the pipeline schedule
         self.max_outstanding = max_outstanding
@@ -262,8 +269,8 @@ class RankWorker(EventRecorder):
         )
         self.worker_thread.start()
 
-        # Log memory usage after initialization
-        print(f"[{rank}] Memory usage after initializing stage executors: {process.memory_info().rss / 1024 ** 2} MB")
+        # Log GPU memory usage after initialization
+        print("after initialization :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
     def create_stage_executor(self, stage_id, mod, mod_name):
         if stage_id in self.stage_executors:
@@ -302,6 +309,7 @@ class RankWorker(EventRecorder):
             )
             self.ready_runlist[unique_key] = work_item
             self.ready_runlist_cv.notify()
+            logging.info(f"Enqueued WorkItem to ready runlist: {work_item}")
 
     def enqueue_waiting_runlist(self, unique_key, work_item):
         with self.waiting_runlist_lock:
@@ -312,6 +320,7 @@ class RankWorker(EventRecorder):
                 unique_key not in self.waiting_runlist
             ), f"key {unique_key} already in waiting runlist {self.waiting_runlist}"
             self.waiting_runlist[unique_key] = work_item
+            logging.info(f"Enqueued WorkItem to waiting runlist: {work_item}")
 
     def worker_loop(self):
         batch_id_to_remaining_backward_microbatches: Dict[int, int] = {}
@@ -339,6 +348,7 @@ class RankWorker(EventRecorder):
                     ):
                         continue
                     work_item = self.ready_runlist.pop(key)
+                    logging.info(f"Dequeued WorkItem from ready runlist: {work_item}")
                     break
 
             # We may not fetch any actionable work item in the above loop, go
@@ -349,9 +359,8 @@ class RankWorker(EventRecorder):
                 f"[{self.rank}][{work_item.microbatch_id}] Got WorkItem {work_item}"
             )
 
-            # Log memory usage before processing the work item
-            process = psutil.Process(os.getpid())
-            print(f"[{self.rank}] Memory usage before processing work item: {process.memory_info().rss / 1024 ** 2} MB")
+            # Log GPU memory usage before processing the work item
+            print("before processing the work item :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
             work_item.state = SchedState.RUNNING
             args_value_refs = work_item.args
@@ -591,9 +600,8 @@ class RankWorker(EventRecorder):
                     f"M{id}_finish", finish_ts
                 )
 
-            # Log memory usage after processing the work item
-            process = psutil.Process(os.getpid())
-            print(f"[{self.rank}] Memory usage after processing work item: {process.memory_info().rss / 1024 ** 2} MB")
+            # Log GPU memory usage after processing the work item
+            print("after processing the work item :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
     # For work item marked with runlist_key, update its operand list with value
     def update_run_list(self, runlist_key, arg_idx, value):
@@ -611,6 +619,7 @@ class RankWorker(EventRecorder):
                 logging.debug(
                     f"[{self.rank}][{work_item.microbatch_id}] all operands ready: {runlist_key}"
                 )
+                logging.info(f"WorkItem is ready: {work_item}")
 
 
 class PipeStageExecutor(EventRecorder):
@@ -1408,14 +1417,13 @@ class PipelineDriverBase(torch.nn.Module):
         self.communication_overload = 0
         self.data_transferred_mb = 0
 
-        # Log memory usage
-        process = psutil.Process(os.getpid())
-        print(f"Memory usage before initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
+        # Log GPU memory usage
+        print("Before _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
         self._init_remote_executors()
 
-        # Log memory usage after initialization
-        print(f"Memory usage after initializing remote executors: {process.memory_info().rss / 1024 ** 2} MB")
+        # Log GPU memory usage after initialization
+        print("After _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
 
 
@@ -2335,4 +2343,5 @@ class PipelineDriverInterleaved1F1B(PipelineDriver1F1B):
             use_c10d=use_c10d,
             loss_reducer=loss_reducer,
         )
+
 

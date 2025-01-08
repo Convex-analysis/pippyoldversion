@@ -24,7 +24,7 @@ def main(node_rank, max_memory_mb):
     # Construct the torchrun command
     command = [
         "torchrun",
-        "--nproc_per_node=1",
+        "--nproc_per_node=2",
         "--nnodes=" + os.environ["WORLD_SIZE"],
         "--node_rank=" + os.environ["NODE_RANK"],
         "--master_addr=" + os.environ["MASTER_ADDR"],
@@ -39,9 +39,7 @@ def main(node_rank, max_memory_mb):
     subprocess.run(command)
 
     # Print the communication overload and data transferred
-    from pippy.PipelineDriver import PipelineDriverBase
-    print(f"Communication overload: {PipelineDriverBase.get_communication_overload()}")
-    print(f"Data transferred: {PipelineDriverBase.get_data_transferred_mb()} MB")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

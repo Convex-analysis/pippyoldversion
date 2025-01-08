@@ -41,8 +41,7 @@ pippy.fx.Tracer.proxy_buffer_attributes = True
 USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
 
 def log_memory_usage(stage):
-    process = psutil.Process(os.getpid())
-    print(f"[{stage}] Memory usage: {process.memory_info().rss / 1024 / 1024} MB")
+    print("GPU {}:{}".format(stage, (torch.cuda.memory_allocated(0)/1024/1024)))
 
 def run_master(_, args):
     MULTI_USE_PARAM_CONFIG = MultiUseParameterConfig.REPLICATE if args.replicate else MultiUseParameterConfig.TRANSMIT
@@ -50,9 +49,9 @@ def run_master(_, args):
     print("Using schedule:", args.schedule)
     print("Using device:", args.device)
     if args.rank == 0:
-        number_of_workers = 2
-        #all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
-        all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
+        number_of_workers = args.world_size
+        all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
+        #all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
         chunks = len(all_worker_ranks)
         batch_size = args.batch_size * chunks
 
@@ -89,10 +88,11 @@ def run_master(_, args):
         log_memory_usage("After initializing model")
 
         annotate_split_points(model, {
+            #'layer': PipeSplitWrapper.SplitPoint.END,
             'layer1': PipeSplitWrapper.SplitPoint.END,
             #'layer2': PipeSplitWrapper.SplitPoint.END,
             #'layer2.0': PipeSplitWrapper.SplitPoint.END,
-            #'layer3': PipeSplitWrapper.SplitPoint.BEGINNING,
+            #'layer3': PipeSplitWrapper.SplitPoint.END,
         })
 
         wrapper = OutputLossWrapper(model, cross_entropy)
@@ -103,8 +103,7 @@ def run_master(_, args):
         log_memory_usage("After creating Pipe")
 
         output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
-        process = psutil.Process(os.getpid())
-        print(f"Memory usage before pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
+        print("1:{}".format(torch.cuda.memory_allocated(0)))
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
@@ -114,7 +113,6 @@ def run_master(_, args):
 
         optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
         log_memory_usage("After creating optimizer")
-        print(f"Memory usage after pipelineDriver: {process.memory_info().rss / 1024 / 1024} MB")
         loaders = {
             "train": train_dataloader,
             "valid": valid_dataloader
@@ -141,7 +139,8 @@ def run_master(_, args):
                         continue
                     x_batch = x_batch.to(args.device)
                     y_batch = y_batch.to(args.device)
-                    if k == "train":
+                    #if k == "train":
+                    if False:
                         pipe_driver.train()
                         optimizer.zero_grad()
                         outp, _ = pipe_driver(x_batch, y_batch)
@@ -179,7 +178,7 @@ def run_master(_, args):
 
     else:
         print("This is a worker rank")
-        print(f"Current Memory usage in this node is : {process.memory_info().rss / 1024 / 1024} MB")
+        print("1:{}".format(torch.cuda.memory_allocated(0)))
         
 
 
@@ -190,7 +189,7 @@ if __name__ == "__main__":
     parser.add_argument('--master_addr', type=str, default=os.getenv('MASTER_ADDR', 'localhost'))
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
-    parser.add_argument('--max_epochs', type=int, default=10)
+    parser.add_argument('--max_epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=64)
 
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
