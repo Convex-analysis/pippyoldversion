@@ -361,7 +361,7 @@ class RankWorker(EventRecorder):
             )
 
             # Log GPU memory usage before processing the work item
-            print("before processing the work item :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
+            print("before processing the work_item.microbatch_id {} :{}MB".format(work_item.microbatch_id, torch.cuda.memory_allocated(0)/1024/1024))
 
             work_item.state = SchedState.RUNNING
             args_value_refs = work_item.args
@@ -602,8 +602,7 @@ class RankWorker(EventRecorder):
                 )
 
             # Log GPU memory usage after processing the work item
-            print("after processing the work item :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
-
+            print("after processing the work_item.microbatch_id {} :{}MB".format(work_item.microbatch_id, torch.cuda.memory_allocated(0)/1024/1024))
             # Explicitly delete the work item to free memory
             del work_item
 
