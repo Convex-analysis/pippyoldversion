@@ -325,6 +325,7 @@ class RankWorker(EventRecorder):
     def worker_loop(self):
         batch_id_to_remaining_backward_microbatches: Dict[int, int] = {}
         while True:
+            print(f'All workitem count at loop begining: {len(self.ready_runlist)+len(self.waiting_runlist)}, current work item in ready runlist: {len(self.ready_runlist)}, current work item in waiting runlist: {len(self.waiting_runlist)}')
             work_item = None
             with self.ready_runlist_cv:
                 while len(self.ready_runlist) == 0:
@@ -603,6 +604,14 @@ class RankWorker(EventRecorder):
             # Log GPU memory usage after processing the work item
             print("after processing the work item :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
+            # Explicitly delete the work item to free memory
+            del work_item
+
+            # Periodically clean up unused memory
+            if microbatch_id % 10 == 0:
+                torch.cuda.empty_cache()
+                #print("Periodic memory cleanup :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
+                print("Granpa GPT crashes pytorch's graphics memory leak with a small stone !!!")
     # For work item marked with runlist_key, update its operand list with value
     def update_run_list(self, runlist_key, arg_idx, value):
         with self.waiting_runlist_lock:

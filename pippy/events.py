@@ -6,6 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional, Any, List, Dict
 
+import pickle
+
 
 @dataclass
 class Allocator:
@@ -65,6 +67,13 @@ class EventsContext:
     def reset(self):
         self.__init__()  # type: ignore[misc]
 
+    def save_to_file(self, file_path: str = '/home/cailab/xtaWorkspace/pippyoldversion/examples/resnet/log.pkl'):
+        with open(file_path, 'wb') as file:
+            pickle.dump({
+                'events': self.events,
+                'next_events': self.next_events,
+                'prev_events': self.prev_events
+            }, file)
 
 class EventRecorder:
     events_context: EventsContext = EventsContext()
@@ -95,6 +104,8 @@ class EventRecorder:
             )
         )
 
+        self.events_context.save_to_file()
+
     def record_dump(
         self,
         rank: int,
@@ -118,6 +129,8 @@ class EventRecorder:
                 mbid=None,
             )
         )
+
+        self.events_context.save_to_file()
 
     def record_event_dependency(
         self, from_id: str, to_id: str, type: Optional[Any]

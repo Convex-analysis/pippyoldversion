@@ -24,7 +24,7 @@ def main(node_rank, max_memory_mb):
     # Construct the torchrun command
     command = [
         "torchrun",
-        "--nproc_per_node=2",
+        "--nproc_per_node=1",
         "--nnodes=" + os.environ["WORLD_SIZE"],
         "--node_rank=" + os.environ["NODE_RANK"],
         "--master_addr=" + os.environ["MASTER_ADDR"],
