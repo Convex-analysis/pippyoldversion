@@ -210,18 +210,15 @@ def train_one_epoch_pipeline(
     mixup_fn=None,
 ):
     second_order = hasattr(optimizer, "is_second_order") and optimizer.is_second_order
-    
+    batch_time_m = AverageMeter()
     data_time_m = AverageMeter()
     losses_m = AverageMeter()
-    '''
-    batch_time_m = AverageMeter()
     losses_waypoints = AverageMeter()
     losses_traffic = AverageMeter()
     losses_velocity = AverageMeter()
     losses_traffic_light_state = AverageMeter()
     losses_stop_sign = AverageMeter()
-    '''
-
+    start = time.time()
     pipelineDriver.train()
 
     end = time.time()
@@ -256,25 +253,9 @@ def train_one_epoch_pipeline(
 
         with amp_autocast():
             output, loss = pipelineDriver(input, target)
-            
-        '''
-        loss_traffic, loss_velocity = loss_fns["traffic"](output[0], target[4])
-            loss_waypoints = loss_fns["waypoints"](output[1], target[1])
-            on_road_mask = target[2] < 0.5
-            loss_traffic_light_state = loss_fns["cls"](output[2], target[3])
-            loss_stop_sign = loss_fns["stop_cls"](output[3], target[6])
-            loss = (
-                loss_traffic * 0.5
-                + loss_waypoints * 0.5
-                + loss_velocity * 0.05
-                + loss_traffic_light_state * 0.1
-                + loss_stop_sign * 0.01
-            )
-        if not args.distributed:
-            losses_traffic.update(loss_traffic.item(), batch_size)
-            losses_waypoints.update(loss_waypoints.item(), batch_size)
-            losses_m.update(loss.item(), batch_size)
-        '''
+
+        losses_m.update(loss.item(), batch_size)
+
         optimizer.zero_grad()
         if loss_scaler is not None:
             loss_scaler(
@@ -304,7 +285,7 @@ def train_one_epoch_pipeline(
             lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
 
         end = time.time()
-        # end for
+        batch_time_m.update(end - start)
 
     if hasattr(optimizer, "sync_lookahead"):
         optimizer.sync_lookahead()
@@ -491,7 +472,6 @@ def run_master(_, args):
                 f.write(events_to_json(all_events_contexts))
             print(f"Saved {pipe_visualized_filename}")
         print('Finished')
-        log_memory_usage("End of training")
         print(f"Communication overload: {pipe_driver.get_communication_overload()}")
         print(f"Data transferred: {pipe_driver.get_data_transferred_mb()} MB")
 
