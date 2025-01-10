@@ -29,6 +29,7 @@ from pippy.microbatch import (
     merge_chunks,
 )
 
+from jtop import jtop 
 # TODO: Define the strategy for replicating the computation. In particular, we will likely make the assumption
 # that the operations in the program are batch-wise commutative (my term), i.e. we can guarantee equivalence
 # with splitting up the operation along the batch dimension, applying the computation to those sub-batches,
@@ -607,7 +608,12 @@ class RankWorker(EventRecorder):
             del work_item
 
             # Periodically clean up unused memory
-            if microbatch_id % 10 == 0:
+            
+            with jtop() as jetson:
+                gpu_memory = jetson.memory['RAM']['shared']
+                total_memory = jetson.memory['RAM']['tot']
+                print(f"Current GPU memory usage: {gpu_memory/1024} MB, and current total memory: {total_memory/1024} MB")
+            if gpu_memory > 0.75*total_memory:
                 torch.cuda.empty_cache()
                 #print("Periodic memory cleanup :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
                 print("Granpa GPT crashes pytorch's graphics memory leak with a small stone !!!")

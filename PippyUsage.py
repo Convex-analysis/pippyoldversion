@@ -132,7 +132,7 @@ def initialize_pipeline(model):
     annotate_split_points(model, {
         #'position_encoding': PipeSplitWrapper.SplitPoint.END,
         'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-        'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+        #'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
     })
     output_loss_value_spec = (False, True)
     pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)

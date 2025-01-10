@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import resource
+import torch
 
 def set_memory_limit(max_memory_mb):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -10,7 +11,7 @@ def set_memory_limit(max_memory_mb):
 def main(node_rank, max_memory_mb):
     # Set memory limit
     set_memory_limit(max_memory_mb)
-
+    torch.set_num_threads(4)
     # Set environment variables
     os.environ["MASTER_ADDR"] = "192.168.2.14"
     os.environ["MASTER_PORT"] = "29500"
