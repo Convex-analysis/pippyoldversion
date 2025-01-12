@@ -1,155 +1,233 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
+import logging
+import time
+import os
+import sys
+import argparse
+from typing import OrderedDict
 import torch
-from typing import Any
+#import resource
+from functools import reduce
+import pickle
+import ctypes
+
+from pippy.IR import Pipe, annotate_split_points, PipeSplitWrapper
+from pippy.IR import LossWrapper
+from pippy.PipelineDriver import PipelineDriverFillDrain
+from pippy.microbatch import TensorChunkSpec
+from pippy.microbatch import LossReducer
+import pippy.fx
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from pippy import run_pippy
+from pippy.IR import MultiUseParameterConfig, Pipe, LossWrapper, PipeSplitWrapper, annotate_split_points
+from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, PipelineDriverInterleaved1F1B, \
+    PipelineDriverBase
+from pippy.events import EventsContext
+from pippy.microbatch import sum_reducer, TensorChunkSpec
+from pippy.visualizer import events_to_json
 
 
-class MyNetworkBlock(torch.nn.Module):
-    def __init__(self, in_dim, out_dim):
-        super().__init__()
-        self.lin = torch.nn.Linear(in_dim, out_dim)
 
-    def forward(self, x):
-        x = self.lin(x)
-        x = torch.relu(x)
-        return x
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 
-
-class MyNetwork(torch.nn.Module):
-    def __init__(self, in_dim, layer_dims):
-        super().__init__()
-
-        prev_dim = in_dim
-        for i, dim in enumerate(layer_dims):
-            setattr(self, f"layer{i}", MyNetworkBlock(prev_dim, dim))
-            prev_dim = dim
-
-        self.num_layers = len(layer_dims)
-        # 10 output classes
-        self.output_proj = torch.nn.Linear(layer_dims[-1], 10)
-
-    def forward(self, x):
-        for i in range(self.num_layers):
-            x = getattr(self, f"layer{i}")(x)
-
-        return self.output_proj(x)
-
-
-mn = MyNetwork(512, [512, 1024, 256])
-
-for key, value in mn.named_parameters():
-    print(key, value.shape)
-
-from pippy.IR import Pipe
-
-pipe = Pipe.from_tracing(mn)
-print(pipe)
-print(pipe.split_gm.submod_0)
-
-
-from pippy.IR import annotate_split_points, PipeSplitWrapper
-
-annotate_split_points(
-    mn,
-    {
-        "layer0": PipeSplitWrapper.SplitPoint.END,
-        #"layer1": PipeSplitWrapper.SplitPoint.END,
-    },
+from timm.utils import *
+from timm.optim import create_optimizer_v2, optimizer_kwargs
+from timm.scheduler import create_scheduler
+from timm.data import create_carla_dataset, create_carla_loader
+from timm.models import (
+    create_model,
+    safe_model_name,
+    resume_checkpoint,
+    load_checkpoint,
+    convert_splitbn_model,
+    model_parameters,
 )
 
-pipe = Pipe.from_tracing(mn)
-print(" pipe ".center(80, "*"))
-print(pipe)
-'''
-print(" submod0 ".center(80, "*"))
-print(pipe.split_gm.submod_0)
-print(" submod1 ".center(80, "*"))
-print(pipe.split_gm.submod_1)
-print(" submod2 ".center(80, "*"))
-print(pipe.split_gm.submod_2)
-'''
+PROFILING_ENABLED = True
+CHECK_NUMERIC_EQUIVALENCE = True
+
+NUM_ITERATION = 100
+
+schedules = {
+    'FillDrain': PipelineDriverFillDrain,
+    '1F1B': PipelineDriver1F1B,
+    'Interleaved1F1B': PipelineDriverInterleaved1F1B,
+}
+
+pippy.fx.Tracer.proxy_buffer_attributes = True
+
+USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
+
+def log_memory_usage(stage):
+    print("1:{}".format(torch.cuda.memory_allocated(0)))
+
+def debug_pickle(obj, name):
+    try:
+        pickle.dumps(obj)
+    except TypeError as e:
+        print(f"Error pickling {name}: {e}")
 
 
-# To run a distributed training job, we must launch the script in multiple
-# different processes. We are using `torchrun` to do so in this example.
-# `torchrun` defines two environment variables: `LOCAL_RANK` and `WORLD_SIZE`,
-# which represent the index of this process within the set of processes and
-# the total number of processes, respectively.
-#
-# To learn more about `torchrun`, see
-# https://pytorch.org/docs/stable/elastic/run.html
-import os
 
-local_rank = int(os.environ["LOCAL_RANK"])
-world_size = int(os.environ["WORLD_SIZE"])
-print(f"The world size is {world_size}")
-# PiPPy uses the PyTorch RPC interface. To use RPC, we must call `init_rpc`
-# and inform the RPC framework of this process's rank and the total world
-# size. We can directly pass values `torchrun` provided.`
-#
-# To learn more about the PyTorch RPC framework, see
-# https://pytorch.org/docs/stable/rpc.html
-import torch.distributed.rpc as rpc
-print(f"Running on rank {local_rank}")
-rpc.init_rpc(f"worker{local_rank}", rank=local_rank, world_size=world_size)
-print(f"Initialized RPC on worker{local_rank}")
-# PiPPy relies on the concept of a "driver" process. The driver process
-# should be a single process within the RPC group that instantiates the
-# PipelineDriver and issues commands on that object. The other processes
-# in the RPC group will receive commands from this process and execute
-# the pipeline stages
-if local_rank == 0:
-    print("Running on master driver rank")
-    # We are going to use the PipelineDriverFillDrain class. This class
-    # provides an interface for executing the `Pipe` in a style similar
-    # to the GPipe fill-drain schedule. To learn more about GPipe and
-    # the fill-drain schedule, see https://arxiv.org/abs/1811.06965
-    from pippy.PipelineDriver import PipelineDriverFillDrain
-    from pippy.microbatch import TensorChunkSpec
+class LAVLoss(nn.Module):
+    def __init__(self):
+        super(LAVLoss, self).__init__()
+        self.prob_criterion = nn.BCEWithLogitsLoss(reduction='none')
+        self.loc_criterion = nn.L1Loss(reduction='none')
+        self.ori_criterion = nn.L1Loss(reduction='none')
+        self.box_criterion = nn.L1Loss(reduction='none')
+        self.spd_criterion = nn.L1Loss(reduction='none')
 
-    # Pipelining relies on _micro-batching_--that is--the process of
-    # dividing the program's input data into smaller chunks and
-    # feeding those chunks through the pipeline sequentially. Doing
-    # this requires that the data and operations be _separable_, i.e.
-    # there should be at least one dimension along which data can be
-    # split such that the program does not have interactions across
-    # this dimension. PiPPy provides `chunk_spec` arguments for this
-    # purpose, to specify the batch dimension for tensors in each of
-    # the args, kwargs, and outputs. The structure of the `chunk_spec`s
-    # should mirror that of the data type. Here, the program has a
-    # single tensor input and single tensor output, so we specify
-    # a single `TensorChunkSpec` instance indicating dimension 0
-    # for args[0] and the output value.
-    args_chunk_spec: Any = (TensorChunkSpec(0),)
-    kwargs_chunk_spec: Any = {}
-    output_chunk_spec: Any = TensorChunkSpec(0)
+    def __call__(self, output, target):
+        prob = target[:, :, 0:1]
+        prob_mean = prob.mean()
+        prob_mean = torch.maximum(prob_mean, torch.ones_like(prob_mean) * 1e-7)
+        prob_det = torch.sigmoid(output[:, :, 0] * (1 - 2 * target[:, :, 0]))
 
-    # Finally, we instantiate the PipelineDriver. We pass in the pipe,
-    # chunk specs, and world size, and the constructor will distribute
-    # our code to the processes in the RPC group. `driver` is an object
-    # we can invoke to run the pipeline.
+        det_loss = (prob_det * self.prob_criterion(output[:, :, 0], target[:, :, 0])).mean() / prob_det.mean()
+        loc_loss = (prob * self.loc_criterion(output[:, :, 1:3], target[:, :, 1:3])).mean() / prob_mean
+        box_loss = (prob * self.box_criterion(output[:, :, 3:5], target[:, :, 3:5])).mean() / prob_mean
+        ori_loss = (prob * self.ori_criterion(output[:, :, 5:7], target[:, :, 5:7])).mean() / prob_mean
+        spd_loss = (prob * self.ori_criterion(output[:, :, 7:8], target[:, :, 7:8])).mean() / prob_mean
+
+        det_loss = 0.4 * det_loss + 0.2 * loc_loss + 0.2 * box_loss + 0.2 * ori_loss
+        return det_loss, spd_loss
+
+class MemFuserLoss(nn.Module):
+    def __init__(self):
+        super(MemFuserLoss, self).__init__()
+        self.traffic = LAVLoss()
+        self.waypoints = torch.nn.L1Loss()
+        self.cls = nn.CrossEntropyLoss()
+        self.stop_cls = nn.CrossEntropyLoss()
+
+    def __call__(self, output, target):
+        loss_traffic, loss_velocity = self.traffic(output[0], target[4])
+        loss_waypoints = self.waypoints(output[1], target[1])
+        loss_traffic_light_state = self.cls(output[2], target[3])
+        loss_stop_sign = self.stop_cls(output[3], target[6])
+        
+        loss = (
+            loss_traffic * 0.5
+            + loss_waypoints * 0.5
+            + loss_velocity * 0.05
+            + loss_traffic_light_state * 0.1
+            + loss_stop_sign * 0.01
+        )
+        return loss
+
+
+class ModelLossWrapper(LossWrapper):
+    def __init__(self, module, loss_fn):
+        super(ModelLossWrapper, self).__init__(module, loss_fn)
+
+    def forward(self, input, target):
+        output = self.module(input)
+        loss = self.loss_fn(output, target)
+        return output, loss
+
+class PipeWrapper:
+    def __init__(self, pipe):
+        self.pipe = pipe
+
+    def to_pycapsule(self):
+        # Convert the Pipe object to a PyCapsule
+        capsule = ctypes.py_object(self.pipe)
+        return capsule
+
+    @staticmethod
+    def from_pycapsule(capsule):
+        # Convert the PyCapsule back to a Pipe object
+        pipe = ctypes.cast(capsule, ctypes.py_object).value
+        return PipeWrapper(pipe)
+
+    def serialize(self):
+        # Serialize the Pipe object using pickle
+        # Convert the PyCapsule to a serializable format
+        capsule = self.to_pycapsule()
+        capsule_address = ctypes.addressof(ctypes.c_void_p.from_buffer(capsule))
+        serialized_pipe = pickle.dumps(capsule_address)
+        return serialized_pipe
+
+    @staticmethod
+    def deserialize(serialized_pipe):
+        # Deserialize the Pipe object using pickle
+        # Convert the serialized format back to a PyCapsule
+        capsule_address = pickle.loads(serialized_pipe)
+        capsule = ctypes.cast(ctypes.c_void_p(capsule_address), ctypes.py_object)
+        pipe = ctypes.cast(capsule, ctypes.py_object).value
+        return PipeWrapper(pipe)
+
+def initialize_pipeline(model):
+    
+
+    annotate_split_points(model, {
+        'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
+        'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+    })
+    loss_wrapper = ModelLossWrapper(module=model, loss_fn=MemFuserLoss())
+    debug_pickle(loss_wrapper, "loss_wrapper")
+    output_loss_value_spec = (False, True)
+    
+    pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)
+    debug_pickle(pipe, "pipe")
+
+    state = pipe.__dict__.copy()
+    for k, v in state.items():
+        debug_pickle(state[k],k)
+    executor = state['executor'].__dict__.copy()
+    for k,v in executor.items():
+        debug_pickle(executor[k],k)
+    
+    # Serialize the Pipe object
+
+
+    # Start to initialize the pipeline driver
+    args_chunk_spec = (TensorChunkSpec(0), TensorChunkSpec(0))
+    kwargs_chunk_spec = {}
+
+    output_chunk_spec = LossReducer(0.0, lambda a, b: a + b)
+    chunks = 1
+    if torch.distributed.is_initialized():
+        world_size = torch.distributed.get_world_size()
+    else:
+        world_size = 1
+
     driver = PipelineDriverFillDrain(
-        pipe,
-        64,
-        world_size=world_size,
-        args_chunk_spec=args_chunk_spec,
-        kwargs_chunk_spec=kwargs_chunk_spec,
-        output_chunk_spec=output_chunk_spec,
-    )
+            pipe, args_chunk_spec=args_chunk_spec, kwargs_chunk_spec=kwargs_chunk_spec,
+            output_chunk_spec=output_chunk_spec, world_size=world_size, chunks=chunks)
+    debug_pickle(driver, "driver")
+    return driver
 
-    x = torch.randn(512, 512)
 
-    # Run the pipeline with input `x`. Divide the batch into 64 micro-batches
-    # and run them in parallel on the pipeline
-    output = driver(x)
+def main():
+    _logger = logging.getLogger("train")
+    model = create_model(
+        "memfuser_baseline_e1d3",
+        pretrained=False,
+        drop_rate=0.0,
+        drop_connect_rate=None,  # DEPRECATED, use drop_path
+        drop_path_rate=0.1,
+        drop_block_rate=None,
+        global_pool=None,
+        bn_tf=False,
+        bn_momentum=None,
+        bn_eps=None,
+        scriptable=True,
+        checkpoint_path=None,
+        freeze_num=-1,
+        )
+    #Take a Memfuser instance, wrap it in a try-except pickle.dumps block, and see if any TypeError is raised.
+    try:
+        pickle.dumps(model)
+    except TypeError as e:
+        print(f"Error pickling model: {e}")
+    debug_pickle(model, "model")
+    pipelineDriver = initialize_pipeline(model)
+   
 
-    # Run the original code and get the output for comparison
-    reference_output = mn(x)
 
-    # Compare numerics of pipeline and original model
-    torch.testing.assert_close(output, reference_output)
-
-    print(" Pipeline parallel model ran successfully! ".center(80, "*"))
-else:
-    print(f"Worker {local_rank} is waiting for commands...")
-
-rpc.shutdown()
+if __name__ == "__main__":
+    main()

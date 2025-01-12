@@ -662,6 +662,17 @@ class Memfuser(nn.Module):
         nn.init.uniform_(self.query_embed)
         nn.init.uniform_(self.query_pos_embed)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # remove or replace unpicklable references
+        # state.pop('some_unpicklable_attr', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # reinitialize anything needed post-pickle
+        # self.some_unpicklable_attr = None
+
     def forward_features(
         self,
         front_image,

@@ -5,6 +5,11 @@ import operator
 from enum import Enum
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import ctypes
+import pickle
+
+def is_pycapsule(obj):
+    return isinstance(obj, ctypes.py_object)
 
 import torch
 import torch.fx as torch_fx
@@ -35,7 +40,36 @@ assert (torch_version.major, torch_version.minor) >= (  # type: ignore
 #    with shared parameters? probably need to modify split_module in this case
 # 5. Add parameter movement to split_module
 
+def debug_pickle(obj, name):
+    try:
+        pickle.dumps(obj)
+    except TypeError as e:
+        print(f"Error pickling {name}: {e}")
+        
+#This function was defined in init function of Pipe class, but it may be the reason of the error, so I move it to the top of the file.
+def throw(*args, **kwargs):
+            raise RuntimeError(
+                "To run pipeline locally, invoke the Pipe object directly, not `split_gm`"
+            )
+#This function is used to deal with the case where the submodule has a unnamed module, which is not supported by pickle and causes an runtime error.
+def inspect_submodule(submod, submod_name):
+            for name, param in submod.named_parameters():
+                debug_pickle(param, f"parameter {name}")
 
+            for name, buffer in submod.named_buffers():
+                debug_pickle(buffer, f"buffer {name}")
+
+            for name, module in submod.named_modules():
+                if name == '':
+                    print(f"Unnamed module found in {submod_name}")
+                    # Assign a new name to the unnamed module
+                    new_name = f"unnamed_module_{id(module)}"
+                    setattr(submod, new_name, module)
+                    delattr(submod, name)
+                debug_pickle(module, f"module {name}")
+                
+                
+                
 def _find_loss_from_output_and_spec(output_val, spec_val):
     if spec_val is False:
         return None
@@ -485,6 +519,7 @@ def _direct_serialization_deserialize(body, nodes):
 def _direct_serialization_reduce(self):
     serialization_dict = dict(self.__dict__)
     serialization_dict.pop("_graph")
+
     return (
         _direct_serialization_deserialize,
         (serialization_dict, _LinearNodeList(self.graph.nodes)),
@@ -558,11 +593,15 @@ class Pipe(torch.nn.Module):
 
         self.new_to_old_qualname_mapping = qualname_mapping
 
-        def throw(self, *args, **kwargs):
-            raise RuntimeError(
-                "To run pipeline locally, invoke the Pipe object directly, not `split_gm`"
-            )
-
+        '''
+        The pipe cannot be pickled because the split_gm is not picklable.
+        By iterating through the submodules of the split_gm, we check out the submoud_0 has a unnamed module, which is not supported by pickle and may cause an runtime error. Hence, we add the inspect_submodule function to deal with this case.
+        
+        The other reason for the error is that the split_gm.forward is set to throw. It is defined in this initial function and after set split_gm.forward to throw, the split_gm is not picklable, and the termial raises an error "AttributeError: Can't pickle local object 'Pipe.__init__.<locals>.throw'". To solve this problem, we move throw function to the top of this file.
+        
+        Combining two of the above reasons, the pipe can be pickled successfully.
+        '''
+        debug_pickle(self, "self")
         self.split_gm.forward = throw  # type: ignore
 
         # Make submodules use custom direct-serialized GraphModule
@@ -571,10 +610,13 @@ class Pipe(torch.nn.Module):
             try:
                 name = f"submod_{i}"
                 submod = getattr(self.split_gm, name)
+                #This line is used to deal with the case where the submodule has a unnamed module, which is not supported by pickle and causes an runtime error.
+                inspect_submodule(submod, name)
                 submod.__class__.__reduce__ = _direct_serialization_reduce
                 i += 1
             except AttributeError:
                 break
+        debug_pickle(self, "self")
 
     def forward(self, *args, **kwargs):
         executor_args = args
@@ -613,6 +655,7 @@ class Pipe(torch.nn.Module):
             res, self.last_grads = res
 
         return res
+
 
     def remap_qualname(self, qualname):
         # TODO: annoying
@@ -976,7 +1019,8 @@ class Pipe(torch.nn.Module):
             logging.info(
                 "Pipeline is in evaluation mode, backward pass not generated"
             )
-
+        #debug_pickle(split, "split")
+        #debug_pickle(qualname_map, "qualname_map")
         return Pipe(
             split,
             qualname_map,
@@ -1009,6 +1053,7 @@ class Pipe(torch.nn.Module):
                     mod
                 )  # because further pipe building activities can modify mod
             graph = _pipeline_tracer.trace(mod, **kwargs)
+            #print("graph", graph)
             if isinstance(graph, torch_fx.Graph):
                 # HACK to convert torch.fx.Graph to pippy.fx.Graph
                 g_new = pippy.fx.Graph()
@@ -1032,7 +1077,6 @@ class Pipe(torch.nn.Module):
 
         if split_policy is not None:
             traced = split_policy(traced)
-
         return Pipe._from_traced(
             mod,
             traced,
@@ -1046,7 +1090,7 @@ class Pipe(torch.nn.Module):
     def __repr__(self):
         return self.split_gm.__repr__()
 
-    # Conditoinal variable to ensure `defer_stage_init` is called before other callers call `materialize_stage`
+    # Conditional variable to ensure `defer_stage_init` is called before other callers call `materialize_stage`
     # TODO: cleaner approach
     _stage_init_lock = threading.Lock()
     stage_init_cv = threading.Condition(_stage_init_lock)

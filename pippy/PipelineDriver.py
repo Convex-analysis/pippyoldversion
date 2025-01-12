@@ -29,7 +29,7 @@ from pippy.microbatch import (
     merge_chunks,
 )
 
-from jtop import jtop 
+#from jtop import jtop 
 # TODO: Define the strategy for replicating the computation. In particular, we will likely make the assumption
 # that the operations in the program are batch-wise commutative (my term), i.e. we can guarantee equivalence
 # with splitting up the operation along the batch dimension, applying the computation to those sub-batches,
@@ -206,8 +206,6 @@ class RefcountedFuture:
         self.refcount -= 1
         return self.refcount == 0
 
-
-import psutil  # Add this import
 
 class RankWorker(EventRecorder):
     """
@@ -1376,7 +1374,6 @@ class PipelineLRScheduler(torch.optim.lr_scheduler._LRScheduler):
         raise NotImplementedError
 
 
-import psutil  # Add this import
 
 class PipelineDriverBase(torch.nn.Module):
     def __init__(

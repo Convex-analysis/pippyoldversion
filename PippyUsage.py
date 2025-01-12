@@ -5,9 +5,10 @@ import sys
 import argparse
 from typing import OrderedDict
 import torch
-import resource, psutil
+#import resource, psutil
 from functools import reduce
 import pickle
+import ctypes
 
 from pippy.IR import Pipe, annotate_split_points, PipeSplitWrapper
 from pippy.IR import LossWrapper
@@ -67,6 +68,21 @@ def debug_pickle(obj, name):
         pickle.dumps(obj)
     except TypeError as e:
         print(f"Error pickling {name}: {e}")
+
+def is_pycapsule(obj):
+    PyCapsule_CheckExact = ctypes.pythonapi.PyCapsule_CheckExact
+    PyCapsule_CheckExact.argtypes = [ctypes.py_object]
+    PyCapsule_CheckExact.restype = ctypes.c_int
+    return PyCapsule_CheckExact(obj) == 1
+
+def has_submodules_if_pycapsule(obj):
+    if is_pycapsule(obj):
+        try:
+            # for example, check if 'submodules' or a similar property exists
+            return hasattr(obj, "submodules") and obj.submodules
+        except AttributeError:
+            return False
+    return False
 
 class LAVLoss(nn.Module):
     def __init__(self):
@@ -428,6 +444,9 @@ def run_master(_, args):
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
         debug_pickle(pipe, "pipe")
+        
+        if is_pycapsule(pipe):
+            print("Pipe is a pycapsule")
 
         log_memory_usage("After creating Pipe")
 
@@ -542,3 +561,4 @@ if __name__ == "__main__":
     
     print(torch.cuda.is_available())
     run_pippy(run_master, args)
+
