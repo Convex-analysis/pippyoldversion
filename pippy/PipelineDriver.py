@@ -608,15 +608,10 @@ class RankWorker(EventRecorder):
             del work_item
 
             # Periodically clean up unused memory
-            
-            with jtop() as jetson:
-                gpu_memory = jetson.memory['RAM']['shared']
-                total_memory = jetson.memory['RAM']['tot']
-                print(f"Current GPU memory usage: {gpu_memory/1024} MB, and current total memory: {total_memory/1024} MB")
-            if gpu_memory > 0.75*total_memory:
+            if microbatch_id % 10 == 0:
                 torch.cuda.empty_cache()
-                #print("Periodic memory cleanup :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
-                print("Granpa GPT crashes pytorch's graphics memory leak with a small stone !!!")
+                print("Periodic memory cleanup :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
+
     # For work item marked with runlist_key, update its operand list with value
     def update_run_list(self, runlist_key, arg_idx, value):
         with self.waiting_runlist_lock:

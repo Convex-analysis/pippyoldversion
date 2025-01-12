@@ -7,6 +7,7 @@ from typing import OrderedDict
 import torch
 import resource, psutil
 from functools import reduce
+import pickle
 
 from pippy.IR import Pipe, annotate_split_points, PipeSplitWrapper
 from pippy.IR import LossWrapper
@@ -61,6 +62,11 @@ USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
 def log_memory_usage(stage):
     print("1:{}".format(torch.cuda.memory_allocated(0)))
 
+def debug_pickle(obj, name):
+    try:
+        pickle.dumps(obj)
+    except TypeError as e:
+        print(f"Error pickling {name}: {e}")
 
 class LAVLoss(nn.Module):
     def __init__(self):
@@ -121,13 +127,8 @@ class ModelLossWrapper(LossWrapper):
 
 
 def initialize_pipeline(model):
-    '''
-    print(" The following model is not warpped with a loss function ".center(80, "+"))
-    pipe = Pipe.from_tracing(model)
-    print(pipe)
-    print(" The following model is warpped with a loss function ".center(80, "*"))
-    '''
     loss_wrapper = ModelLossWrapper(module=model, loss_fn=MemFuserLoss())
+    debug_pickle(loss_wrapper, "loss_wrapper")
 
     annotate_split_points(model, {
         #'position_encoding': PipeSplitWrapper.SplitPoint.END,
@@ -136,7 +137,7 @@ def initialize_pipeline(model):
     })
     output_loss_value_spec = (False, True)
     pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)
-    print(pipe)
+    debug_pickle(pipe, "pipe")
 
     #start to initialize the pipeline driver
     args_chunk_spec = (TensorChunkSpec(0), TensorChunkSpec(0))
@@ -147,11 +148,12 @@ def initialize_pipeline(model):
     if torch.distributed.is_initialized():
         world_size = torch.distributed.get_world_size()
     else:
-        world_size = 1 
+        world_size = 1
 
     driver = PipelineDriverFillDrain(
             pipe, args_chunk_spec=args_chunk_spec, kwargs_chunk_spec=kwargs_chunk_spec,
             output_chunk_spec=output_chunk_spec, world_size=world_size)
+    debug_pickle(driver, "driver")
     return driver
 
 def get_optimizer(args, model, _logger):
@@ -412,18 +414,20 @@ def run_master(_, args):
             checkpoint_path=None,
             freeze_num=-1,
         )
+        debug_pickle(model, "model")
 
         log_memory_usage("After initializing model")
 
         annotate_split_points(model, {
             'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-            'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+            #'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
         })
 
         wrapper = OutputLossWrapper(model, MemFuserLoss())
 
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
+        debug_pickle(pipe, "pipe")
 
         log_memory_usage("After creating Pipe")
 
@@ -434,6 +438,7 @@ def run_master(_, args):
                                                                 output_chunk_spec=output_chunk_spec,
                                                                 _record_mem_dumps=bool(args.record_mem_dumps),
                                                                 checkpoint=bool(args.checkpoint))
+        debug_pickle(pipe_driver, "pipe_driver")
 
         optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
         lr_scheduler, num_epochs = create_scheduler(args, optimizer)
@@ -507,7 +512,7 @@ if __name__ == "__main__":
     parser.add_argument("--multi-view-input-size", default=None, nargs=3, type=int)
     #The following arguments are used for the moddel
     parser.add_argument("--dataset", type=str, default="carla")
-    parser.add_argument("--data-dir", type=str, default="./carladata")
+    parser.add_argument("--data-dir", type=str, default="./Caraladata/Device1")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--backbone-lr", type=float, default=1e-3)

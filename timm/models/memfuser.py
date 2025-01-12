@@ -943,18 +943,6 @@ def memfuser_baseline_e1d3(**kwargs):
     return model
 
 @register_model
-def memfuser_baseline_e1d3(**kwargs):
-    model = Memfuser(
-        enc_depth=1,
-        dec_depth=3,
-        embed_dim=256,
-        rgb_backbone_name="r50",
-        lidar_backbone_name="conv",
-        waypoints_pred_head="gru",
-    )
-    return model
-
-@register_model
 def memfuser_baseline_e1d3_return_feature(**kwargs):
     '''
     _return_feature means the model only output the intermediate features,
