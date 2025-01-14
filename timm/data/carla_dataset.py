@@ -178,13 +178,16 @@ class CarlaMVDetDataset(BaseIODataset):
         route_dir_nums = 0
         dataset_indexs = self._load_text(os.path.join(root, 'dataset_index.txt')).split('\n')
         pattern = re.compile('town(\d\d).*w(\d+)')
+        print(f"data index: {dataset_indexs}")
         for line in dataset_indexs:
             if len(line.split()) != 2:
                 continue
             path, frames = line.split()
             path = os.path.join(root, 'data', path)
             frames = int(frames)
+            #print(f"loading {path} with {frames} frames")
             res = pattern.findall(path)
+            #print(f"res: {res}")
             if len(res) != 1:
                 continue
             town = int(res[0][0])
@@ -195,6 +198,7 @@ class CarlaMVDetDataset(BaseIODataset):
             for i in range(0, frames):
                 route_frames.append((path, i, route_dir_nums))
         _logger.info("Sub route dir nums: %d" % len(route_frames))
+        #print(f"Sub route dir nums: {len(route_frames)}")
         return route_frames
 
     def __len__(self):

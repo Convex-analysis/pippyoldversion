@@ -58,13 +58,16 @@ def inspect_submodule(submod, submod_name):
 
             for name, buffer in submod.named_buffers():
                 debug_pickle(buffer, f"buffer {name}")
-
+            id = 0
             for name, module in submod.named_modules():
+                id += 1
                 if name == '':
                     print(f"Unnamed module found in {submod_name}")
+                    #print(f"module: {module}")
                     # Assign a new name to the unnamed module
-                    new_name = f"unnamed_module_{id(module)}"
-                    setattr(submod, new_name, module)
+                    #new_name = f"{submod_name}_unnamed_{id}"
+                    #new_name = f"submod_{id}"
+                    #setattr(submod, new_name, module)
                     delattr(submod, name)
                 debug_pickle(module, f"module {name}")
                 
@@ -603,7 +606,7 @@ class Pipe(torch.nn.Module):
         '''
         debug_pickle(self, "self")
         self.split_gm.forward = throw  # type: ignore
-
+        #self.split_gm.forward = None  # type: ignore
         # Make submodules use custom direct-serialized GraphModule
         i = 0
         while True:

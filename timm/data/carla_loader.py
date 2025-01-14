@@ -114,6 +114,7 @@ def create_carla_loader(
         drop_last=is_training,
         persistent_workers=persistent_workers,
     )
+
     try:
         loader = loader_class(dataset, **loader_args)
     except TypeError as e:

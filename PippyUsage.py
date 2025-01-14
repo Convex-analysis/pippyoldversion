@@ -35,7 +35,7 @@ import torch.optim as optim
 from timm.utils import *
 from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler
-from timm.data import create_carla_dataset, create_carla_loader
+from timm.data import create_carla_dataset, create_carla_loader, resolve_data_config
 from timm.models import (
     create_model,
     safe_model_name,
@@ -142,6 +142,9 @@ class ModelLossWrapper(LossWrapper):
         return output, loss
 
 
+def loss_reducer_fn(a, b):
+    return a + b
+
 def initialize_pipeline(model):
     loss_wrapper = ModelLossWrapper(module=model, loss_fn=MemFuserLoss())
     debug_pickle(loss_wrapper, "loss_wrapper")
@@ -159,7 +162,7 @@ def initialize_pipeline(model):
     args_chunk_spec = (TensorChunkSpec(0), TensorChunkSpec(0))
     kwargs_chunk_spec = {}
 
-    output_chunk_spec = LossReducer(0.0, lambda a, b: a + b)
+    output_chunk_spec = LossReducer(0.0, loss_reducer_fn)
 
     if torch.distributed.is_initialized():
         world_size = torch.distributed.get_world_size()
@@ -241,8 +244,10 @@ def train_one_epoch_pipeline(
 
     end = time.time()
     last_idx = len(loader) - 1
+    print(f"Length of loader: {len(loader)}")
     num_updates = epoch * len(loader)
     for batch_idx, (input, target) in enumerate(loader):
+        print(f"Batch {batch_idx}")
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
         if isinstance(input, (tuple, list)):
@@ -269,8 +274,8 @@ def train_one_epoch_pipeline(
             else:
                 target = target.cuda()
 
-        with amp_autocast():
-            output, loss = pipelineDriver(input, target)
+        print(f"Input: {input.keys()}")
+        output, loss = pipelineDriver(input, target)
 
         losses_m.update(loss.item(), batch_size)
 
@@ -363,6 +368,12 @@ def main():
         )
  '''   
     
+import sys
+
+# Increase the recursion limit
+sys.setrecursionlimit(3000)
+
+# Your existing code
 def run_master(_, args):
     MULTI_USE_PARAM_CONFIG = MultiUseParameterConfig.REPLICATE if args.replicate else MultiUseParameterConfig.TRANSMIT
     print(f'REPLICATE config: {args.replicate} -> {MULTI_USE_PARAM_CONFIG}')
@@ -387,8 +398,9 @@ def run_master(_, args):
             with_depth=args.with_depth,
             multi_view=args.multi_view,
             augment_prob=args.augment_prob,
-            temporal_frames=args.temporal_frames,
+            temporal_frames=args.temporal_frames
         )
+        #print(F"Length of dataset: {dataset_train.route_frames}")
         dataset_eval = create_carla_dataset(
             args.dataset,
             root=args.data_dir,
@@ -402,6 +414,11 @@ def run_master(_, args):
             augment_prob=args.augment_prob,
             temporal_frames=args.temporal_frames,
         )
+        
+        collate_fn = None
+        mixup_fn = None
+
+
 
         class OutputLossWrapper(LossWrapper):
             def __init__(self, module, loss_fn):
@@ -434,6 +451,32 @@ def run_master(_, args):
 
         log_memory_usage("After initializing model")
 
+
+        data_config = resolve_data_config(
+        vars(args), model=model, verbose=args.local_rank == 0
+        )
+        
+        train_interpolation = args.train_interpolation
+        if args.no_aug or not train_interpolation:
+            train_interpolation = data_config["interpolation"]
+        
+        loader_train = create_carla_loader(
+            dataset_train,
+            input_size=data_config["input_size"],
+            batch_size=args.batch_size,
+            multi_view_input_size=args.multi_view_input_size,
+            is_training=True,
+            scale=args.scale,
+            color_jitter=args.color_jitter,
+            interpolation=train_interpolation,
+            mean=data_config["mean"],
+            std=data_config["std"],
+            #num_workers=args.workers,
+            #distributed=args.distributed,
+            collate_fn=collate_fn,
+            pin_memory=args.pin_mem,
+            )
+        args.prefetcher = not args.no_prefetcher
         annotate_split_points(model, {
             'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
             #'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
@@ -445,25 +488,26 @@ def run_master(_, args):
         pipe.to(args.device)
         debug_pickle(pipe, "pipe")
         
-        if is_pycapsule(pipe):
-            print("Pipe is a pycapsule")
 
         log_memory_usage("After creating Pipe")
 
-        output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
+        output_chunk_spec = (TensorChunkSpec(0), loss_reducer_fn)
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
                                                                 output_chunk_spec=output_chunk_spec,
                                                                 _record_mem_dumps=bool(args.record_mem_dumps),
                                                                 checkpoint=bool(args.checkpoint))
-        debug_pickle(pipe_driver, "pipe_driver")
+        #debug_pickle(pipe_driver, "pipe_driver")
 
         optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
+        '''
         lr_scheduler, num_epochs = create_scheduler(args, optimizer)
         lr_scheduler_pipe = pipe_driver.instantiate_lr_scheduler(
             lr_scheduler, total_iters=num_epochs
         )
+        '''
+        
         
         log_memory_usage("After creating optimizer")
         
@@ -475,12 +519,12 @@ def run_master(_, args):
             train_one_epoch_pipeline(
                 i,
                 pipe_driver,
-                dataset_train,
+                loader_train,
                 optimizer,
                 MemFuserLoss(),
                 args,
                 writer=None,
-                lr_scheduler=lr_scheduler_pipe,
+                lr_scheduler=None,
                 saver=None,
                 output_dir=None,
                 amp_autocast=None,
@@ -520,20 +564,239 @@ if __name__ == "__main__":
     parser.add_argument('--num_worker_threads', type=int, default=16)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     #The following arguments are used for the dataloader
-    parser.add_argument("--train-towns", type=int, nargs="+", default=[0])
+    parser.add_argument("--train-towns", type=int, nargs="+", default=[1,2,3,4,5,6,7,10])
     parser.add_argument("--val-towns", type=int, nargs="+", default=[1])
-    parser.add_argument("--train-weathers", type=int, nargs="+", default=[0])
+    parser.add_argument("--train-weathers", type=int, nargs="+", default=[0,1,2,3,4,5,6,7,8,9,10,11,14,15,16,17,18,19])
     parser.add_argument("--val-weathers", type=int, nargs="+", default=[1])
     parser.add_argument("--with-lidar", action="store_true", default=False)
     parser.add_argument("--with-seg", action="store_true", default=False)
     parser.add_argument("--with-depth", action="store_true", default=False)
-    parser.add_argument("--multi-view", action="store_true", default=False)
+    parser.add_argument("--multi-view", action="store_true", default=True)
     parser.add_argument("--multi-view-input-size", default=None, nargs=3, type=int)
     #The following arguments are used for the moddel
+    parser.add_argument(
+    "--sched",
+    default="cosine",
+    type=str,
+    metavar="SCHEDULER",
+    help='LR scheduler (default: "step")',
+    )
     parser.add_argument("--dataset", type=str, default="carla")
-    parser.add_argument("--data-dir", type=str, default="./Caraladata/Device1")
+    parser.add_argument("--data-dir", type=str, default="./Caraladata/Device1/")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument(
+    "--min-lr",
+    type=float,
+    default=1e-5,
+    metavar="LR",
+    help="lower lr bound for cyclic schedulers that hit 0 (1e-5)",
+    )
+    parser.add_argument(
+    "--lr-cycle-mul",
+    type=float,
+    default=1.0,
+    metavar="MULT",
+    help="learning rate cycle len multiplier (default: 1.0)",
+    )
+    parser.add_argument(
+        "--lr-cycle-limit",
+        type=int,
+        default=1,
+        metavar="N",
+        help="learning rate cycle limit",
+    )
+    parser.add_argument(
+        "--warmup-lr",
+        type=float,
+        default=5e-6,
+        metavar="LR",
+        help="warmup learning rate (default: 0.0001)",
+    )
+    parser.add_argument(
+    "--decay-rate",
+    "--dr",
+    type=float,
+    default=0.1,
+    metavar="RATE",
+    help="LR decay rate (default: 0.1)",
+    )
+    parser.add_argument(
+    "--warmup-epochs",
+    type=int,
+    default=5,
+    metavar="N",
+    help="epochs to warmup LR, if scheduler supports",
+    )
+    parser.add_argument(
+    "--cooldown-epochs",
+    type=int,
+    default=10,
+    metavar="N",
+    help="epochs to cooldown LR at min_lr, after cyclic schedule ends",
+    )
+
+    #data_config resolver args
+    parser.add_argument(
+    "--pin-mem",
+    action="store_true",
+    default=False,
+    help="Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.",
+    )
+    parser.add_argument(
+    "--no-prefetcher",
+    action="store_true",
+    default=False,
+    help="disable fast prefetcher",
+    )
+    # Augmentation & regularization parameters
+    parser.add_argument(
+        "--no-aug",
+        action="store_true",
+        default=False,
+        help="Disable all training augmentation, override other train aug args",
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        nargs="+",
+        default=[0.08, 1.0],
+        metavar="PCT",
+        help="Random resize scale (default: 0.08 1.0)",
+    )
+    parser.add_argument(
+        "--ratio",
+        type=float,
+        nargs="+",
+        default=[3.0 / 4.0, 4.0 / 3.0],
+        metavar="RATIO",
+        help="Random resize aspect ratio (default: 0.75 1.33)",
+    )
+    parser.add_argument(
+        "--hflip", type=float, default=0.5, help="Horizontal flip training aug probability"
+    )
+    parser.add_argument(
+        "--vflip", type=float, default=0.0, help="Vertical flip training aug probability"
+    )
+    parser.add_argument(
+        "--color-jitter",
+        type=float,
+        default=0.1,
+        metavar="PCT",
+        help="Color jitter factor (default: 0.4)",
+    )
+    parser.add_argument(
+        "--aa",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help='Use AutoAugment policy. "v0" or "original". (default: None)',
+    ),
+    parser.add_argument(
+        "--aug-splits",
+        type=int,
+        default=0,
+        help="Number of augmentation splits (default: 0, valid: 0 or >=2)",
+    )
+    parser.add_argument(
+        "--jsd",
+        action="store_true",
+        default=False,
+        help="Enable Jensen-Shannon Divergence + CE loss. Use with `--aug-splits`.",
+    )
+    parser.add_argument(
+        "--reprob",
+        type=float,
+        default=0.0,
+        metavar="PCT",
+        help="Random erase prob (default: 0.)",
+    )
+    parser.add_argument(
+        "--remode", type=str, default="const", help='Random erase mode (default: "const")'
+    )
+    parser.add_argument(
+        "--recount", type=int, default=1, help="Random erase count (default: 1)"
+    )
+    parser.add_argument(
+        "--resplit",
+        action="store_true",
+        default=False,
+        help="Do not random erase first (clean) augmentation split",
+    )
+    parser.add_argument(
+        "--smoothing", type=float, default=0.0, help="Label smoothing (default: 0.0)"
+    )
+    parser.add_argument(
+        "--smoothed_l1", default=False, action='store_true', help="L1 smooth"
+    )
+    parser.add_argument(
+    "--train-interpolation",
+    type=str,
+    default="random",
+    help='Training interpolation (random, bilinear, bicubic default: "random")',
+    )
+
+    parser.add_argument(
+    "--num-classes",
+    type=int,
+    default=None,
+    metavar="N",
+    help="number of label classes (Model default if None)",
+    )
+    parser.add_argument(
+        "--gp",
+        default=None,
+        type=str,
+        metavar="POOL",
+        help="Global pool type, one of (fast, avg, max, avgmax, avgmaxc). Model default if None.",
+    )
+    parser.add_argument(
+        "--img-size",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Image patch size (default: None => model default)",
+    )
+    parser.add_argument(
+    "--input-size",
+    default=None,
+    nargs=3,
+    type=int,
+    metavar="N N N",
+    help="Input all image dimensions (d h w, e.g. --input-size 3 224 224), uses model default if empty",
+    )
+
+    parser.add_argument(
+    "--crop-pct",
+    default=None,
+    type=float,
+    metavar="N",
+    help="Input image center crop percent (for validation only)",
+    )
+    parser.add_argument(
+        "--mean",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="MEAN",
+        help="Override mean pixel value of dataset",
+    )
+    parser.add_argument(
+        "--std",
+        type=float,
+        nargs="+",
+        default=None,
+        metavar="STD",
+        help="Override std deviation of of dataset",
+    )
+    parser.add_argument(
+        "--interpolation",
+        default="",
+        type=str,
+        metavar="NAME",
+        help="Image resize interpolation type (overrides model)",
+    )
+
     parser.add_argument("--backbone-lr", type=float, default=1e-3)
     parser.add_argument("--with-backbone-lr", action="store_true", default=False)
     parser.add_argument("--clip-grad", type=float, default=None)
@@ -561,4 +824,3 @@ if __name__ == "__main__":
     
     print(torch.cuda.is_available())
     run_pippy(run_master, args)
-

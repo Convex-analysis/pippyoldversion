@@ -9,7 +9,7 @@ from .multistep_lr import MultiStepLRScheduler
 
 
 def create_scheduler(args, optimizer):
-    num_epochs = args.epochs
+    num_epochs = args.max_epochs
 
     if getattr(args, "lr_noise", None) is not None:
         lr_noise = getattr(args, "lr_noise")

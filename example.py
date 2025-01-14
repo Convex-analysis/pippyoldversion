@@ -172,34 +172,8 @@ def initialize_pipeline(model):
     output_loss_value_spec = (False, True)
     
     pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)
-    debug_pickle(pipe, "pipe")
-
-    state = pipe.__dict__.copy()
-    for k, v in state.items():
-        debug_pickle(state[k],k)
-    executor = state['executor'].__dict__.copy()
-    for k,v in executor.items():
-        debug_pickle(executor[k],k)
     
-    # Serialize the Pipe object
-
-
-    # Start to initialize the pipeline driver
-    args_chunk_spec = (TensorChunkSpec(0), TensorChunkSpec(0))
-    kwargs_chunk_spec = {}
-
-    output_chunk_spec = LossReducer(0.0, lambda a, b: a + b)
-    chunks = 1
-    if torch.distributed.is_initialized():
-        world_size = torch.distributed.get_world_size()
-    else:
-        world_size = 1
-
-    driver = PipelineDriverFillDrain(
-            pipe, args_chunk_spec=args_chunk_spec, kwargs_chunk_spec=kwargs_chunk_spec,
-            output_chunk_spec=output_chunk_spec, world_size=world_size, chunks=chunks)
-    debug_pickle(driver, "driver")
-    return driver
+    print(F"Pipe: {pipe}")
 
 
 def main():
@@ -225,7 +199,7 @@ def main():
     except TypeError as e:
         print(f"Error pickling model: {e}")
     debug_pickle(model, "model")
-    pipelineDriver = initialize_pipeline(model)
+    initialize_pipeline(model)
    
 
 
