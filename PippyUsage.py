@@ -500,13 +500,14 @@ def run_master(_, args):
                                                                 checkpoint=bool(args.checkpoint))
         #debug_pickle(pipe_driver, "pipe_driver")
 
-        optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
-        '''
+        optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=args.lr, betas=(0.9, 0.999), eps=1e-8)
+        
+        #Note: the following three lines codes can be commented out if you don't want to use the lr_scheduler, there is a bug in the lr_scheduler_pipe, seems because that pipedrive has a empty getstate function in Pipelinedrive.py
         lr_scheduler, num_epochs = create_scheduler(args, optimizer)
         lr_scheduler_pipe = pipe_driver.instantiate_lr_scheduler(
             lr_scheduler, total_iters=num_epochs
         )
-        '''
+        
         
         
         log_memory_usage("After creating optimizer")
@@ -572,7 +573,7 @@ if __name__ == "__main__":
     parser.add_argument("--with-seg", action="store_true", default=False)
     parser.add_argument("--with-depth", action="store_true", default=False)
     parser.add_argument("--multi-view", action="store_true", default=True)
-    parser.add_argument("--multi-view-input-size", default=None, nargs=3, type=int)
+    parser.add_argument("--multi-view-input-size", default=[3,128,128], nargs=3, type=int)
     #The following arguments are used for the moddel
     parser.add_argument(
     "--sched",
@@ -584,7 +585,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="carla")
     parser.add_argument("--data-dir", type=str, default="./Caraladata/Device1/")
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=0.00075)
     parser.add_argument(
     "--min-lr",
     type=float,
@@ -660,7 +661,7 @@ if __name__ == "__main__":
         "--scale",
         type=float,
         nargs="+",
-        default=[0.08, 1.0],
+        default=[0.9, 1.1],
         metavar="PCT",
         help="Random resize scale (default: 0.08 1.0)",
     )
@@ -799,7 +800,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--backbone-lr", type=float, default=1e-3)
     parser.add_argument("--with-backbone-lr", action="store_true", default=False)
-    parser.add_argument("--clip-grad", type=float, default=None)
+    parser.add_argument("--clip-grad", type=float, default=5)
     parser.add_argument("--clip-mode", type=str, default="norm")
     parser.add_argument("--amp", action="store_true", default=False)
     parser.add_argument("--local_rank", type=int, default=0)
