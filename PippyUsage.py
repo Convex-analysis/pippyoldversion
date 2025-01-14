@@ -24,7 +24,7 @@ from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, Pi
 from pippy.events import EventsContext
 from pippy.microbatch import sum_reducer, TensorChunkSpec
 from pippy.visualizer import events_to_json
-
+from pippy.fx import graph_module
 
 
 import torch
@@ -486,8 +486,10 @@ def run_master(_, args):
 
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
+        
         debug_pickle(pipe, "pipe")
         
+        pipe.split_gm.print_readable()
 
         log_memory_usage("After creating Pipe")
 
@@ -649,7 +651,7 @@ if __name__ == "__main__":
     parser.add_argument(
     "--no-prefetcher",
     action="store_true",
-    default=False,
+    default=True,
     help="disable fast prefetcher",
     )
     # Augmentation & regularization parameters

@@ -99,7 +99,7 @@ def run_master(_, args):
 
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
-
+        #pipe.split_gm.print_readable()
         log_memory_usage("After creating Pipe")
 
         output_chunk_spec = (TensorChunkSpec(0), sum_reducer)
