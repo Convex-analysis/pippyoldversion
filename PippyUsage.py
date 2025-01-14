@@ -492,6 +492,8 @@ def run_master(_, args):
         log_memory_usage("After creating Pipe")
 
         output_chunk_spec = (TensorChunkSpec(0), loss_reducer_fn)
+        #pipe_driver 里会调用RPC通信，所需要pipe_driver can pickle
+        #Type error: Pycapsule object can't be pickled
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
@@ -569,7 +571,7 @@ if __name__ == "__main__":
     parser.add_argument("--val-towns", type=int, nargs="+", default=[1])
     parser.add_argument("--train-weathers", type=int, nargs="+", default=[0,1,2,3,4,5,6,7,8,9,10,11,14,15,16,17,18,19])
     parser.add_argument("--val-weathers", type=int, nargs="+", default=[1])
-    parser.add_argument("--with-lidar", action="store_true", default=False)
+    parser.add_argument("--with-lidar", action="store_true", default=True)
     parser.add_argument("--with-seg", action="store_true", default=False)
     parser.add_argument("--with-depth", action="store_true", default=False)
     parser.add_argument("--multi-view", action="store_true", default=True)

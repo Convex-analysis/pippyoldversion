@@ -1261,8 +1261,8 @@ class PipelineOptimizer(torch.optim.Optimizer):
         self.param_groups = [param_group]
 
     def __getstate__(self):
-        raise NotImplementedError()
-
+        #raise NotImplementedError()
+        pass
     def __setstate__(self, state):
         raise NotImplementedError()
 

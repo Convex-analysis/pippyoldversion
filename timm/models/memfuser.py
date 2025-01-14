@@ -832,21 +832,22 @@ class Memfuser(nn.Module):
         return features, lidar_token
 
     def forward(self, x):
-        front_image = x["rgb_front"]
-        left_image = x["rgb_left"]
-        right_image = x["rgb_right"]
-        rear_image = x["rgb_rear"]
-        front_center_image = x["rgb_center"]
-        lidar = x["lidar"]
-        num_points = x['num_points']
+        device = x["rgb_front"].device
+        front_image = x["rgb_front"].to(device)
+        left_image = x["rgb_left"].to(device)
+        right_image = x["rgb_right"].to(device)
+        rear_image = x["rgb_rear"].to(device)
+        front_center_image = x["rgb_center"].to(device)
+        lidar = x["lidar"].to(device)
+        num_points = x['num_points'].to(device)
+        
         if not self.return_feature:
-            velocity = x['velocity'].view(1, -1, 1)
-            target_point = x["target_point"]
+            velocity = x['velocity'].view(1, -1, 1).to(device)
+            target_point = x["target_point"].to(device)
             velocity_feature = self.velocity_fc(velocity)
             velocity_feature = velocity_feature.repeat(6, 1, 1)
         else:
-            velocity = x['velocity']
-            velocity = velocity.view(1, -1, 1)
+            velocity = x['velocity'].view(1, -1, 1).to(device)
             velocity_feature = self.velocity_fc(velocity)
             velocity_feature = velocity_feature.repeat(6, 1, 1)
 
