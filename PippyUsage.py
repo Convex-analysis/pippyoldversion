@@ -489,7 +489,7 @@ def run_master(_, args):
         
         debug_pickle(pipe, "pipe")
         
-        pipe.split_gm.print_readable()
+        # pipe.split_gm.print_readable()
 
         log_memory_usage("After creating Pipe")
 
