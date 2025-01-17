@@ -452,8 +452,6 @@ class RankWorker(EventRecorder):
                         with stage_executor.mod.no_sync():  # type: ignore[operator]
                             out_val = stage_executor.mod(*args, **kwargs)
                     else:
-                        print('args: {}', format(args))
-                        input('Debugging Pause')
                         out_val = stage_executor.mod(*args, **kwargs)
                     return out_val
 
