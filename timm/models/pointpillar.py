@@ -67,21 +67,6 @@ class DynamicPointNet(nn.Module):
 
 pippy.fx.wrap('len')
 
-def process_lidar_batch(self, lidar_list, num_points):
-        coords = []
-        filtered_points = []
-        for batch_id, points in enumerate(lidar_list):
-            points = points[:num_points[batch_id]]
-            points, grid_yx = self.grid_locations(points)
-
-            # batch indices 
-            grid_byx = torch.nn.functional.pad(grid_yx, (1, 0), mode='constant', value=batch_id)
-
-            coords.append(grid_byx)
-            filtered_points.append(points)
-
-pippy.fx.wrap('process_lidar_batch')
-
 def custom_cat(coords, filtered_points):
         coords = torch.cat(coords, dim=0)
         filtered_points = torch.cat(filtered_points, dim=0)
@@ -120,6 +105,8 @@ def custom_scatter_points(features, coords, batch_size, ny, nx):
     canvas[coords[:, 0], :, torch.clamp(ny - 1 - coords[:, 1], 0, ny - 1), torch.clamp(coords[:, 2], 0, nx - 1)] = features
     return canvas
 pippy.fx.wrap('custom_scatter_points') 
+
+
 class PointPillarNet(nn.Module):
     def __init__(self, num_input=9, num_features=[32,32],
         min_x=-20, max_x=30,
@@ -200,7 +187,7 @@ class PointPillarNet(nn.Module):
                 filtered_points.append(points)
 
             '''
-            coords, filtered_points = process_lidar_batch(lidar_list, num_points)
+            coords, filtered_points = process_lidar_batch(self, lidar_list, num_points)
             # batch_size, grid_y, grid_x 
             #coords = torch.cat(coords, dim=0)
             #filtered_points = torch.cat(filtered_points, dim=0)
@@ -210,6 +197,23 @@ class PointPillarNet(nn.Module):
         features = self.point_net(decorated_points, inverse_indices)
 
         return self.scatter_points(features, unique_coords, batch_size)
+    
+def process_lidar_batch(instance, lidar_list, num_points):
+    if not isinstance(instance, PointPillarNet):
+        raise ValueError("This function is only for PointPillar")
+    coords = []
+    filtered_points = []
+    for batch_id, points in enumerate(lidar_list):
+        points = points[:num_points[batch_id]]
+        points, grid_yx = instance.grid_locations(points)
+
+        # batch indices 
+        grid_byx = torch.nn.functional.pad(grid_yx, (1, 0), mode='constant', value=batch_id)
+
+        coords.append(grid_byx)
+        filtered_points.append(points)
+
+pippy.fx.wrap('process_lidar_batch')
 
 class ConvBackbone(nn.Module):
     def __init__(self, num_feature=64, norm_cfg={'eps': 1e-3, 'momentum': 0.01}):

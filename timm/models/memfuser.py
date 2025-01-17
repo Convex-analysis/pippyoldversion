@@ -73,7 +73,7 @@ class HybridEmbed(nn.Module):
     
 def custom_ones(size, device): return torch.ones(size, device=device)
 
-def custom_arrange(size, device): return torch.arange(size, device=device)
+def custom_arrange(size, device, dtype=torch.float32): return torch.arange(size, device=device, dtype=torch.float32)
 
 pippy.fx.wrap('custom_ones')
 pippy.fx.wrap('custom_arrange')
