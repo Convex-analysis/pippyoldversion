@@ -104,7 +104,7 @@ def custom_scatter_points(features, coords, batch_size, ny, nx):
     canvas = torch.zeros(batch_size, features.shape[1], ny, nx, dtype=features.dtype, device=features.device)
     canvas[coords[:, 0], :, torch.clamp(ny - 1 - coords[:, 1], 0, ny - 1), torch.clamp(coords[:, 2], 0, nx - 1)] = features
     return canvas
-pippy.fx.wrap('custom_scatter_points') 
+pippy.fx.wrap('custom_scatter_points')
 
 
 class PointPillarNet(nn.Module):
@@ -195,12 +195,10 @@ class PointPillarNet(nn.Module):
             decorated_points, unique_coords, inverse_indices = self.pillar_generation(filtered_points, coords)
 
         features = self.point_net(decorated_points, inverse_indices)
-
-        return self.scatter_points(features, unique_coords, batch_size)
+        ret = self.scatter_points(features, unique_coords, batch_size)
+        return ret
     
 def process_lidar_batch(instance, lidar_list, num_points):
-    if not isinstance(instance, PointPillarNet):
-        raise ValueError("This function is only for PointPillar")
     coords = []
     filtered_points = []
     for batch_id, points in enumerate(lidar_list):
@@ -212,6 +210,8 @@ def process_lidar_batch(instance, lidar_list, num_points):
 
         coords.append(grid_byx)
         filtered_points.append(points)
+    
+    return coords, filtered_points
 
 pippy.fx.wrap('process_lidar_batch')
 

@@ -599,7 +599,6 @@ class Memfuser(nn.Module):
                                          output_features=embed_dim)
 
         rgb_embed_layer = partial(HybridEmbed, backbone=self.rgb_backbone)
-
         if use_mmad_pretrain:
             params = torch.load(use_mmad_pretrain)["state_dict"]
             updated_params = OrderedDict()

@@ -483,7 +483,6 @@ def run_master(_, args):
         })
 
         wrapper = OutputLossWrapper(model, MemFuserLoss())
-
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
         
