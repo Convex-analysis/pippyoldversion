@@ -24,7 +24,7 @@ from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, Pi
 from pippy.events import EventsContext
 from pippy.microbatch import sum_reducer, TensorChunkSpec
 from pippy.visualizer import events_to_json
-from pippy.fx import graph_module
+
 
 
 import torch
@@ -483,18 +483,15 @@ def run_master(_, args):
         })
 
         wrapper = OutputLossWrapper(model, MemFuserLoss())
+
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
-        
         debug_pickle(pipe, "pipe")
         
-        # pipe.split_gm.print_readable()
 
         log_memory_usage("After creating Pipe")
 
         output_chunk_spec = (TensorChunkSpec(0), loss_reducer_fn)
-        #pipe_driver 里会调用RPC通信，所需要pipe_driver can pickle
-        #Type error: Pycapsule object can't be pickled
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
@@ -503,14 +500,13 @@ def run_master(_, args):
                                                                 checkpoint=bool(args.checkpoint))
         #debug_pickle(pipe_driver, "pipe_driver")
 
-        optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=args.lr, betas=(0.9, 0.999), eps=1e-8)
-        
-        #Note: the following three lines codes can be commented out if you don't want to use the lr_scheduler, there is a bug in the lr_scheduler_pipe, seems because that pipedrive has a empty getstate function in Pipelinedrive.py
+        optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
+        '''
         lr_scheduler, num_epochs = create_scheduler(args, optimizer)
         lr_scheduler_pipe = pipe_driver.instantiate_lr_scheduler(
             lr_scheduler, total_iters=num_epochs
         )
-        
+        '''
         
         
         log_memory_usage("After creating optimizer")
@@ -572,11 +568,11 @@ if __name__ == "__main__":
     parser.add_argument("--val-towns", type=int, nargs="+", default=[1])
     parser.add_argument("--train-weathers", type=int, nargs="+", default=[0,1,2,3,4,5,6,7,8,9,10,11,14,15,16,17,18,19])
     parser.add_argument("--val-weathers", type=int, nargs="+", default=[1])
-    parser.add_argument("--with-lidar", action="store_true", default=True)
+    parser.add_argument("--with-lidar", action="store_true", default=False)
     parser.add_argument("--with-seg", action="store_true", default=False)
     parser.add_argument("--with-depth", action="store_true", default=False)
     parser.add_argument("--multi-view", action="store_true", default=True)
-    parser.add_argument("--multi-view-input-size", default=[3,128,128], nargs=3, type=int)
+    parser.add_argument("--multi-view-input-size", default=None, nargs=3, type=int)
     #The following arguments are used for the moddel
     parser.add_argument(
     "--sched",
@@ -588,7 +584,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="carla")
     parser.add_argument("--data-dir", type=str, default="./Caraladata/Device1/")
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--lr", type=float, default=0.00075)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument(
     "--min-lr",
     type=float,
@@ -650,7 +646,7 @@ if __name__ == "__main__":
     parser.add_argument(
     "--no-prefetcher",
     action="store_true",
-    default=True,
+    default=False,
     help="disable fast prefetcher",
     )
     # Augmentation & regularization parameters
@@ -664,7 +660,7 @@ if __name__ == "__main__":
         "--scale",
         type=float,
         nargs="+",
-        default=[0.9, 1.1],
+        default=[0.08, 1.0],
         metavar="PCT",
         help="Random resize scale (default: 0.08 1.0)",
     )
@@ -803,7 +799,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--backbone-lr", type=float, default=1e-3)
     parser.add_argument("--with-backbone-lr", action="store_true", default=False)
-    parser.add_argument("--clip-grad", type=float, default=5)
+    parser.add_argument("--clip-grad", type=float, default=None)
     parser.add_argument("--clip-mode", type=str, default="norm")
     parser.add_argument("--amp", action="store_true", default=False)
     parser.add_argument("--local_rank", type=int, default=0)
