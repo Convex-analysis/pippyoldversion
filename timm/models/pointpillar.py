@@ -173,7 +173,7 @@ class PointPillarNet(nn.Module):
         with torch.no_grad():
             coords = []
             filtered_points = []
-            '''
+            
             for batch_id, points in enumerate(lidar_list):
                 points = points[:num_points[batch_id]]
                 #points[:, 1] = -points[:, 1]
@@ -186,17 +186,10 @@ class PointPillarNet(nn.Module):
                 coords.append(grid_byx)
                 filtered_points.append(points)
 
-            '''
-            for batch_id in range(batch_size):
-                #points = lidar_list[batch_id][:num_points[batch_id]]
-                points = wrapped_list_item(lidar_list, batch_id, num_points)
-                points, grid_yx = self.grid_locations(points)
-
-                # batch indices 
-                grid_byx = torch.nn.functional.pad(grid_yx, (1, 0), mode='constant', value=batch_id)
-
-                coords.append(grid_byx)
-                filtered_points.append(points)
+            
+            #fix the type of variables coords and filtered_points as tensor
+            #coords = torch.tensor(coords)
+            #filtered_points = list(filtered_points)
             #coords, filtered_points = process_lidar_batch(self, lidar_list, num_points)
             # batch_size, grid_y, grid_x 
             #coords = torch.cat(coords, dim=0)
@@ -208,9 +201,6 @@ class PointPillarNet(nn.Module):
         ret = self.scatter_points(features, unique_coords, batch_size)
         return ret
 
-def wrapped_list_item(list,id,num_points):
-    return list[id][:num_points[id]]
-pippy.fx.wrap('wrapped_list_item')
 def process_lidar_batch(instance, lidar_list, num_points):
     coords = []
     filtered_points = []
