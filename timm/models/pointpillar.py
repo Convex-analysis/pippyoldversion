@@ -199,7 +199,8 @@ class PointPillarNet(nn.Module):
 
         features = self.point_net(decorated_points, inverse_indices)
         ret = self.scatter_points(features, unique_coords, batch_size)
-        assert isinstance(ret, torch.Tensor)    
+        #assert isinstance(ret, torch.Tensor) 
+        assert isinstance(ret, PointPillarNet)   
         for i in enumerate(ret):
             print(i)
         return ret
