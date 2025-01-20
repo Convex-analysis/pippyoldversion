@@ -173,7 +173,7 @@ class PointPillarNet(nn.Module):
         with torch.no_grad():
             coords = []
             filtered_points = []
-            
+            '''
             for batch_id, points in enumerate(lidar_list):
                 points = points[:num_points[batch_id]]
                 #points[:, 1] = -points[:, 1]
@@ -186,11 +186,11 @@ class PointPillarNet(nn.Module):
                 coords.append(grid_byx)
                 filtered_points.append(points)
 
-            
+            '''
             #fix the type of variables coords and filtered_points as tensor
             #coords = torch.tensor(coords)
             #filtered_points = list(filtered_points)
-            #coords, filtered_points = process_lidar_batch(self, lidar_list, num_points)
+            coords, filtered_points = process_lidar_batch(self, lidar_list, num_points)
             # batch_size, grid_y, grid_x 
             #coords = torch.cat(coords, dim=0)
             #filtered_points = torch.cat(filtered_points, dim=0)
@@ -199,6 +199,9 @@ class PointPillarNet(nn.Module):
 
         features = self.point_net(decorated_points, inverse_indices)
         ret = self.scatter_points(features, unique_coords, batch_size)
+        assert isinstance(ret, torch.Tensor)    
+        for i in enumerate(ret):
+            print(i)
         return ret
 
 def process_lidar_batch(instance, lidar_list, num_points):
