@@ -509,7 +509,7 @@ class LidarModel(nn.Module):
         self.reduce_size = nn.Conv2d(6*num_feature, output_features, 2, 2)
 
     def forward(self, lidars, num_points):
-        features = self.point_pillar_net(lidars, num_points)
+        features : Tensor = self.point_pillar_net(lidars, num_points)
         features = self.backbone(features)
         features = self.reduce_size(features)
         features = features[:, :, 5:55, 5:55]
