@@ -167,7 +167,7 @@ class PointPillarNet(nn.Module):
 
         return coords, filtered_points
     
-    def forward(self, lidar_list, num_points):
+    def forward(self, lidar_list, num_points)->torch.Tensor:
 
         batch_size = len(lidar_list)
         with torch.no_grad():
@@ -199,10 +199,6 @@ class PointPillarNet(nn.Module):
 
         features = self.point_net(decorated_points, inverse_indices)
         ret = self.scatter_points(features, unique_coords, batch_size)
-        #assert isinstance(ret, torch.Tensor) 
-        assert isinstance(ret, PointPillarNet)   
-        for i in enumerate(ret):
-            print(i)
         return ret
 
 def process_lidar_batch(instance, lidar_list, num_points):
