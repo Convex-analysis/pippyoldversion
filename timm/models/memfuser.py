@@ -73,7 +73,7 @@ class HybridEmbed(nn.Module):
     
 def custom_ones(size, device): return torch.ones(size, device=device)
 
-def custom_arrange(size, device, dtype=torch.float32): return torch.arange(size, device=device, dtype=torch.float32)
+def custom_arrange(size, device): return torch.arange(size, device=device)
 
 pippy.fx.wrap('custom_ones')
 pippy.fx.wrap('custom_arrange')
@@ -599,6 +599,7 @@ class Memfuser(nn.Module):
                                          output_features=embed_dim)
 
         rgb_embed_layer = partial(HybridEmbed, backbone=self.rgb_backbone)
+
         if use_mmad_pretrain:
             params = torch.load(use_mmad_pretrain)["state_dict"]
             updated_params = OrderedDict()
@@ -831,22 +832,21 @@ class Memfuser(nn.Module):
         return features, lidar_token
 
     def forward(self, x):
-        device = x["rgb_front"].device
-        front_image = x["rgb_front"].to(device)
-        left_image = x["rgb_left"].to(device)
-        right_image = x["rgb_right"].to(device)
-        rear_image = x["rgb_rear"].to(device)
-        front_center_image = x["rgb_center"].to(device)
-        lidar = x["lidar"].to(device)
-        num_points = x['num_points'].to(device)
-        
+        front_image = x["rgb_front"]
+        left_image = x["rgb_left"]
+        right_image = x["rgb_right"]
+        rear_image = x["rgb_rear"]
+        front_center_image = x["rgb_center"]
+        lidar = x["lidar"]
+        num_points = x['num_points']
         if not self.return_feature:
-            velocity = x['velocity'].view(1, -1, 1).to(device)
-            target_point = x["target_point"].to(device)
+            velocity = x['velocity'].view(1, -1, 1)
+            target_point = x["target_point"]
             velocity_feature = self.velocity_fc(velocity)
             velocity_feature = velocity_feature.repeat(6, 1, 1)
         else:
-            velocity = x['velocity'].view(1, -1, 1).to(device)
+            velocity = x['velocity']
+            velocity = velocity.view(1, -1, 1)
             velocity_feature = self.velocity_fc(velocity)
             velocity_feature = velocity_feature.repeat(6, 1, 1)
 
