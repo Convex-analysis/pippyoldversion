@@ -97,7 +97,7 @@ def custom_decorate(points, unique_coords, inverse_indices, pixels_per_meter, mi
 pippy.fx.wrap('custom_decorate')
 
 def custom_zero_tensor(batch_size, features, ny, nx, dtype, device):
-    return torch.zeros(batch_size, features.shape[1], ny, nx, dtype=features.dtype, device=features.device)
+    return torch.zeros(batch_size, features.shape[1], ny, nx, dtype=dtype, device=device)
 pippy.fx.wrap('custom_zero_tensor')    
 
 def custom_scatter_points(features, coords, batch_size, ny, nx):
@@ -140,7 +140,6 @@ def custom_process_lidar_batch(lidar_list, num_points,
                                         min_y,
                                         max_y,
                                         pixels_per_meter)
-        assert isinstance(points, PointPillarNet)
         # batch indices 
         grid_byx = torch.nn.functional.pad(grid_yx, (1, 0), mode='constant', value=batch_id)
 
@@ -150,6 +149,13 @@ def custom_process_lidar_batch(lidar_list, num_points,
     return coords, filtered_points
 
 pippy.fx.wrap('custom_process_lidar_batch')
+
+def debug_checkpoint(x):
+    print('\033[31m----------------------debug----------------------\033[0m')
+    print(type(x))
+    print('\033[31m----------------------end------------------------\033[0m')
+
+pippy.fx.wrap('debug_checkpoint')
 
 class PointPillarNet(nn.Module):
     def __init__(self, num_input=9, num_features=[32,32],
@@ -197,12 +203,12 @@ class PointPillarNet(nn.Module):
     def pillar_generation(self, points, coords):
         unique_coords, inverse_indices = coords.unique(return_inverse=True, dim=0)
         #decorated_points = self.decorate(points, unique_coords, inverse_indices)
-        decorated_points = custom_decorate(points, unique_coords, inverse_indices)
+        decorated_points = custom_decorate(points, unique_coords, inverse_indices, self.pixels_per_meter, self.min_x, self.min_y)
         return decorated_points, unique_coords, inverse_indices
 
-    def scatter_points(self, features, coords, batch_size ):
+    def scatter_points(self, features, coords, batch_size):
         #canvas = torch.zeros(batch_size, features.shape[1], self.ny, self.nx, dtype=features.dtype, device=features.device)
-        canvas = custom_zero_tensor(batch_size, features.shape[1], self.ny, self.nx, dtype=features.dtype, device=features.device)
+        canvas = custom_zero_tensor(batch_size, features, self.ny, self.nx, dtype=features.dtype, device=features.device)
         #canvas[coords[:, 0], :, torch.clamp(self.ny-1-coords[:, 1],0,self.ny-1), torch.clamp(coords[:, 2],0,self.nx-1)] = features
         canvas = custom_scatter_points(features, coords, batch_size, self.ny, self.nx)
         return canvas

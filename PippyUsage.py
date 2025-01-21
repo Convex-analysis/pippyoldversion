@@ -247,8 +247,6 @@ def train_one_epoch_pipeline(
     print(f"Length of loader: {len(loader)}")
     num_updates = epoch * len(loader)
     for batch_idx, (input, target) in enumerate(loader):
-        print(f"Batch {batch_idx}")
-        print(f"Input: {input.keys()}")
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
         if isinstance(input, (tuple, list)):
@@ -647,7 +645,7 @@ if __name__ == "__main__":
     parser.add_argument(
     "--no-prefetcher",
     action="store_true",
-    default=False,
+    default=True,
     help="disable fast prefetcher",
     )
     # Augmentation & regularization parameters
