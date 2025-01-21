@@ -828,9 +828,9 @@ class Pipe(torch.nn.Module):
         to_delete = list()  # a list of nodes for deferral deletion
 
         for node in split.graph.nodes:
-            print('\033[31m node: \033[0m', node)
-            print('\033[31m node.op: \033[0m', node.op)
-            print('\033[31m node.target: \033[0m', node.target)
+            # print('\033[31m node: \033[0m', node)
+            # print('\033[31m node.op: \033[0m', node.op)
+            # print('\033[31m node.target: \033[0m', node.target)
             if node.op == "get_attr" and len(node.users) == 1:
                 user = list(node.users)[0]
                 assert user.op == "call_module"
@@ -841,11 +841,11 @@ class Pipe(torch.nn.Module):
                 mod_itr = split
                 for atom in atoms[:-1]:
                     mod_itr = getattr(mod_itr, atom)
-                print('\033[31m type mod_itr: \033[0m', type(mod_itr))
-                print('\033[31m atoms: \033[0m', atoms)
+                # print('\033[31m type mod_itr: \033[0m', type(mod_itr))
+                # print('\033[31m atoms: \033[0m', atoms)
                 param_val = getattr(mod_itr, atoms[-1])
-                print('\033[31m param_val: \033[0m', param_val)
-                input('Debug pause')
+                # print('\033[31m param_val: \033[0m', param_val)
+                # input('Debug pause')
                 is_buffer = atoms[-1] in mod_itr._buffers
 
                 move_param_to_callee(
