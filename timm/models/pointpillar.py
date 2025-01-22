@@ -97,7 +97,7 @@ def custom_decorate(points, unique_coords, inverse_indices, pixels_per_meter, mi
 pippy.fx.wrap('custom_decorate')
 
 def custom_zero_tensor(batch_size, features, ny, nx, dtype, device):
-    return torch.zeros(batch_size, features.shape[1], ny, nx, dtype=features.dtype, device=features.device)
+    return torch.zeros(batch_size, features.shape[1], ny, nx, dtype=dtype, device=device)
 pippy.fx.wrap('custom_zero_tensor')    
 
 def custom_scatter_points(features, coords, batch_size, ny, nx):
@@ -106,6 +106,56 @@ def custom_scatter_points(features, coords, batch_size, ny, nx):
     return canvas
 pippy.fx.wrap('custom_scatter_points')
 
+def custom_grid_locations(points,
+                   min_x,
+                   max_x,
+                   min_y,
+                   max_y,
+                   pixels_per_meter):
+    keep = (points[:, 0] >= min_x) & (points[:, 0] < max_x) & \
+        (points[:, 1] >= min_y) & (points[:, 1] < max_y)
+    points = points[keep, :]
+
+    coords = (points[:, [0, 1]] - torch.tensor([min_x, min_y],
+        device=points.device)) * pixels_per_meter
+    coords = coords.long()
+
+    return points, coords
+
+pippy.fx.wrap('custom_grid_locations')
+    
+def custom_process_lidar_batch(lidar_list, num_points,
+                        min_x,
+                        max_x,
+                        min_y,
+                        max_y,
+                        pixels_per_meter):
+    coords = []
+    filtered_points = []
+    for batch_id, points in enumerate(lidar_list):
+        points = points[:num_points[batch_id]]
+        points, grid_yx = custom_grid_locations(points,
+                                        min_x,
+                                        max_x,
+                                        min_y,
+                                        max_y,
+                                        pixels_per_meter)
+        # batch indices 
+        grid_byx = torch.nn.functional.pad(grid_yx, (1, 0), mode='constant', value=batch_id)
+
+        coords.append(grid_byx)
+        filtered_points.append(points)
+    
+    return coords, filtered_points
+
+pippy.fx.wrap('custom_process_lidar_batch')
+
+def debug_checkpoint(x):
+    print('\033[31m----------------------debug----------------------\033[0m')
+    print(type(x))
+    print('\033[31m----------------------end------------------------\033[0m')
+
+pippy.fx.wrap('debug_checkpoint')
 
 class PointPillarNet(nn.Module):
     def __init__(self, num_input=9, num_features=[32,32],
@@ -153,18 +203,15 @@ class PointPillarNet(nn.Module):
     def pillar_generation(self, points, coords):
         unique_coords, inverse_indices = coords.unique(return_inverse=True, dim=0)
         #decorated_points = self.decorate(points, unique_coords, inverse_indices)
-        decorated_points = custom_decorate(points, unique_coords, inverse_indices)
+        decorated_points = custom_decorate(points, unique_coords, inverse_indices, self.pixels_per_meter, self.min_x, self.min_y)
         return decorated_points, unique_coords, inverse_indices
 
-    def scatter_points(self, features, coords, batch_size ):
+    def scatter_points(self, features, coords, batch_size):
         #canvas = torch.zeros(batch_size, features.shape[1], self.ny, self.nx, dtype=features.dtype, device=features.device)
-        canvas = custom_zero_tensor(batch_size, features.shape[1], self.ny, self.nx, dtype=features.dtype, device=features.device)
+        canvas = custom_zero_tensor(batch_size, features, self.ny, self.nx, dtype=features.dtype, device=features.device)
         #canvas[coords[:, 0], :, torch.clamp(self.ny-1-coords[:, 1],0,self.ny-1), torch.clamp(coords[:, 2],0,self.nx-1)] = features
         canvas = custom_scatter_points(features, coords, batch_size, self.ny, self.nx)
         return canvas
-    
-    
-
         return coords, filtered_points
     
     def forward(self, lidar_list, num_points)->torch.Tensor:
@@ -190,7 +237,7 @@ class PointPillarNet(nn.Module):
             #fix the type of variables coords and filtered_points as tensor
             #coords = torch.tensor(coords)
             #filtered_points = list(filtered_points)
-            coords, filtered_points = process_lidar_batch(self, lidar_list, num_points)
+            coords, filtered_points = custom_process_lidar_batch(lidar_list, num_points, self.min_x, self.max_x, self.min_y, self.max_y, self.pixels_per_meter)
             # batch_size, grid_y, grid_x 
             #coords = torch.cat(coords, dim=0)
             #filtered_points = torch.cat(filtered_points, dim=0)
@@ -200,23 +247,6 @@ class PointPillarNet(nn.Module):
         features = self.point_net(decorated_points, inverse_indices)
         ret = self.scatter_points(features, unique_coords, batch_size)
         return ret
-
-def process_lidar_batch(instance, lidar_list, num_points):
-    coords = []
-    filtered_points = []
-    for batch_id, points in enumerate(lidar_list):
-        points = points[:num_points[batch_id]]
-        points, grid_yx = instance.grid_locations(points)
-
-        # batch indices 
-        grid_byx = torch.nn.functional.pad(grid_yx, (1, 0), mode='constant', value=batch_id)
-
-        coords.append(grid_byx)
-        filtered_points.append(points)
-    
-    return coords, filtered_points
-
-pippy.fx.wrap('process_lidar_batch')
 
 class ConvBackbone(nn.Module):
     def __init__(self, num_feature=64, norm_cfg={'eps': 1e-3, 'momentum': 0.01}):

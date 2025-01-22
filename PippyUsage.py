@@ -247,7 +247,6 @@ def train_one_epoch_pipeline(
     print(f"Length of loader: {len(loader)}")
     num_updates = epoch * len(loader)
     for batch_idx, (input, target) in enumerate(loader):
-        print(f"Batch {batch_idx}")
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
         if isinstance(input, (tuple, list)):
@@ -568,12 +567,12 @@ if __name__ == "__main__":
     parser.add_argument("--val-towns", type=int, nargs="+", default=[1])
     parser.add_argument("--train-weathers", type=int, nargs="+", default=[0,1,2,3,4,5,6,7,8,9,10,11,14,15,16,17,18,19])
     parser.add_argument("--val-weathers", type=int, nargs="+", default=[1])
-    parser.add_argument("--with-lidar", action="store_true", default=False)
+    parser.add_argument("--with-lidar", action="store_true", default=True)
     parser.add_argument("--with-seg", action="store_true", default=False)
     parser.add_argument("--with-depth", action="store_true", default=False)
     parser.add_argument("--multi-view", action="store_true", default=True)
     parser.add_argument("--multi-view-input-size", default=None, nargs=3, type=int)
-    #The following arguments are used for the moddel
+    #The following arguments are used for the model
     parser.add_argument(
     "--sched",
     default="cosine",
@@ -646,7 +645,7 @@ if __name__ == "__main__":
     parser.add_argument(
     "--no-prefetcher",
     action="store_true",
-    default=False,
+    default=True,
     help="disable fast prefetcher",
     )
     # Augmentation & regularization parameters
