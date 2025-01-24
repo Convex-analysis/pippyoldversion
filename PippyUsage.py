@@ -818,13 +818,16 @@ if __name__ == "__main__":
     parser.add_argument("--bn-eps", type=float, default=None)
     parser.add_argument("--scriptable", action="store_true", default=False)
 
+    parser.add_argument('--rpc_timeout', type=int, default=120)
+
+
     
     
     
     args = parser.parse_args()
 
     from datetime import datetime
-    logging_path = '/home/cailab/xtaWorkspace/' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + '_pipeline_driver.log'
+    logging_path = '/home/cailab/xtaWorkspace/logs/' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + '_pipeline_driver.log'
     logging.basicConfig(
         level=logging.DEBUG,
         force=True,
