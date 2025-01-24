@@ -61,10 +61,6 @@ from pippy.microbatch import (
 
 DEBUG = False
 
-# Configure logging to write to a file
-logging.basicConfig(filename='/home/cailab/xtaWorkspace/pipeline_driver.log', level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
 class Phase(Enum):
     FORWARD = 0
     BACKWARD = 1
@@ -1451,8 +1447,6 @@ class PipelineDriverBase(torch.nn.Module):
 
         # Log GPU memory usage after initialization
         print("After _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
-
-
 
     def _init_remote_executors(self):
         self.rank_worker_rrefs: Dict[int, torch.distributed.rpc.RRef] = {}

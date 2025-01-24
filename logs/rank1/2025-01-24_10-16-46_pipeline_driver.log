@@ -1,0 +1,129 @@
+2025-01-24 10:16:46,605 - INFO - Added key: store_based_barrier_key:1 to store for rank: 1
+2025-01-24 10:16:47,572 - INFO - Rank 1: Completed store-based barrier for key:store_based_barrier_key:1 with 2 nodes.
+2025-01-24 10:16:57,784 - INFO - Added key: store_based_barrier_key:2 to store for rank: 1
+2025-01-24 10:16:57,787 - INFO - Rank 1: Completed store-based barrier for key:store_based_barrier_key:2 with 2 nodes.
+2025-01-24 10:16:57,792 - INFO - Added key: store_based_barrier_key:3 to store for rank: 1
+2025-01-24 10:16:57,796 - INFO - Rank 1: Completed store-based barrier for key:store_based_barrier_key:3 with 2 nodes.
+2025-01-24 10:16:57,799 - INFO - Added key: store_based_barrier_key:4 to store for rank: 1
+2025-01-24 10:16:57,815 - INFO - Rank 1: Completed store-based barrier for key:store_based_barrier_key:4 with 2 nodes.
+2025-01-24 10:16:57,819 - INFO - Added key: store_based_barrier_key:5 to store for rank: 1
+2025-01-24 10:16:57,824 - INFO - Rank 1: Completed store-based barrier for key:store_based_barrier_key:5 with 2 nodes.
+2025-01-24 10:17:15,163 - INFO - [1] Instantiating RankWorker
+2025-01-24 10:17:20,132 - INFO - Instantiating PipeStageExecutor for stage 1
+2025-01-24 10:17:20,153 - INFO - [1] Instantiating RankWorker
+2025-01-24 10:17:24,639 - INFO - Instantiating PipeStageExecutor for stage 1
+2025-01-24 10:17:33,308 - DEBUG - [1] Received getitem call: ('0_getitem_7', 2, ValueReference(1, 0_submod_1), 0)
+2025-01-24 10:17:33,310 - DEBUG - [1][0] Received invoke call for %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})
+2025-01-24 10:17:33,312 - DEBUG - [1][0] Invoke call found 7 ValueReference arguments
+2025-01-24 10:17:33,313 - INFO - Created WorkItem: WorkItem(%submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {}))
+2025-01-24 10:17:33,313 - DEBUG - [1][0] Invoke instantiated WorkItem WorkItem(%submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})) with key 0_submod_1
+2025-01-24 10:17:33,313 - DEBUG - [1][0] Scheduling WorkItem as WAITING workitem
+2025-01-24 10:17:33,314 - DEBUG - [1] Current waiting runlist keys: dict_keys([])
+2025-01-24 10:17:33,314 - INFO - Enqueued WorkItem to waiting runlist: WorkItem(%submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {}))
+2025-01-24 10:17:33,314 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem) for runlist item 0_submod_1 arg_idx 0
+2025-01-24 10:17:33,316 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_1) for runlist item 0_submod_1 arg_idx 1
+2025-01-24 10:17:33,316 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_2) for runlist item 0_submod_1 arg_idx 2
+2025-01-24 10:17:33,317 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_3) for runlist item 0_submod_1 arg_idx 3
+2025-01-24 10:17:33,317 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_4) for runlist item 0_submod_1 arg_idx 4
+2025-01-24 10:17:33,317 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_5) for runlist item 0_submod_1 arg_idx 5
+2025-01-24 10:17:33,318 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_6) for runlist item 0_submod_1 arg_idx 6
+2025-01-24 10:17:33,319 - DEBUG - [1] Received getitem call: ('0_getitem_8', 2, ValueReference(1, 0_submod_1), 1)
+2025-01-24 10:17:33,319 - DEBUG - [1] Received getitem call: ('0_getitem_9', 2, ValueReference(1, 0_submod_1), 2)
+2025-01-24 10:17:33,320 - DEBUG - [1] Received getitem call: ('0_getitem_10', 2, ValueReference(1, 0_submod_1), 3)
+2025-01-24 10:17:33,320 - DEBUG - [1] Received getitem call: ('0_getitem_11', 2, ValueReference(1, 0_submod_1), 4)
+2025-01-24 10:17:33,320 - DEBUG - [1] Received getitem call: ('0_getitem_12', 2, ValueReference(1, 0_submod_1), 5)
+2025-01-24 10:17:33,570 - DEBUG - [1][0] Received invoke call for %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})})
+2025-01-24 10:17:33,571 - DEBUG - [1] Received getitem call: ('0_getitem_13', 8, ValueReference(1, 0_stage_backward), 0)
+2025-01-24 10:17:33,572 - DEBUG - [1][0] Invoke call found 13 ValueReference arguments
+2025-01-24 10:17:33,573 - INFO - Created WorkItem: WorkItem(%stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})}))
+2025-01-24 10:17:33,573 - DEBUG - [1][0] Invoke instantiated WorkItem WorkItem(%stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})})) with key 0_stage_backward
+2025-01-24 10:17:33,573 - DEBUG - [1][0] Scheduling WorkItem as WAITING workitem
+2025-01-24 10:17:33,574 - DEBUG - [1] Current waiting runlist keys: dict_keys(['0_submod_1'])
+2025-01-24 10:17:33,574 - INFO - Enqueued WorkItem to waiting runlist: WorkItem(%stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})}))
+2025-01-24 10:17:33,574 - DEBUG - [1][0] Requesting transfer of value ValueReference(1, 0_getitem_7) for runlist item 0_stage_backward arg_idx 0
+2025-01-24 10:17:33,576 - DEBUG - [1][0] Requesting transfer of value ValueReference(1, 0_getitem_8) for runlist item 0_stage_backward arg_idx 1
+2025-01-24 10:17:33,577 - DEBUG - [1][0] Requesting transfer of value ValueReference(1, 0_getitem_9) for runlist item 0_stage_backward arg_idx 2
+2025-01-24 10:17:33,580 - DEBUG - [1][0] Requesting transfer of value ValueReference(1, 0_getitem_10) for runlist item 0_stage_backward arg_idx 3
+2025-01-24 10:17:33,581 - DEBUG - [1][0] Requesting transfer of value ValueReference(1, 0_getitem_11) for runlist item 0_stage_backward arg_idx 4
+2025-01-24 10:17:33,582 - DEBUG - [1][0] Requesting transfer of value ValueReference(1, 0_getitem_12) for runlist item 0_stage_backward arg_idx 5
+2025-01-24 10:17:33,584 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem) for runlist item 0_stage_backward arg_idx 6
+2025-01-24 10:17:33,585 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_1) for runlist item 0_stage_backward arg_idx 7
+2025-01-24 10:17:33,586 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_2) for runlist item 0_stage_backward arg_idx 8
+2025-01-24 10:17:33,587 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_3) for runlist item 0_stage_backward arg_idx 9
+2025-01-24 10:17:33,588 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_4) for runlist item 0_stage_backward arg_idx 10
+2025-01-24 10:17:33,589 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_5) for runlist item 0_stage_backward arg_idx 11
+2025-01-24 10:17:33,590 - DEBUG - [1][0] Requesting transfer of value ValueReference(0, 0_getitem_6) for runlist item 0_stage_backward arg_idx 12
+2025-01-24 10:17:33,591 - DEBUG - [1] Received getitem call: ('0_getitem_14', 1, ValueReference(1, 0_stage_backward), 1)
+2025-01-24 10:17:33,592 - DEBUG - [1] Received getitem call: ('0_getitem_15', 1, ValueReference(1, 0_getitem_13), 0)
+2025-01-24 10:17:33,592 - DEBUG - [1] Received getitem call: ('0_getitem_16', 1, ValueReference(1, 0_getitem_13), 1)
+2025-01-24 10:17:33,593 - DEBUG - [1] Received getitem call: ('0_getitem_17', 1, ValueReference(1, 0_getitem_13), 2)
+2025-01-24 10:17:33,593 - DEBUG - [1] Received getitem call: ('0_getitem_18', 1, ValueReference(1, 0_getitem_13), 3)
+2025-01-24 10:17:33,593 - DEBUG - [1] Received getitem call: ('0_getitem_19', 1, ValueReference(1, 0_getitem_13), 4)
+2025-01-24 10:17:33,594 - DEBUG - [1] Received getitem call: ('0_getitem_20', 1, ValueReference(1, 0_getitem_13), 5)
+2025-01-24 10:17:33,594 - DEBUG - [1] Received getitem call: ('0_getitem_21', 1, ValueReference(1, 0_getitem_13), 6)
+2025-01-24 10:17:33,773 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_7) initiated by stage 1 for 0_stage_backward
+2025-01-24 10:17:33,776 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_8) initiated by stage 1 for 0_stage_backward
+2025-01-24 10:17:33,777 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_10) initiated by stage 1 for 0_stage_backward
+2025-01-24 10:17:33,778 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_11) initiated by stage 1 for 0_stage_backward
+2025-01-24 10:17:33,778 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_12) initiated by stage 1 for 0_stage_backward
+2025-01-24 10:17:33,779 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_9) initiated by stage 1 for 0_stage_backward
+2025-01-24 10:17:33,808 - DEBUG - [1] Received getitem call: ('1_getitem_7', 2, ValueReference(1, 1_submod_1), 0)
+2025-01-24 10:17:33,808 - DEBUG - [1][1] Received invoke call for %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})
+2025-01-24 10:17:33,810 - DEBUG - [1][1] Invoke call found 7 ValueReference arguments
+2025-01-24 10:17:33,811 - INFO - Created WorkItem: WorkItem(%submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {}))
+2025-01-24 10:17:33,811 - DEBUG - [1][1] Invoke instantiated WorkItem WorkItem(%submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})) with key 1_submod_1
+2025-01-24 10:17:33,812 - DEBUG - [1][1] Scheduling WorkItem as WAITING workitem
+2025-01-24 10:17:33,812 - DEBUG - [1] Current waiting runlist keys: dict_keys(['0_submod_1', '0_stage_backward'])
+2025-01-24 10:17:33,813 - INFO - Enqueued WorkItem to waiting runlist: WorkItem(%submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {}))
+2025-01-24 10:17:33,813 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem) for runlist item 1_submod_1 arg_idx 0
+2025-01-24 10:17:33,816 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_1) for runlist item 1_submod_1 arg_idx 1
+2025-01-24 10:17:33,817 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_2) for runlist item 1_submod_1 arg_idx 2
+2025-01-24 10:17:33,818 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_3) for runlist item 1_submod_1 arg_idx 3
+2025-01-24 10:17:33,819 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_4) for runlist item 1_submod_1 arg_idx 4
+2025-01-24 10:17:33,820 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_5) for runlist item 1_submod_1 arg_idx 5
+2025-01-24 10:17:33,821 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_6) for runlist item 1_submod_1 arg_idx 6
+2025-01-24 10:17:33,822 - DEBUG - [1] Received getitem call: ('1_getitem_8', 2, ValueReference(1, 1_submod_1), 1)
+2025-01-24 10:17:33,823 - DEBUG - [1] Received getitem call: ('1_getitem_9', 2, ValueReference(1, 1_submod_1), 2)
+2025-01-24 10:17:33,826 - DEBUG - [1] Received getitem call: ('1_getitem_10', 2, ValueReference(1, 1_submod_1), 3)
+2025-01-24 10:17:33,826 - DEBUG - [1] Received getitem call: ('1_getitem_11', 2, ValueReference(1, 1_submod_1), 4)
+2025-01-24 10:17:33,827 - DEBUG - [1] Received getitem call: ('1_getitem_12', 2, ValueReference(1, 1_submod_1), 5)
+2025-01-24 10:17:33,994 - DEBUG - [1][1] Received invoke call for %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})})
+2025-01-24 10:17:33,994 - DEBUG - [1][1] Invoke call found 13 ValueReference arguments
+2025-01-24 10:17:33,995 - DEBUG - [1] Received getitem call: ('1_getitem_13', 8, ValueReference(1, 1_stage_backward), 0)
+2025-01-24 10:17:33,996 - INFO - Created WorkItem: WorkItem(%stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})}))
+2025-01-24 10:17:33,996 - DEBUG - [1][1] Invoke instantiated WorkItem WorkItem(%stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})})) with key 1_stage_backward
+2025-01-24 10:17:33,996 - DEBUG - [1][1] Scheduling WorkItem as WAITING workitem
+2025-01-24 10:17:33,997 - DEBUG - [1] Current waiting runlist keys: dict_keys(['0_submod_1', '0_stage_backward', '1_submod_1'])
+2025-01-24 10:17:33,997 - INFO - Enqueued WorkItem to waiting runlist: WorkItem(%stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem_7, %getitem_8, %getitem_9, %getitem_10, %getitem_11, %getitem_12), output_grads: (None, None, None, None, None, None), input_values: [%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target], outputs_with_grads_idxs: [5], stage_info: stage_backward for stage %submod_1 : [#users=6] = call_module[target=submod_1](args = (%getitem, %getitem_1, %getitem_2, %getitem_3, %getitem_4, %getitem_5, %getitem_6, %target), kwargs = {})}))
+2025-01-24 10:17:33,997 - DEBUG - [1][1] Requesting transfer of value ValueReference(1, 1_getitem_7) for runlist item 1_stage_backward arg_idx 0
+2025-01-24 10:17:33,999 - DEBUG - [1][1] Requesting transfer of value ValueReference(1, 1_getitem_8) for runlist item 1_stage_backward arg_idx 1
+2025-01-24 10:17:34,000 - DEBUG - [1][1] Executing transfer of value ValueReference(1, 1_getitem_7) initiated by stage 1 for 1_stage_backward
+2025-01-24 10:17:34,001 - DEBUG - [1][1] Requesting transfer of value ValueReference(1, 1_getitem_9) for runlist item 1_stage_backward arg_idx 2
+2025-01-24 10:17:34,002 - DEBUG - [1][1] Executing transfer of value ValueReference(1, 1_getitem_8) initiated by stage 1 for 1_stage_backward
+2025-01-24 10:17:34,002 - DEBUG - [1][1] Requesting transfer of value ValueReference(1, 1_getitem_10) for runlist item 1_stage_backward arg_idx 3
+2025-01-24 10:17:34,003 - DEBUG - [1][1] Executing transfer of value ValueReference(1, 1_getitem_9) initiated by stage 1 for 1_stage_backward
+2025-01-24 10:17:34,004 - DEBUG - [1][1] Requesting transfer of value ValueReference(1, 1_getitem_11) for runlist item 1_stage_backward arg_idx 4
+2025-01-24 10:17:34,005 - DEBUG - [1][1] Requesting transfer of value ValueReference(1, 1_getitem_12) for runlist item 1_stage_backward arg_idx 5
+2025-01-24 10:17:34,006 - DEBUG - [1][1] Executing transfer of value ValueReference(1, 1_getitem_10) initiated by stage 1 for 1_stage_backward
+2025-01-24 10:17:34,006 - DEBUG - [1][1] Executing transfer of value ValueReference(1, 1_getitem_11) initiated by stage 1 for 1_stage_backward
+2025-01-24 10:17:34,007 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem) for runlist item 1_stage_backward arg_idx 6
+2025-01-24 10:17:34,008 - DEBUG - [1][1] Executing transfer of value ValueReference(1, 1_getitem_12) initiated by stage 1 for 1_stage_backward
+2025-01-24 10:17:34,009 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_1) for runlist item 1_stage_backward arg_idx 7
+2025-01-24 10:17:34,010 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_2) for runlist item 1_stage_backward arg_idx 8
+2025-01-24 10:17:34,011 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_3) for runlist item 1_stage_backward arg_idx 9
+2025-01-24 10:17:34,013 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_4) for runlist item 1_stage_backward arg_idx 10
+2025-01-24 10:17:34,014 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_5) for runlist item 1_stage_backward arg_idx 11
+2025-01-24 10:17:34,015 - DEBUG - [1][1] Requesting transfer of value ValueReference(0, 1_getitem_6) for runlist item 1_stage_backward arg_idx 12
+2025-01-24 10:17:34,016 - DEBUG - [1] Received getitem call: ('1_getitem_14', 1, ValueReference(1, 1_stage_backward), 1)
+2025-01-24 10:17:34,017 - DEBUG - [1] Received getitem call: ('1_getitem_15', 1, ValueReference(1, 1_getitem_13), 0)
+2025-01-24 10:17:34,017 - DEBUG - [1] Received getitem call: ('1_getitem_16', 1, ValueReference(1, 1_getitem_13), 1)
+2025-01-24 10:17:34,017 - DEBUG - [1] Received getitem call: ('1_getitem_17', 1, ValueReference(1, 1_getitem_13), 2)
+2025-01-24 10:17:34,018 - DEBUG - [1] Received getitem call: ('1_getitem_18', 1, ValueReference(1, 1_getitem_13), 3)
+2025-01-24 10:17:34,018 - DEBUG - [1] Received getitem call: ('1_getitem_19', 1, ValueReference(1, 1_getitem_13), 4)
+2025-01-24 10:17:34,019 - DEBUG - [1] Received getitem call: ('1_getitem_20', 1, ValueReference(1, 1_getitem_13), 5)
+2025-01-24 10:17:34,019 - DEBUG - [1] Received getitem call: ('1_getitem_21', 1, ValueReference(1, 1_getitem_13), 6)
+2025-01-24 10:17:34,958 - DEBUG - [1][0] Completing transfer of value ValueReference(0, 0_getitem_1) for runlist item 0_submod_1 arg_idx 1
+2025-01-24 10:17:35,018 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_15) initiated by stage 0 for 0_stage_backward_1
+2025-01-24 10:17:35,049 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_16) initiated by stage 0 for 0_stage_backward_1
+2025-01-24 10:17:35,053 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_7) initiated by stage 0 for 0_sync_barrier
+2025-01-24 10:17:35,056 - DEBUG - [1][0] Executing transfer of value ValueReference(1, 0_getitem_17) initiated by stage 0 for 0_stage_backward_1

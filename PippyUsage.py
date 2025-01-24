@@ -379,6 +379,7 @@ def run_master(_, args):
     print(f'REPLICATE config: {args.replicate} -> {MULTI_USE_PARAM_CONFIG}')
     print("Using schedule:", args.schedule)
     print("Using device:", args.device)
+
     if args.rank == 0:
         number_of_workers = 2
         all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
@@ -821,6 +822,20 @@ if __name__ == "__main__":
     
     
     args = parser.parse_args()
+
+    from datetime import datetime
+    logging_path = '/home/cailab/xtaWorkspace/' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + '_pipeline_driver.log'
+    logging.basicConfig(
+        level=logging.DEBUG,
+        force=True,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(logging_path),
+            logging.StreamHandler()
+        ]
+    )
+
+    print(f"Logging to {logging_path}")
     
     print(torch.cuda.is_available())
     run_pippy(run_master, args)
