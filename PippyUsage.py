@@ -255,6 +255,7 @@ def train_one_epoch_pipeline(
             batch_size = input[list(input.keys())[0]].size(0)
         else:
             batch_size = input.size(0)
+        # CYH: not prefetcher, move to cuda here, so prefetcher needs to be False, i.e. args.-no-prefetcher = True
         if not args.prefetcher:
             if isinstance(input, (tuple, list)):
                 input = [x.cuda() for x in input]
