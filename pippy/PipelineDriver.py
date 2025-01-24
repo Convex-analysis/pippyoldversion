@@ -206,6 +206,14 @@ class RefcountedFuture:
         self.refcount -= 1
         return self.refcount == 0
 
+def print_red(x):
+    print(f'\033[31m{x}\033[0m')
+
+def print_blue(x):
+    print(f'\033[34m{x}\033[0m')
+
+def print_green(x):
+    print(f'\033[32m{x}\033[0m')
 
 class RankWorker(EventRecorder):
     """
@@ -326,9 +334,12 @@ class RankWorker(EventRecorder):
         while True:
             print(f'All workitem count at loop begining: {len(self.ready_runlist)+len(self.waiting_runlist)}, current work item in ready runlist: {len(self.ready_runlist)}, current work item in waiting runlist: {len(self.waiting_runlist)}')
             work_item = None
+            print("before dequeue_ready_runlist")
             with self.ready_runlist_cv:
                 while len(self.ready_runlist) == 0:
+                    print('No work item in ready runlist, waiting for new work item')
                     self.ready_runlist_cv.wait()
+                print('Got new work item in ready runlist')
 
                 logging.debug(
                     f"[{self.rank}] Dequeueing workitem from set of {len(self.ready_runlist)}"
@@ -350,7 +361,7 @@ class RankWorker(EventRecorder):
                     work_item = self.ready_runlist.pop(key)
                     logging.info(f"Dequeued WorkItem from ready runlist: {work_item}")
                     break
-
+            print("after dequeue_ready_runlist")
             # We may not fetch any actionable work item in the above loop, go
             # back to the loop in this case
             if work_item is None:
@@ -613,10 +624,13 @@ class RankWorker(EventRecorder):
     # For work item marked with runlist_key, update its operand list with value
     def update_run_list(self, runlist_key, arg_idx, value):
         with self.waiting_runlist_lock:
+            print(f'Updating runlist with key {runlist_key}, arg_idx {arg_idx}, value {value}')
             work_item = self.waiting_runlist[runlist_key]
             work_item.ready_args[arg_idx] = value
             work_item.blocked_args_count -= 1
+            print(f'Before WorkItem if: work_item.blocked_args_count({work_item.blocked_args_count}) should be 0')
             if work_item.blocked_args_count == 0:
+                print('Inside WorkItem if')
                 with self.ready_runlist_cv:
                     work_item.state = SchedState.READY
                     self.ready_runlist[runlist_key] = self.waiting_runlist.pop(
@@ -627,6 +641,7 @@ class RankWorker(EventRecorder):
                     f"[{self.rank}][{work_item.microbatch_id}] all operands ready: {runlist_key}"
                 )
                 logging.info(f"WorkItem is ready: {work_item}")
+                print(f'WorkItem is ready: {work_item}')
 
 
 class PipeStageExecutor(EventRecorder):
@@ -792,6 +807,7 @@ class PipeStageExecutor(EventRecorder):
         logging.debug(
             f"[{self.stage_id}][{cur_microbatch}] Received invoke call for {debug_str}"
         )
+        print(f"[stage_id: {self.stage_id}][cur_microbatch: {cur_microbatch}] Received invoke call for {debug_str}")
         # Extract all ValueRef arguments so we can spawn asynchronous data transfers
         # for each of them
         value_ref_args: List[ValueReference] = []
@@ -806,6 +822,7 @@ class PipeStageExecutor(EventRecorder):
         logging.debug(
             f"[{self.stage_id}][{cur_microbatch}] Invoke call found {len(value_ref_args)} ValueReference arguments"
         )
+        print(f"[stage_id: {self.stage_id}][cur_microbatch: {cur_microbatch}] Invoke call found {len(value_ref_args)} ValueReference arguments")
 
         # Construct WorkItem for this microbatch+phase and record it in the
         # waiting runlist
@@ -845,11 +862,13 @@ class PipeStageExecutor(EventRecorder):
                 f"[{self.stage_id}][{cur_microbatch}] No RRef arguments. "
                 f"Scheduling directly as READY workitem"
             )
+            print(f"[{self.stage_id}][{cur_microbatch}] No RRef arguments.\nScheduling directly as READY workitem")
             self.rank_worker.enqueue_ready_runlist(output_unique_key, work_item)
         else:
             logging.debug(
                 f"[{self.stage_id}][{cur_microbatch}] Scheduling WorkItem as WAITING workitem"
             )
+            print(f"[{self.stage_id}][{cur_microbatch}] Scheduling WorkItem as WAITING workitem")
             work_item.state = SchedState.WAITING
             self.rank_worker.enqueue_waiting_runlist(
                 output_unique_key, work_item
@@ -916,6 +935,8 @@ class PipeStageExecutor(EventRecorder):
         self.record_event_dependency(
             from_id=name, to_id=target_name, type="waiting"
         )
+
+        print(f"[stage_id: {self.stage_id}][cur_microbatch: {cur_microbatch}] Invoke call finished for {debug_str}")
 
         return ValueReference(self.stage_id, output_unique_key)
 
@@ -1668,6 +1689,7 @@ class PipelineDriverBase(torch.nn.Module):
         logging.debug(
             f"[root] Retrieving output values from {len(microbatch_interpreters)} chunks"
         )
+        print(f"[root] Retrieving output values from {len(microbatch_interpreters)} chunks")
         output_vals = []
         for interp, last_node in zip(microbatch_interpreters, last_nodes):
             interp.run_until(lambda n: False)
@@ -1675,16 +1697,20 @@ class PipelineDriverBase(torch.nn.Module):
 
         # First kick of async transfers to retrieve ValueReference values
         def initiate_async_transfer(a):
+            print(f'initiate_async_transfer: {a}')
             if isinstance(a, ValueReference):
                 #self.communication_overload += 1  # Increment communication count
                 # Calculate data size in MB
                 #value_size = a.meta["tensor_meta"].numel() * a.meta["tensor_meta"].element_size() / (1024 ** 2)
                 #self.data_transferred_mb += value_size
                 value_ref_executor_rref = self.stage_to_executor[a.stage_id]
-                return value_ref_executor_rref.rpc_async().get_value(
+                tmp = value_ref_executor_rref.rpc_async().get_value(
                     "root", "collect", -1, a
                 )
+                print(f'initiate_async_transfer_result tmp: {tmp}')
+                return tmp
             else:
+                print(f'initiate_async_transfer_result a: {a}')
                 return a
 
         output_vals = pippy.fx.node.map_aggregate(

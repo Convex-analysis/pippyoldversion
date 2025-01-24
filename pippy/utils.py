@@ -221,6 +221,8 @@ def run_worker(rank, run_func, args, *extra_args):
         rpc_backend_options=options,
     )
 
+    
+
     global dp_pg_per_pp_rank
     dp_ranks_per_pp_rank = (
         torch.arange(actual_world_size)
