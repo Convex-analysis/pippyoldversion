@@ -610,7 +610,7 @@ class RankWorker(EventRecorder):
 
             # Periodically clean up unused memory
             if microbatch_id % 10 == 0:
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
                 print("Periodic memory cleanup :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
     # For work item marked with runlist_key, update its operand list with value
@@ -619,6 +619,9 @@ class RankWorker(EventRecorder):
             work_item = self.waiting_runlist[runlist_key]
             work_item.ready_args[arg_idx] = value
             work_item.blocked_args_count -= 1
+            print(f'WorkItem future: {work_item.future} with arg_idx: {arg_idx} finished!')
+            print(f'WorkItem debugstr: {work_item.debug_str}')
+            print(f'WorkItem ready args length: {len(work_item.ready_args)}')
             print(f'Before WorkItem if: work_item.blocked_args_count({work_item.blocked_args_count}) should be 0')
             if work_item.blocked_args_count == 0:
                 with self.ready_runlist_cv:

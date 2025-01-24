@@ -557,7 +557,8 @@ if __name__ == "__main__":
     parser.add_argument('--max_epochs', type=int, default=10)
     parser.add_argument('--batch_size', type=int, default=4)
 
-    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
+    # CYH: Schedules 0:FillDrain, 1:1F1B, 2:Interleaved1F1B
+    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
@@ -818,7 +819,7 @@ if __name__ == "__main__":
     parser.add_argument("--bn-eps", type=float, default=None)
     parser.add_argument("--scriptable", action="store_true", default=False)
 
-    parser.add_argument('--rpc_timeout', type=int, default=120)
+    parser.add_argument('--rpc_timeout', type=int, default=216000)
 
 
     
