@@ -620,10 +620,7 @@ class RankWorker(EventRecorder):
             work_item = self.waiting_runlist[runlist_key]
             work_item.ready_args[arg_idx] = value
             work_item.blocked_args_count -= 1
-            print(f'WorkItem future: {work_item.future} with arg_idx: {arg_idx} finished!')
-            print(f'WorkItem debugstr: {work_item.debug_str}')
-            print(f'WorkItem ready args length: {len(work_item.ready_args)}')
-            print(f'Before WorkItem if: work_item.blocked_args_count({work_item.blocked_args_count}) should be 0')
+            print(f'Before WorkItem Ready if: work_item.blocked_args_count({work_item.blocked_args_count}) should be 0')
             if work_item.blocked_args_count == 0:
                 with self.ready_runlist_cv:
                     work_item.state = SchedState.READY
@@ -993,8 +990,6 @@ class PipeStageExecutor(EventRecorder):
             # Now the indexed future is created
             refcounted_future = self.value_store[value_ref_arg.unique_key]
 
-            print_blue(f'refcounted_future: {refcounted_future}')
-
         value = refcounted_future.future.wait()
 
         with self.value_store_lock:
@@ -1023,9 +1018,7 @@ class PipeStageExecutor(EventRecorder):
                 f"[{self.stage_id}][{microbatch}] Completing transfer of value {value_ref_arg} "
                 f"for runlist item {runlist_key} arg_idx {arg_idx} from peer stage {value_ref_arg.stage_id}"
             )
-            print_green(f'before value = fut.value(), the future is {fut.done()}')
             value = fut.value()
-            print_green(f'Received value: {value}')
             self.rank_worker.update_run_list(runlist_key, arg_idx, value)
 
         return fut.then(bottom_half)
