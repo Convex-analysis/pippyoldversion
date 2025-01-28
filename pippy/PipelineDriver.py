@@ -566,6 +566,7 @@ class RankWorker(EventRecorder):
                 f"[{self.rank}][{work_item.microbatch_id}] Populating result of type {type(out_val)} "
                 f"for {key}"
             )
+
             future.set_result(out_val)
             work_item.state = SchedState.DONE
 
@@ -610,7 +611,7 @@ class RankWorker(EventRecorder):
 
             # Periodically clean up unused memory
             if microbatch_id % 10 == 0:
-                # torch.cuda.empty_cache()
+                torch.cuda.empty_cache()
                 print("Periodic memory cleanup :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
     # For work item marked with runlist_key, update its operand list with value
@@ -992,11 +993,15 @@ class PipeStageExecutor(EventRecorder):
             # Now the indexed future is created
             refcounted_future = self.value_store[value_ref_arg.unique_key]
 
+            print_blue(f'refcounted_future: {refcounted_future}')
+
         value = refcounted_future.future.wait()
 
         with self.value_store_lock:
             if refcounted_future.release():
                 self.value_store.pop(value_ref_arg.unique_key)
+
+        print_red(f'value size: {value.size()}')
 
         return value
 
@@ -1020,7 +1025,9 @@ class PipeStageExecutor(EventRecorder):
                 f"[{self.stage_id}][{microbatch}] Completing transfer of value {value_ref_arg} "
                 f"for runlist item {runlist_key} arg_idx {arg_idx} from peer stage {value_ref_arg.stage_id}"
             )
+            print_green(f'before value = fut.value(), the future is {fut.done()}')
             value = fut.value()
+            print_green(f'Received value: {value}')
             self.rank_worker.update_run_list(runlist_key, arg_idx, value)
 
         return fut.then(bottom_half)

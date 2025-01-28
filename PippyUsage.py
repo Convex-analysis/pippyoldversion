@@ -488,7 +488,9 @@ def run_master(_, args):
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
         debug_pickle(pipe, "pipe")
-        
+        print('-------------------------------------------------')
+        print(pipe)
+        print('-------------------------------------------------')
 
         log_memory_usage("After creating Pipe")
 
@@ -819,7 +821,7 @@ if __name__ == "__main__":
     parser.add_argument("--bn-eps", type=float, default=None)
     parser.add_argument("--scriptable", action="store_true", default=False)
 
-    parser.add_argument('--rpc_timeout', type=int, default=216000)
+    parser.add_argument('--rpc_timeout', type=int, default=120)
 
 
     

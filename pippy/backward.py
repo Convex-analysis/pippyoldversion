@@ -96,6 +96,12 @@ def stage_backward(
 
 
 def sync_barrier(loss, barrier_tokens, last_grads):
+    assert loss is not None, "Loss should not be None"
+    assert last_grads is not None, "last_grads should not be None"
+    print('----------loss----------')
+    print(loss)
+    print('----------last_grads----------')
+    print(last_grads)
     return loss, last_grads
 
 
