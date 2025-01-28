@@ -255,6 +255,8 @@ def merge_chunks(chunks, chunk_spec, _debug_mask_minibatches: bool = False):
 
     for chunk in chunks:
         chunk_flattened, _ = tree_flatten(chunk)
+        print(f"chunk_flattened: {chunk_flattened}")
+        print(f"spec_flattened: {spec_flattened}")
         if len(chunk_flattened) != len(spec_flattened):
             raise ValueError(
                 f"Chunk {chunk} did not match chunk spec {chunk_spec}"
