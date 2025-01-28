@@ -1001,8 +1001,6 @@ class PipeStageExecutor(EventRecorder):
             if refcounted_future.release():
                 self.value_store.pop(value_ref_arg.unique_key)
 
-        print_red(f'value size: {value.size()}')
-
         return value
 
     def async_transfer(self, microbatch, value_ref_arg, arg_idx, runlist_key):

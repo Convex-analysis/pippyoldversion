@@ -565,7 +565,7 @@ if __name__ == "__main__":
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
-    parser.add_argument('--num_worker_threads', type=int, default=16)
+    parser.add_argument('--num_worker_threads', type=int, default=512)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     #The following arguments are used for the dataloader
     parser.add_argument("--train-towns", type=int, nargs="+", default=[1,2,3,4,5,6,7,10])
@@ -821,7 +821,7 @@ if __name__ == "__main__":
     parser.add_argument("--bn-eps", type=float, default=None)
     parser.add_argument("--scriptable", action="store_true", default=False)
 
-    parser.add_argument('--rpc_timeout', type=int, default=120)
+    parser.add_argument('--rpc_timeout', type=int, default=600)
 
 
     
