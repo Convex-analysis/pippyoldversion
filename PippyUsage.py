@@ -491,9 +491,9 @@ def run_master(_, args):
         pipe = Pipe.from_tracing(wrapper, MULTI_USE_PARAM_CONFIG)
         pipe.to(args.device)
         debug_pickle(pipe, "pipe")
-        print('-------------------------------------------------')
-        print(pipe)
-        print('-------------------------------------------------')
+        # print('-------------------------------------------------')
+        # print(pipe)
+        # print('-------------------------------------------------')
 
         log_memory_usage("After creating Pipe")
 
@@ -835,7 +835,7 @@ if __name__ == "__main__":
     from datetime import datetime
     logging_path = '/home/cailab/xtaWorkspace/logs/' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + '_pipeline_driver.log'
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         force=True,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
