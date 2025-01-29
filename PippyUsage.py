@@ -497,7 +497,11 @@ def run_master(_, args):
 
         log_memory_usage("After creating Pipe")
 
-        output_chunk_spec = (TensorChunkSpec(0), loss_reducer_fn)
+        output_chunk_spec = {
+            'output': (TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0)),
+            'loss': LossReducer(0.0, loss_reducer_fn)
+        }
+        
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
