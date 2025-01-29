@@ -279,7 +279,8 @@ def train_one_epoch_pipeline(
 
         print(f"Input: {input.keys()}")
         output, loss = pipelineDriver(input, target)
-
+        print(f"Output of pipelineDriver: {output.keys()}")
+        print(f"Loss of pipelineDriver: {loss}")
         losses_m.update(loss.item(), batch_size)
 
         optimizer.zero_grad()
