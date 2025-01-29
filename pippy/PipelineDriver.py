@@ -610,7 +610,8 @@ class RankWorker(EventRecorder):
             del work_item
 
             # Periodically clean up unused memory
-            if microbatch_id % 10 == 0:
+            # if microbatch_id % 5 == 0:
+            if True:
                 torch.cuda.empty_cache()
                 print("Periodic memory cleanup :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 

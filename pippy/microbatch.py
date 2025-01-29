@@ -243,8 +243,6 @@ def merge_chunks(chunks, chunk_spec, _debug_mask_minibatches: bool = False):
     # Preliminary: flatten the chunk spec
     if chunk_spec is not None:
         spec_flattened, flatten_spec = tree_flatten(chunk_spec)
-        print(f"spec_flattened: {spec_flattened}")
-        print(f"flatten_spec: {flatten_spec}")
     else:
         # If chunk_spec is not provided, we will merge chunks along the default dimension (0), for all output fields
         # We obtain the output structure by flattening chunk 0 and generate the chunk_spec
@@ -257,8 +255,6 @@ def merge_chunks(chunks, chunk_spec, _debug_mask_minibatches: bool = False):
 
     for chunk in chunks:
         chunk_flattened, _ = tree_flatten(chunk)
-        print(f"chunk_flattened: {chunk_flattened}")
-        print(f"spec_flattened: {spec_flattened}")
         if len(chunk_flattened) != len(spec_flattened):
             raise ValueError(
                 f"Chunk {chunk} did not match chunk spec {chunk_spec}"

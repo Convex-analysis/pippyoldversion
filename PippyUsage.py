@@ -45,6 +45,8 @@ from timm.models import (
     model_parameters,
 )
 
+from pippy.PipelineDriver import print_blue, print_red, print_green
+
 PROFILING_ENABLED = True
 CHECK_NUMERIC_EQUIVALENCE = True
 
@@ -278,9 +280,9 @@ def train_one_epoch_pipeline(
                 target = target.cuda()
 
         print(f"Input: {input.keys()}")
-        output, loss = pipelineDriver(input, target)
-        print(f"Output of pipelineDriver: {output.keys()}")
-        print(f"Loss of pipelineDriver: {loss}")
+        result = pipelineDriver(input, target)
+        output = result['output']
+        loss = result['loss']
         losses_m.update(loss.item(), batch_size)
 
         optimizer.zero_grad()
@@ -313,6 +315,8 @@ def train_one_epoch_pipeline(
 
         end = time.time()
         batch_time_m.update(end - start)
+
+        print_red(f"Epoch: {epoch}, Batch: {batch_idx}/{last_idx} finished!")
 
     if hasattr(optimizer, "sync_lookahead"):
         optimizer.sync_lookahead()
@@ -568,7 +572,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=4)
 
     # CYH: Schedules 0:FillDrain, 1:1F1B, 2:Interleaved1F1B
-    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
+    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
