@@ -162,7 +162,10 @@ def initialize_pipeline(model):
     args_chunk_spec = (TensorChunkSpec(0), TensorChunkSpec(0))
     kwargs_chunk_spec = {}
 
-    output_chunk_spec = LossReducer(0.0, loss_reducer_fn)
+    output_chunk_spec = {
+        'output': (TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0)),
+        'loss': LossReducer(0.0, loss_reducer_fn)
+    }
 
     if torch.distributed.is_initialized():
         world_size = torch.distributed.get_world_size()
