@@ -249,7 +249,6 @@ def train_one_epoch_pipeline(
 
     end = time.time()
     last_idx = len(loader) - 1
-    print(f"Length of loader: {len(loader)}")
     num_updates = epoch * len(loader)
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx

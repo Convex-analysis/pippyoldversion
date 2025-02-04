@@ -1,17 +1,65 @@
 import os
 import subprocess
 import sys
-import resource
 import torch
+import itertools
 
-def set_memory_limit(max_memory_mb):
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    resource.setrlimit(resource.RLIMIT_AS, (max_memory_mb * 1024 * 1024, hard))
+DEVICE_IP_LIST = [
+    "192.168.2.14",
+    "192.168.2.13"
+]
+
+def intra_cluster_loop():
+    #Set master address and port
+    os.environ["MASTER_ADDR"] = "192.168.2.14"
+    os.environ["MASTER_PORT"] = "29500"
+    #set world size
+    os.environ["WORLD_SIZE"] = "3"
+    #TODO this line will replace after the pipeline timplate generation
+    rank_list = [
+        [1,2],#node 1's rank list [1,2]
+        [2,1]#node 2's rank list [2,1]
+    ]
+    
+    for pipe_template in rank_list:
+        #get the current node ip
+        current_node_ip = os.popen('hostname -I').read().split()[0]
+        if current_node_ip == os.environ["MASTER_ADDR"]:
+            #if the current node is the master node, set the node rank to 0
+            os.environ["NODE_RANK"] = "0"
+        elif current_node_ip == DEVICE_IP_LIST[0]:
+            os.environ["NODE_RANK"] = pipe_template[0]
+        elif current_node_ip == DEVICE_IP_LIST[1]:
+            os.environ["NODE_RANK"] = pipe_template[1]   
+            
+        # Construct the torchrun command
+        command = [
+            "torchrun",
+            "--nproc_per_node=1",
+            "--nnodes=" + os.environ["WORLD_SIZE"],
+            "--node_rank=" + os.environ["NODE_RANK"],
+            "--master_addr=" + os.environ["MASTER_ADDR"],
+            "--master_port=" + os.environ["MASTER_PORT"],
+            "pippy_resnet.py",
+            "--record_mem_dumps=0",
+            "--checkpoint=0"
+            #"--max_memory_mb=" + str(max_memory_mb)
+        ]
+        # Run the command
+        subprocess.run(command)
+        
+        
+    
+    
+    
+     
+    
+    
+
+
 
 def main(node_rank, max_memory_mb):
-    # Set memory limit
-    set_memory_limit(max_memory_mb)
-    torch.set_num_threads(4)
+
     # Set environment variables
     os.environ["MASTER_ADDR"] = "192.168.2.14"
     os.environ["MASTER_PORT"] = "29500"
@@ -44,13 +92,13 @@ def main(node_rank, max_memory_mb):
 
 
 if __name__ == "__main__":
+    intra_cluster_loop()
+    '''
     if len(sys.argv) != 2:
         #print("Usage: python run_torchrun.py <node_rank> <max_memory_mb>")
         print("Usage: python run_torchrun.py <node_rank>")
         sys.exit(1)
     
     node_rank = int(sys.argv[1])
-    max_memory_mb = 6300
-    print(f"Node rank: {node_rank}")
-    print(f"Max memory: {max_memory_mb}")
-    main(node_rank, max_memory_mb)
+    main(node_rank, 6300)
+    '''

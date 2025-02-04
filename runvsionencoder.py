@@ -3,6 +3,12 @@ import subprocess
 import sys
 import resource
 
+DEVICE_IP_LIST = [
+    "192.168.2.14",
+    "192.168.2.13"
+]
+
+
 def set_memory_limit(max_memory_mb):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     resource.setrlimit(resource.RLIMIT_AS, (max_memory_mb * 1024 * 1024, hard))
