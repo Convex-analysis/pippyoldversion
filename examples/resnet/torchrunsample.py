@@ -28,9 +28,9 @@ def intra_cluster_loop():
             #if the current node is the master node, set the node rank to 0
             os.environ["NODE_RANK"] = "0"
         elif current_node_ip == DEVICE_IP_LIST[0]:
-            os.environ["NODE_RANK"] = pipe_template[0]
+            os.environ["NODE_RANK"] = str(pipe_template[0])
         elif current_node_ip == DEVICE_IP_LIST[1]:
-            os.environ["NODE_RANK"] = pipe_template[1]   
+            os.environ["NODE_RANK"] = str(pipe_template[1])
             
         # Construct the torchrun command
         command = [
