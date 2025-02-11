@@ -21,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from pippy import run_pippy
 from pippy.IR import MultiUseParameterConfig, Pipe, LossWrapper, PipeSplitWrapper, annotate_split_points
 from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, PipelineDriverInterleaved1F1B, \
-    PipelineDriverBase
+    PipelineDriverBase, print_blue, print_green, print_red
 from pippy.events import EventsContext
 from pippy.microbatch import sum_reducer, TensorChunkSpec
 from pippy.visualizer import events_to_json
@@ -163,8 +163,21 @@ def run_master(_, args):
                     if args.visualize:
                         batches_events_contexts.append(pipe_driver.retrieve_events())
                     log_memory_usage(f"After processing batch {i} in {k} loader")
+
+                    break
                 print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
             log_memory_usage(f"End of epoch {epoch + 1}")
+
+            if True:
+                print_red(f"Switching template...")
+                if pipe_driver.template == 1:
+                    pipe_driver.set_template(0)
+                else:
+                    pipe_driver.set_template(1)
+                
+                pipe_driver._init_remote_executors()
+                print_red(f"Switch template complete!")
+
         if args.visualize:
             all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
                                                         batches_events_contexts, EventsContext())
@@ -189,7 +202,7 @@ if __name__ == "__main__":
     parser.add_argument('--master_addr', type=str, default=os.getenv('MASTER_ADDR', 'localhost'))
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
-    parser.add_argument('--max_epochs', type=int, default=1)
+    parser.add_argument('--max_epochs', type=int, default=4)
     parser.add_argument('--batch_size', type=int, default=64)
 
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())

@@ -1429,6 +1429,10 @@ class PipelineDriverBase(torch.nn.Module):
         self.communication_overload = 0
         self.data_transferred_mb = 0
 
+        # 0: [0, 1]
+        # 1: [1, 0]
+        self.template = 0
+
         # Log GPU memory usage
         print("Before _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
@@ -1436,6 +1440,10 @@ class PipelineDriverBase(torch.nn.Module):
 
         # Log GPU memory usage after initialization
         print("After _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
+
+    def set_template(self, template: int):
+        self.template = template
+
 
     def _init_remote_executors(self):
         self.rank_worker_rrefs: Dict[int, torch.distributed.rpc.RRef] = {}
@@ -1527,32 +1535,100 @@ class PipelineDriverBase(torch.nn.Module):
 
         self.stage_to_executor: Dict = {}
 
-        for stage_id, descr in enumerate(executor_descriptors):
-            # Assign stages to rank workers in a round-robin fashion
-            rank = self.all_ranks[stage_id % self.world_size]
-            logging.debug(f"[root] Sending stage_id = {stage_id} mod to worker")
-            self.remote_stage_executor_rrefs[descr.name] = (
-                stage_id,
-                self.rank_worker_rrefs[rank]
-                .remote()
-                .create_stage_executor(
-                    stage_id=stage_id,
-                    mod=descr.mod,
-                    mod_name=descr.name,
-                ),
-            )
-            if Pipe.is_stage_init_deferred():
-                logging.debug(
-                    f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
+        # for stage_id, descr in enumerate(executor_descriptors):
+        #     # Assign stages to rank workers in a round-robin fashion
+        #     rank = self.all_ranks[stage_id % self.world_size]
+        #     logging.debug(f"[root] Sending stage_id = {stage_id} mod to worker")
+        #     self.remote_stage_executor_rrefs[descr.name] = (
+        #         stage_id,
+        #         self.rank_worker_rrefs[rank]
+        #         .remote()
+        #         .create_stage_executor(
+        #             stage_id=stage_id,
+        #             mod=descr.mod,
+        #             mod_name=descr.name,
+        #         ),
+        #     )
+        #     if Pipe.is_stage_init_deferred():
+        #         logging.debug(
+        #             f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
+        #         )
+        #         while not self.remote_stage_executor_rrefs[descr.name][
+        #             1
+        #         ].confirmed_by_owner():
+        #             pass
+        #     self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
+        #         descr.name
+        #     ][1]
+        #     self.communication_overload += 1  # Increment communication count
+
+        stage_template = [
+            [0, 1],
+            [1, 0]
+        ]
+
+        if self.template == 0:
+            i_submod = 0
+            for i, descr in enumerate(executor_descriptors):
+                # Assign stages to rank workers in a round-robin fashion
+                stage_id = stage_template[self.template][i]
+                rank = self.all_ranks[stage_id % self.world_size]
+                logging.info(f"[root] Sending stage_id = {stage_id}, mod {i_submod} to worker")
+                self.remote_stage_executor_rrefs[descr.name] = (
+                    stage_id,
+                    self.rank_worker_rrefs[rank]
+                    .remote()
+                    .create_stage_executor(
+                        stage_id=stage_id,
+                        mod=descr.mod,
+                        mod_name=descr.name,
+                    ),
                 )
-                while not self.remote_stage_executor_rrefs[descr.name][
-                    1
-                ].confirmed_by_owner():
-                    pass
-            self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
-                descr.name
-            ][1]
-            self.communication_overload += 1  # Increment communication count
+                if Pipe.is_stage_init_deferred():
+                    logging.debug(
+                        f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
+                    )
+                    while not self.remote_stage_executor_rrefs[descr.name][
+                        1
+                    ].confirmed_by_owner():
+                        pass
+                self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
+                    descr.name
+                ][1]
+                self.communication_overload += 1  # Increment communication count
+
+                i_submod += 1
+        else:
+            i_submod = 0
+            for i, descr in enumerate(executor_descriptors):
+                # Assign stages to rank workers in a round-robin fashion
+                stage_id = stage_template[self.template][i]
+                rank = self.all_ranks[stage_id % self.world_size]
+                logging.info(f"[root] Sending stage_id = {stage_id}, mod {i_submod} to worker")
+                self.remote_stage_executor_rrefs[descr.name] = (
+                    stage_id,
+                    self.rank_worker_rrefs[rank]
+                    .remote()
+                    .create_stage_executor(
+                        stage_id=stage_id,
+                        mod=descr.mod,
+                        mod_name=descr.name,
+                    ),
+                )
+                if Pipe.is_stage_init_deferred():
+                    logging.debug(
+                        f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
+                    )
+                    while not self.remote_stage_executor_rrefs[descr.name][
+                        1
+                    ].confirmed_by_owner():
+                        pass
+                self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
+                    descr.name
+                ][1]
+                self.communication_overload += 1  # Increment communication count
+
+                i_submod += 1
 
         # Inform executors of their peers
         for stage_id, executor in self.stage_to_executor.items():

@@ -92,8 +92,8 @@ def main(node_rank, max_memory_mb):
 
 
 if __name__ == "__main__":
-    intra_cluster_loop()
-    '''
+    # intra_cluster_loop()
+
     if len(sys.argv) != 2:
         #print("Usage: python run_torchrun.py <node_rank> <max_memory_mb>")
         print("Usage: python run_torchrun.py <node_rank>")
@@ -101,4 +101,3 @@ if __name__ == "__main__":
     
     node_rank = int(sys.argv[1])
     main(node_rank, 6300)
-    '''
