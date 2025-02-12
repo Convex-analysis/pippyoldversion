@@ -1431,7 +1431,8 @@ class PipelineDriverBase(torch.nn.Module):
 
         # 0: [0, 1]
         # 1: [1, 0]
-        self.template = 0
+        self.template_id = None
+        self.template = None
 
         # Log GPU memory usage
         print("Before _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
@@ -1441,7 +1442,14 @@ class PipelineDriverBase(torch.nn.Module):
         # Log GPU memory usage after initialization
         print("After _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
-    def set_template(self, template: int):
+    def set_template_id(self, template_id: int):
+        if template_id >= len(self.template):
+            raise ValueError("template_id should be less than the length of the template")
+        self.template_id = template_id
+    
+    def set_template(self, template: List[List[int]]):
+        if len(template[0]) > self.world_size:
+            raise ValueError("template should have less than world_size stages")
         self.template = template
 
 
@@ -1562,73 +1570,39 @@ class PipelineDriverBase(torch.nn.Module):
         #     ][1]
         #     self.communication_overload += 1  # Increment communication count
 
-        stage_template = [
-            [0, 1],
-            [1, 0]
-        ]
-
-        if self.template == 0:
-            i_submod = 0
-            for i, descr in enumerate(executor_descriptors):
-                # Assign stages to rank workers in a round-robin fashion
-                stage_id = stage_template[self.template][i]
-                rank = self.all_ranks[stage_id % self.world_size]
-                logging.info(f"[root] Sending stage_id = {stage_id}, mod {i_submod} to worker")
-                self.remote_stage_executor_rrefs[descr.name] = (
-                    stage_id,
-                    self.rank_worker_rrefs[rank]
-                    .remote()
-                    .create_stage_executor(
-                        stage_id=stage_id,
-                        mod=descr.mod,
-                        mod_name=descr.name,
-                    ),
+        for i in range(len(executor_descriptors)):
+        # for i, descr in enumerate(executor_descriptors):                              # descr = submod0,submod1; submod0,submod1;
+            # Assign stages to rank workers in a round-robin fashion
+            assert self.template is not None and self.template_id is not None, "template and template_id must not be None"
+            descr = executor_descriptors[self.template[self.template_id][i]]
+            stage_id = self.template[self.template_id][i]                               # stage_id = 0,1;           1,0;
+            # rank = self.all_ranks[stage_id % self.world_size]
+            rank = self.all_ranks[i % self.world_size]                                  # rank = 0,1;               0,1;
+            logging.info(f"[root] Sending stage_id = {stage_id} mod to worker")
+            self.remote_stage_executor_rrefs[descr.name] = (
+                stage_id,
+                self.rank_worker_rrefs[rank]
+                .remote()
+                .create_stage_executor(
+                    stage_id=stage_id,
+                    mod=descr.mod,
+                    mod_name=descr.name,
+                ),
+            )
+            print_green(f"Current descr name: {descr.name}, stage_id: {stage_id}, rank: {rank}")
+            if Pipe.is_stage_init_deferred():
+                logging.debug(
+                    f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
                 )
-                if Pipe.is_stage_init_deferred():
-                    logging.debug(
-                        f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
-                    )
-                    while not self.remote_stage_executor_rrefs[descr.name][
-                        1
-                    ].confirmed_by_owner():
-                        pass
-                self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
-                    descr.name
-                ][1]
-                self.communication_overload += 1  # Increment communication count
+                while not self.remote_stage_executor_rrefs[descr.name][
+                    1
+                ].confirmed_by_owner():
+                    pass
+            self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
+                descr.name
+            ][1]
+            self.communication_overload += 1  # Increment communication count
 
-                i_submod += 1
-        else:
-            i_submod = 0
-            for i, descr in enumerate(executor_descriptors):
-                # Assign stages to rank workers in a round-robin fashion
-                stage_id = stage_template[self.template][i]
-                rank = self.all_ranks[stage_id % self.world_size]
-                logging.info(f"[root] Sending stage_id = {stage_id}, mod {i_submod} to worker")
-                self.remote_stage_executor_rrefs[descr.name] = (
-                    stage_id,
-                    self.rank_worker_rrefs[rank]
-                    .remote()
-                    .create_stage_executor(
-                        stage_id=stage_id,
-                        mod=descr.mod,
-                        mod_name=descr.name,
-                    ),
-                )
-                if Pipe.is_stage_init_deferred():
-                    logging.debug(
-                        f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
-                    )
-                    while not self.remote_stage_executor_rrefs[descr.name][
-                        1
-                    ].confirmed_by_owner():
-                        pass
-                self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
-                    descr.name
-                ][1]
-                self.communication_overload += 1  # Increment communication count
-
-                i_submod += 1
 
         # Inform executors of their peers
         for stage_id, executor in self.stage_to_executor.items():
