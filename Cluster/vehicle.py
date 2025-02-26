@@ -1,18 +1,32 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
+from Cluster.DTMC import DTMC
 
 class Vehicle:
-    def __init__(self, gpu_performance, memory, trajectory):
+    def __init__(self, gpu_performance, memory, trajectory, comm_radius, unit_distance, dtmc: DTMC, pattern_id: int):
         self.gpu_performance = gpu_performance
         self.memory = memory
         self.trajectory = trajectory
+        self.comm_radius = comm_radius
+        self.unit_distance = unit_distance
+        self.dtmc = dtmc
+        self.pattern_id = pattern_id
+        self.current_cell = 0
+        self.comm_range_cells = int(np.pi * (comm_radius ** 2) / (unit_distance ** 2))
+        self.arrival_time = np.random.uniform(0, 10)
+        self.departure_time = self.arrival_time + np.random.uniform(1, 5)
+        self.dwell_time = self.departure_time - self.arrival_time
 
     def get_specs(self):
         return {
             'gpu_performance': self.gpu_performance,
             'memory': self.memory,
-            'trajectory': self.trajectory
+            'trajectory': self.trajectory,
+            'comm_range_cells': self.comm_range_cells,
+            'arrival_time': self.arrival_time,
+            'departure_time': self.departure_time,
+            'dwell_time': self.dwell_time
         }
 
     def predict_dwell_time(self, historical_data):
@@ -29,22 +43,33 @@ class Vehicle:
         is_sufficient = dwl_i * cmp_i >= M_cmp * e_req and mem_i >= M_cap
         return is_sufficient, cmp_i, mem_i, dwl_i
 
+    def move_to_next_cell(self):
+        self.current_cell = self.dtmc.predict_next_cell(self.current_cell, self.pattern_id)
+
+    def get_neighbors(self):
+        return self.dtmc.get_neighbors(self.current_cell)
+
+    def get_vehicles_in_neighbor_cells(self, vehicles):
+        neighbors = self.get_neighbors()
+        neighbor_vehicles = [v for v in vehicles if v.current_cell in neighbors]
+        return neighbor_vehicles
+
     @staticmethod
-    def from_csv(file_path):
+    def from_csv(file_path, dtmc: DTMC, pattern_id: int):
         df = pd.read_csv(file_path)
         vehicles = []
         for _, row in df.iterrows():
-            vehicle = Vehicle(row['gpu_performance'], row['memory'], row['trajectory'])
+            vehicle = Vehicle(row['gpu_performance'], row['memory'], row['trajectory'], row['comm_radius'], row['unit_distance'], dtmc, pattern_id)
             vehicles.append(vehicle)
         return vehicles
 
     @staticmethod
-    def generate_random(num_vehicles, gpu_range, memory_range, trajectory_length):
+    def generate_random(num_vehicles, gpu_range, memory_range, trajectory_length, comm_radius, unit_distance, dtmc: DTMC, pattern_id: int):
         vehicles = []
         for _ in range(num_vehicles):
             gpu_performance = np.random.uniform(*gpu_range)
             memory = np.random.uniform(*memory_range)
             trajectory = np.random.rand(trajectory_length, 2)  # Assuming 2D trajectory
-            vehicle = Vehicle(gpu_performance, memory, trajectory)
+            vehicle = Vehicle(gpu_performance, memory, trajectory, comm_radius, unit_distance, dtmc, pattern_id)
             vehicles.append(vehicle)
         return vehicles
