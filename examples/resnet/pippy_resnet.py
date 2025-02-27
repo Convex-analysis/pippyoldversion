@@ -111,6 +111,7 @@ def run_master(_, args):
                                                                 _record_mem_dumps=bool(args.record_mem_dumps),
                                                                 checkpoint=bool(args.checkpoint))
         
+        template = None
         template = [
             [0, 1],
             [1, 0]
