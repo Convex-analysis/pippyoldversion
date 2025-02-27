@@ -630,6 +630,7 @@ PiPPy provides both off-the-shelf pipeline schedules as described in the researc
 <img src="https://i.imgur.com/ujCPZAU.png" alt="Interleaved 1F1B Schedule" width="800"/>
 (Diagram from Narayanan, 2021)
 
+
 # Future Work
 
 Future work on PiPPy includes:
