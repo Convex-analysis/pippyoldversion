@@ -5,6 +5,7 @@ import sys
 from functools import reduce
 import psutil
 import resource
+import logging
 
 def set_memory_limit(max_memory_mb):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -25,7 +26,7 @@ from pippy.PipelineDriver import PipelineDriverFillDrain, PipelineDriver1F1B, Pi
 from pippy.events import EventsContext
 from pippy.microbatch import sum_reducer, TensorChunkSpec
 from pippy.visualizer import events_to_json
-from resnet import ResNet50, ResNet34, ResNet101, ResNet152
+from resnet import ResNet50, ResNet34, ResNet101, ResNet152, ResNet18
 
 PROFILING_ENABLED = True
 CHECK_NUMERIC_EQUIVALENCE = True
@@ -83,14 +84,14 @@ def run_master(_, args):
 
         log_memory_usage("Before initializing model")
 
-        model = ResNet50()
+        model = ResNet18()
 
         log_memory_usage("After initializing model")
 
         annotate_split_points(model, {
-            #'layer': PipeSplitWrapper.SplitPoint.END,
-            'layer1': PipeSplitWrapper.SplitPoint.END,
-            #'layer2': PipeSplitWrapper.SplitPoint.END,
+            # 'layer': PipeSplitWrapper.SplitPoint.END,
+            # 'layer1': PipeSplitWrapper.SplitPoint.END,
+            'layer2': PipeSplitWrapper.SplitPoint.END,
             #'layer2.0': PipeSplitWrapper.SplitPoint.END,
             #'layer3': PipeSplitWrapper.SplitPoint.END,
         })
@@ -111,7 +112,6 @@ def run_master(_, args):
                                                                 _record_mem_dumps=bool(args.record_mem_dumps),
                                                                 checkpoint=bool(args.checkpoint))
         
-        template = None
         template = [
             [0, 1],
             [1, 0]
@@ -142,6 +142,7 @@ def run_master(_, args):
                 # Randomly select num_batches_to_process batches data
                 num_batches_to_process = 10  # Change this value to the desired number of batches
                 indices = torch.randperm(len(dataloader))[:num_batches_to_process]
+                USE_TQDM = False
                 for i, (x_batch, y_batch) in enumerate(tqdm(dataloader) if USE_TQDM else dataloader):
                     if i not in indices:
                         continue
@@ -213,7 +214,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_epochs', type=int, default=4)
     parser.add_argument('--batch_size', type=int, default=64)
 
-    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
+    parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
     parser.add_argument('--replicate', type=int, default=int(os.getenv("REPLICATE", '0')))
     parser.add_argument('--cuda', type=int, default=int(torch.cuda.is_available()))
     parser.add_argument('--visualize', type=int, default=0, choices=[0, 1])
@@ -221,9 +222,17 @@ if __name__ == "__main__":
     
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
     
-    parser.add_argument('--num_worker_threads', type=int, default=16)
+    # parser.add_argument('--num_worker_threads', type=int, default=16)
+    parser.add_argument('--num_worker_threads', type=int, default=512)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler()],
+        force=True
+    )
     
     # Set memory limit
     #set_memory_limit(args.max_memory_mb)

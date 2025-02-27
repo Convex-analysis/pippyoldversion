@@ -1570,6 +1570,19 @@ class PipelineDriverBase(torch.nn.Module):
         #     ][1]
         #     self.communication_overload += 1  # Increment communication count
 
+        def on_transfer_rpc_done(result):
+            end_time = time.time()
+
+            # 获取开始时间（假设它是全局变量，或者通过上下文传递）
+            # start_time = result['start_time']  # 你可以在发送 RPC 时将开始时间传递到回调中
+            
+            # 计算时间差
+            # duration = end_time - start_time
+            
+            # 输出时间差
+            print_blue(f"RPC completed in {end_time:.4f} seconds")
+
+
         for i in range(len(executor_descriptors)):
         # for i, descr in enumerate(executor_descriptors):                              # descr = submod0,submod1; submod0,submod1;
             # Assign stages to rank workers in a round-robin fashion
@@ -1579,15 +1592,23 @@ class PipelineDriverBase(torch.nn.Module):
             # rank = self.all_ranks[stage_id % self.world_size]
             rank = self.all_ranks[i % self.world_size]                                  # rank = 0,1;               0,1;
             logging.info(f"[root] Sending stage_id = {stage_id} mod to worker")
+            start_time = time.time()
+            fut = self.rank_worker_rrefs[rank].remote().create_stage_executor(
+                stage_id=stage_id,
+                mod=descr.mod,
+                mod_name=descr.name,
+            ).then(on_transfer_rpc_done)
+
             self.remote_stage_executor_rrefs[descr.name] = (
                 stage_id,
-                self.rank_worker_rrefs[rank]
-                .remote()
-                .create_stage_executor(
-                    stage_id=stage_id,
-                    mod=descr.mod,
-                    mod_name=descr.name,
-                ),
+                # self.rank_worker_rrefs[rank]
+                # .remote()
+                # .create_stage_executor(
+                #     stage_id=stage_id,
+                #     mod=descr.mod,
+                #     mod_name=descr.name,
+                # ).then(on_transfer_rpc_done),
+                fut,
             )
             print_green(f"Current descr name: {descr.name}, stage_id: {stage_id}, rank: {rank}")
             if Pipe.is_stage_init_deferred():
