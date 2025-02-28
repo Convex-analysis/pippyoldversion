@@ -7,6 +7,8 @@ import psutil
 import resource
 import logging
 import time
+import sys
+sys.path.insert(0, "/home/plm/cyhWorkspace/pippyoldversion")
 
 def set_memory_limit(max_memory_mb):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -62,8 +64,8 @@ def run_master(_, args):
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
-        # train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-        # valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
+        train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+        valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
 
         # train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
         # valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
@@ -124,8 +126,8 @@ def run_master(_, args):
                                                                 checkpoint=bool(args.checkpoint))
         
         template = [
-            [0, 1],
-            [1, 0]
+            [1, 2],
+            [2, 1]
         ]
         pipe_driver.set_template(template)
         pipe_driver.set_template_id(0)

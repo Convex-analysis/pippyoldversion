@@ -1435,8 +1435,11 @@ class PipelineDriverBase(torch.nn.Module):
 
         # 0: [0, 1]
         # 1: [1, 0]
-        self.template_id = None
-        self.template = None
+        self.template_id = 0
+        self.template = [
+            [1, 2],
+            [2, 1]
+        ]
 
         # Log GPU memory usage
         print("Before _init_remote_executors :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
@@ -1576,27 +1579,22 @@ class PipelineDriverBase(torch.nn.Module):
         #     ][1]
         #     self.communication_overload += 1  # Increment communication count
 
-        def on_transfer_rpc_done(result):
-            end_time = time.time()
-
-            # 获取开始时间（假设它是全局变量，或者通过上下文传递）
-            # start_time = result['start_time']  # 你可以在发送 RPC 时将开始时间传递到回调中
-            
-            # 计算时间差
-            # duration = end_time - start_time
-            
-            # 输出时间差
-            print_blue(f"RPC completed in {end_time:.4f} seconds")
-
-
+        # i: 0 - 1
         for i in range(len(executor_descriptors)):
         # for i, descr in enumerate(executor_descriptors):                              # descr = submod0,submod1; submod0,submod1;
             # Assign stages to rank workers in a round-robin fashion
             assert self.template is not None and self.template_id is not None, "template and template_id must not be None"
+            print(len(executor_descriptors)) # 2
+            print(self.template)  # [[1, 2], [2, 1]]
+            print(self.template_id) # 0
+            print(i) # 0
+            import builtins
+            builtins.input("wait")
+
             descr = executor_descriptors[self.template[self.template_id][i]]
             stage_id = self.template[self.template_id][i]                               # stage_id = 0,1;           1,0;
             # rank = self.all_ranks[stage_id % self.world_size]
-            rank = self.all_ranks[i % self.world_size]                                  # rank = 0,1;               0,1;
+            rank = self.all_ranks[i + 1 % self.world_size]                                  # rank = 0,1;               0,1;
             logging.info(f"[root] Sending stage_id = {stage_id} mod to worker")
 
             self.remote_stage_executor_rrefs[descr.name] = (
@@ -1607,7 +1605,7 @@ class PipelineDriverBase(torch.nn.Module):
                     stage_id=stage_id,
                     mod=descr.mod,
                     mod_name=descr.name,
-                ).then(on_transfer_rpc_done),
+                ),
             )
             print_green(f"Current descr name: {descr.name}, stage_id: {stage_id}, rank: {rank}")
             if Pipe.is_stage_init_deferred():
