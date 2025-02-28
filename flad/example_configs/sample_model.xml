@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<model name="BEVFusionModel">
+    <components>
+        <component name="RGB_Backbone" flops_per_sample="5e9" capacity="2e9" />
+        <component name="Lidar_Backbone" flops_per_sample="8e9" capacity="3e9" />
+        <component name="Encoder" flops_per_sample="3e9" capacity="1.5e9" />
+        <component name="Decoder" flops_per_sample="4e9" capacity="2e9" />
+        <component name="OutputLayer" flops_per_sample="1e9" capacity="0.5e9" />
+    </components>
+    <partitions>
+        <partition name="RGB_Only" communication_volume="0.5e9">
+            <component_ref name="RGB_Backbone" />
+        </partition>
+        <partition name="Lidar_Only" communication_volume="0.8e9">
+            <component_ref name="Lidar_Backbone" />
+        </partition>
+        <partition name="Encoder_Part" communication_volume="0.7e9">
+            <component_ref name="Encoder" />
+        </partition>
+        <partition name="Decoder_Output" communication_volume="1.2e9">
+            <component_ref name="Decoder" />
+            <component_ref name="OutputLayer" />
+        </partition>
+    </partitions>
+</model>
