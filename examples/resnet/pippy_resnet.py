@@ -62,8 +62,18 @@ def run_master(_, args):
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
-        train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-        valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
+        # train_data = datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+        # valid_data = datasets.CIFAR10('./data', train=False, transform=transform)
+
+        # train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
+        # valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
+
+        # 只选择100个样本
+        train_indices = torch.randperm(len(train_data))[:100]
+        valid_indices = torch.randperm(len(valid_data))[:100]
+        
+        train_data = torch.utils.data.Subset(train_data, train_indices)
+        valid_data = torch.utils.data.Subset(valid_data, valid_indices)
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_data, num_replicas=chunks, rank=args.rank)
         valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_data, num_replicas=chunks, rank=args.rank)
@@ -141,12 +151,12 @@ def run_master(_, args):
                 epoch_correct = 0
                 epoch_all = 0
                 # Randomly select num_batches_to_process batches data
-                num_batches_to_process = 10  # Change this value to the desired number of batches
-                indices = torch.randperm(len(dataloader))[:num_batches_to_process]
+                # num_batches_to_process = 10  # Change this value to the desired number of batches
+                # indices = torch.randperm(len(dataloader))[:num_batches_to_process]
                 USE_TQDM = False
                 for i, (x_batch, y_batch) in enumerate(tqdm(dataloader) if USE_TQDM else dataloader):
-                    if i not in indices:
-                        continue
+                    # if i not in indices:
+                    #     continue
                     x_batch = x_batch.to(args.device)
                     y_batch = y_batch.to(args.device)
                     if k == "train":
@@ -173,8 +183,6 @@ def run_master(_, args):
                     if args.visualize:
                         batches_events_contexts.append(pipe_driver.retrieve_events())
                     log_memory_usage(f"After processing batch {i} in {k} loader")
-
-                    break
                 print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
             log_memory_usage(f"End of epoch {epoch + 1}")
 
@@ -215,7 +223,7 @@ if __name__ == "__main__":
     parser.add_argument('--master_addr', type=str, default=os.getenv('MASTER_ADDR', 'localhost'))
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
-    parser.add_argument('--max_epochs', type=int, default=80)
+    parser.add_argument('--max_epochs', type=int, default=10)
     parser.add_argument('--batch_size', type=int, default=64)
 
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())
