@@ -52,8 +52,8 @@ def run_master(_, args):
     print("Using device:", args.device)
     if args.rank == 0:
         number_of_workers = args.world_size
-        #all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
-        all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
+        all_worker_ranks = list(range(1, 1 + number_of_workers))  # exclude master rank = 0
+        # all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
         chunks = len(all_worker_ranks)
         batch_size = args.batch_size * chunks
 
@@ -85,7 +85,7 @@ def run_master(_, args):
 
         log_memory_usage("Before initializing model")
 
-        model = ResNet18()
+        model = ResNet50()
 
         log_memory_usage("After initializing model")
 
