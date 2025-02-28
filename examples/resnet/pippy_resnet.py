@@ -6,6 +6,7 @@ from functools import reduce
 import psutil
 import resource
 import logging
+import time
 
 def set_memory_limit(max_memory_mb):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -178,6 +179,7 @@ def run_master(_, args):
             log_memory_usage(f"End of epoch {epoch + 1}")
 
             if True:
+                start_time = time.time()
                 print_red(f"Switching template...")
                 if pipe_driver.template_id == 1:
                     pipe_driver.set_template_id(0)
@@ -186,6 +188,8 @@ def run_master(_, args):
                 
                 pipe_driver._init_remote_executors()
                 print_red(f"Switch template complete!")
+                end_time = time.time()
+                print_red(f"Time taken to switch template: {end_time - start_time} seconds")
 
         if args.visualize:
             all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
@@ -211,7 +215,7 @@ if __name__ == "__main__":
     parser.add_argument('--master_addr', type=str, default=os.getenv('MASTER_ADDR', 'localhost'))
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
-    parser.add_argument('--max_epochs', type=int, default=4)
+    parser.add_argument('--max_epochs', type=int, default=80)
     parser.add_argument('--batch_size', type=int, default=64)
 
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[1], choices=schedules.keys())

@@ -276,6 +276,8 @@ class RankWorker(EventRecorder):
         print("after initialization :{}MB".format(torch.cuda.memory_allocated(0)/1024/1024))
 
     def create_stage_executor(self, stage_id, mod, mod_name):
+        print_red(f"-------------Creating stage executor for stage {stage_id}")
+        logging.info(f"-------------[{self.rank}] Creating stage executor for stage {stage_id}")
         if stage_id in self.stage_executors:
             raise AssertionError(
                 f"Rank {self.rank} already has stage {stage_id}"
@@ -303,6 +305,8 @@ class RankWorker(EventRecorder):
             rank_worker=self,
             _record_mem_dumps=self._record_mem_dumps,
         )
+        logging.info(f"-------------Created stage executor for stage {stage_id}")
+        print_red(f"-------------Created stage executor for stage {stage_id}")
         return self.stage_executors[stage_id]
 
     def enqueue_ready_runlist(self, unique_key, work_item):
@@ -1446,11 +1450,13 @@ class PipelineDriverBase(torch.nn.Module):
         if template_id >= len(self.template):
             raise ValueError("template_id should be less than the length of the template")
         self.template_id = template_id
+        self.communication_overload = 0
     
     def set_template(self, template: List[List[int]]):
         if len(template[0]) > self.world_size:
             raise ValueError("template should have less than world_size stages")
         self.template = template
+        self.communication_overload = 0
 
 
     def _init_remote_executors(self):
@@ -1592,23 +1598,16 @@ class PipelineDriverBase(torch.nn.Module):
             # rank = self.all_ranks[stage_id % self.world_size]
             rank = self.all_ranks[i % self.world_size]                                  # rank = 0,1;               0,1;
             logging.info(f"[root] Sending stage_id = {stage_id} mod to worker")
-            start_time = time.time()
-            fut = self.rank_worker_rrefs[rank].remote().create_stage_executor(
-                stage_id=stage_id,
-                mod=descr.mod,
-                mod_name=descr.name,
-            ).then(on_transfer_rpc_done)
 
             self.remote_stage_executor_rrefs[descr.name] = (
                 stage_id,
-                # self.rank_worker_rrefs[rank]
-                # .remote()
-                # .create_stage_executor(
-                #     stage_id=stage_id,
-                #     mod=descr.mod,
-                #     mod_name=descr.name,
-                # ).then(on_transfer_rpc_done),
-                fut,
+                self.rank_worker_rrefs[rank]
+                .remote()
+                .create_stage_executor(
+                    stage_id=stage_id,
+                    mod=descr.mod,
+                    mod_name=descr.name,
+                ).then(on_transfer_rpc_done),
             )
             print_green(f"Current descr name: {descr.name}, stage_id: {stage_id}, rank: {rank}")
             if Pipe.is_stage_init_deferred():
