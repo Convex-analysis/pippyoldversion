@@ -85,7 +85,7 @@ def run_master(_, args):
 
         log_memory_usage("Before initializing model")
 
-        model = ResNet50()
+        model = ResNet18()
 
         log_memory_usage("After initializing model")
 
