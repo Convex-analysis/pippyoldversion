@@ -1435,10 +1435,12 @@ class PipelineDriverBase(torch.nn.Module):
 
         # 0: [0, 1]
         # 1: [1, 0]
+        # Template id refers to the index of the template array.
         self.template_id = 0
+        # template element refers to stage_id.
         self.template = [
-            [1, 2],
-            [2, 1]
+            [0, 1],
+            [1, 0]
         ]
 
         # Log GPU memory usage
@@ -1584,17 +1586,13 @@ class PipelineDriverBase(torch.nn.Module):
         # for i, descr in enumerate(executor_descriptors):                              # descr = submod0,submod1; submod0,submod1;
             # Assign stages to rank workers in a round-robin fashion
             assert self.template is not None and self.template_id is not None, "template and template_id must not be None"
-            print(len(executor_descriptors)) # 2
-            print(self.template)  # [[1, 2], [2, 1]]
-            print(self.template_id) # 0
-            print(i) # 0
-            import builtins
-            builtins.input("wait")
 
             descr = executor_descriptors[self.template[self.template_id][i]]
             stage_id = self.template[self.template_id][i]                               # stage_id = 0,1;           1,0;
             # rank = self.all_ranks[stage_id % self.world_size]
-            rank = self.all_ranks[i + 1 % self.world_size]                                  # rank = 0,1;               0,1;
+            # rank = self.all_ranks[i % self.world_size]
+            # all_ranks = [1, 2]
+            rank = self.all_ranks[i % self.world_size]                              # rank = 1,2;               2,1; for master independent
             logging.info(f"[root] Sending stage_id = {stage_id} mod to worker")
 
             self.remote_stage_executor_rrefs[descr.name] = (

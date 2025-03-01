@@ -67,7 +67,7 @@ class EventsContext:
     def reset(self):
         self.__init__()  # type: ignore[misc]
 
-    def save_to_file(self, file_path: str = '/home/cailab/xtaWorkspace/pippyoldversion/examples/resnet/log.pkl'):
+    def save_to_file(self, file_path: str = '/home/plm/cyhWorkspace/pippyoldversion/examples/resnet/log.pkl'):
         with open(file_path, 'wb') as file:
             pickle.dump({
                 'events': self.events,
