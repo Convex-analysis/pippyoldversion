@@ -1,0 +1,62 @@
+<cluster name="ClusterName">
+    <vehicles>
+        <vehicle id="v1" memory="4e9" comp_capability="6e9" comm_capability="3e9" />
+        <vehicle id="v2" memory="5e9" comp_capability="7e9" comm_capability="1.2e9" />
+        <vehicle id="v3" memory="6.5e9" comp_capability="6e9" comm_capability="1.3e9" />
+        <vehicle id="v4" memory="4.5e9" comp_capability="7e9" comm_capability="1.5e9" />
+        <vehicle id="v5" memory="5e9" comp_capability="6.7e9" comm_capability="1.3e9" />
+        <vehicle id="v6" memory="5e9" comp_capability="6.7e9" comm_capability="1.3e9" />
+        <vehicle id="v7" memory="5e9" comp_capability="6.7e9" comm_capability="1.3e9" />
+        
+    </vehicles>
+    <dependencies>
+        <dependency source="v1" target="v5" />
+        <dependency source="v1" target="v2" />
+        <dependency source="v1" target="v3" />
+        <dependency source="v1" target="v4" />
+        <dependency source="v1" target="v6" />
+        <dependency source="v1" target="v7" />
+
+        <dependency source="v2" target="v1" />
+        <dependency source="v2" target="v3" />
+        <dependency source="v2" target="v4" />
+        <dependency source="v2" target="v5" />
+        <dependency source="v2" target="v6" />
+        <dependency source="v2" target="v7" />
+
+        <dependency source="v3" target="v1" />
+        <dependency source="v3" target="v2" />
+        <dependency source="v3" target="v4" />
+        <dependency source="v3" target="v5" />
+        <dependency source="v3" target="v6" />
+        <dependency source="v3" target="v7" />
+
+        <dependency source="v4" target="v3" />
+        <dependency source="v4" target="v5" />
+        <dependency source="v4" target="v1" />
+        <dependency source="v4" target="v2" />
+        <dependency source="v4" target="v6" />
+        <dependency source="v4" target="v7" />
+
+        <dependency source="v5" target="v3" />
+        <dependency source="v5" target="v1" />
+        <dependency source="v5" target="v2" />
+        <dependency source="v5" target="v4" />
+        <dependency source="v5" target="v6" />
+        <dependency source="v5" target="v7" />
+
+        <dependency source="v6" target="v3" />
+        <dependency source="v6" target="v1" />
+        <dependency source="v6" target="v2" />
+        <dependency source="v6" target="v4" />
+        <dependency source="v6" target="v5" />
+        <dependency source="v6" target="v7" />
+
+        <dependency source="v7" target="v3" />
+        <dependency source="v7" target="v1" />
+        <dependency source="v7" target="v2" />
+        <dependency source="v7" target="v4" />
+        <dependency source="v7" target="v5" />
+        <dependency source="v7" target="v6" />
+    </dependencies>
+</cluster>
