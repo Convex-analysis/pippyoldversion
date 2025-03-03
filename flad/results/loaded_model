@@ -1,0 +1,94 @@
+// Model: VisionEncoder_Large
+digraph {
+	dpi=300 rankdir=TB size="11,11"
+	subgraph cluster_partitions {
+		color=lightgrey label=Partitions style=filled
+		p0 [label="ShallowFeatureExtraction
+FLOPs: 8.40 G
+Capacity: 2.60 GB
+Comm: 0.80 GB" fillcolor=lightblue shape=box style=filled]
+		p1 [label="RGB_DeepProcessing
+FLOPs: 6.00 G
+Capacity: 1.80 GB
+Comm: 0.60 GB" fillcolor=lightblue shape=box style=filled]
+		p2 [label="Lidar_DeepProcessing
+FLOPs: 7.20 G
+Capacity: 2.20 GB
+Comm: 0.60 GB" fillcolor=lightblue shape=box style=filled]
+		p3 [label="EncoderFusion_Early
+FLOPs: 2.20 G
+Capacity: 0.60 GB
+Comm: 0.50 GB" fillcolor=lightblue shape=box style=filled]
+		p4 [label="EncoderFusion_Middle
+FLOPs: 2.20 G
+Capacity: 0.60 GB
+Comm: 0.40 GB" fillcolor=lightblue shape=box style=filled]
+		p5 [label="EncoderFusion_Late
+FLOPs: 1.70 G
+Capacity: 0.60 GB
+Comm: 0.40 GB" fillcolor=lightblue shape=box style=filled]
+		p6 [label="DecoderProcessing_Early
+FLOPs: 2.20 G
+Capacity: 0.70 GB
+Comm: 0.50 GB" fillcolor=lightblue shape=box style=filled]
+		p7 [label="DecoderProcessing_Late
+FLOPs: 4.50 G
+Capacity: 1.40 GB
+Comm: 0.40 GB" fillcolor=lightblue shape=box style=filled]
+		p8 [label="PredictionOutputs
+FLOPs: 1.20 G
+Capacity: 0.60 GB
+Comm: 0.25 GB" fillcolor=lightblue shape=box style=filled]
+	}
+	subgraph cluster_components {
+		color=lightgrey label=Components style=filled
+		c0 [label="RGB_Backbone_Shallow
+FLOPs: 3.60 G
+Capacity: 1.20 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c1 [label="RGB_Backbone_Deep
+FLOPs: 6.00 G
+Capacity: 1.80 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c2 [label="Lidar_Backbone_Shallow
+FLOPs: 4.80 G
+Capacity: 1.40 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c3 [label="Lidar_Backbone_Deep
+FLOPs: 7.20 G
+Capacity: 2.20 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c4 [label="TransformerEncoder_Layer1
+FLOPs: 2.20 G
+Capacity: 0.60 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c5 [label="TransformerEncoder_Layer2
+FLOPs: 2.20 G
+Capacity: 0.60 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c6 [label="TransformerEncoder_Layer3
+FLOPs: 1.70 G
+Capacity: 0.60 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c7 [label="TransformerDecoder_Layer1
+FLOPs: 2.20 G
+Capacity: 0.70 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c8 [label="TransformerDecoder_Layer2
+FLOPs: 2.20 G
+Capacity: 0.70 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c9 [label="TransformerDecoder_Layer3
+FLOPs: 2.30 G
+Capacity: 0.70 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c10 [label="PredictionHeads_Traffic
+FLOPs: 0.60 G
+Capacity: 0.30 GB" fillcolor=lightyellow shape=ellipse style=filled]
+		c11 [label="PredictionHeads_Waypoints
+FLOPs: 0.60 G
+Capacity: 0.30 GB" fillcolor=lightyellow shape=ellipse style=filled]
+	}
+	p0 -> c0 [style=dashed]
+	p0 -> c2 [style=dashed]
+	p1 -> c1 [style=dashed]
+	p2 -> c3 [style=dashed]
+	p3 -> c4 [style=dashed]
+	p4 -> c5 [style=dashed]
+	p5 -> c6 [style=dashed]
+	p6 -> c7 [style=dashed]
+	p7 -> c8 [style=dashed]
+	p7 -> c9 [style=dashed]
+	p8 -> c10 [style=dashed]
+	p8 -> c11 [style=dashed]
+}

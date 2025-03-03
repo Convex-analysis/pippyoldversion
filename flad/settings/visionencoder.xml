@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<model name="VisionEncoder">
+    <components>
+        <!-- Split RGB backbone into shallow and deep layers -->
+        <component name="RGB_Backbone_Shallow" flops_per_sample="3e9" capacity="1e9" />
+        <component name="RGB_Backbone_Deep" flops_per_sample="5e9" capacity="1.5e9" />
+        
+        <!-- Split Lidar backbone into shallow and deep layers -->
+        <component name="Lidar_Backbone_Shallow" flops_per_sample="4e9" capacity="1.2e9" />
+        <component name="Lidar_Backbone_Deep" flops_per_sample="6e9" capacity="1.8e9" />
+        
+        <!-- Split the encoder into multiple components -->
+        <component name="TransformerEncoder_Layer1" flops_per_sample="1.8e9" capacity="0.5e9" />
+        <component name="TransformerEncoder_Layer2" flops_per_sample="1.8e9" capacity="0.5e9" />
+        <component name="TransformerEncoder_Layer3" flops_per_sample="1.4e9" capacity="0.5e9" />
+        
+        <!-- Split the decoder into multiple components -->
+        <component name="TransformerDecoder_Layer1" flops_per_sample="1.8e9" capacity="0.6e9" />
+        <component name="TransformerDecoder_Layer2" flops_per_sample="1.8e9" capacity="0.6e9" />
+        <component name="TransformerDecoder_Layer3" flops_per_sample="1.9e9" capacity="0.6e9" />
+        
+        <!-- Prediction heads -->
+        <component name="PredictionHeads_Traffic" flops_per_sample="0.5e9" capacity="0.25e9" />
+        <component name="PredictionHeads_Waypoints" flops_per_sample="0.5e9" capacity="0.25e9" />
+    </components>
+    <partitions>
+        <!-- Only the shallow layers of RGB and Lidar are grouped together locally -->
+        <partition name="ShallowFeatureExtraction" communication_volume="0.6e9">
+            <component_ref name="RGB_Backbone_Shallow" />
+            <component_ref name="Lidar_Backbone_Shallow" />
+        </partition>
+        
+        <!-- Deep layers are separate -->
+        <partition name="RGB_DeepProcessing" communication_volume="0.5e9">
+            <component_ref name="RGB_Backbone_Deep" />
+        </partition>
+        
+        <partition name="Lidar_DeepProcessing" communication_volume="0.5e9">
+            <component_ref name="Lidar_Backbone_Deep" />
+        </partition>
+        
+        <!-- Encoder layers are split into partitions -->
+        <partition name="EncoderFusion_Early" communication_volume="0.4e9">
+            <component_ref name="TransformerEncoder_Layer1" />
+        </partition>
+        
+        <partition name="EncoderFusion_Middle" communication_volume="0.3e9">
+            <component_ref name="TransformerEncoder_Layer2" />
+        </partition>
+        
+        <partition name="EncoderFusion_Late" communication_volume="0.3e9">
+            <component_ref name="TransformerEncoder_Layer3" />
+        </partition>
+        
+        <!-- Decoder layers are split into partitions -->
+        <partition name="DecoderProcessing_Early" communication_volume="0.4e9">
+            <component_ref name="TransformerDecoder_Layer1" />
+        </partition>
+        
+        <partition name="DecoderProcessing_Late" communication_volume="0.3e9">
+            <component_ref name="TransformerDecoder_Layer2" />
+            <component_ref name="TransformerDecoder_Layer3" />
+        </partition>
+        
+        <!-- Prediction heads as a separate partition -->
+        <partition name="PredictionOutputs" communication_volume="0.2e9">
+            <component_ref name="PredictionHeads_Traffic" />
+            <component_ref name="PredictionHeads_Waypoints" />
+        </partition>
+    </partitions>
+</model>

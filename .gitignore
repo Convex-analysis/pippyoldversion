@@ -17,3 +17,6 @@ dist
 *.jpeg
 *.pt
 *.pth
+*.txt
+*.png
+*.csv

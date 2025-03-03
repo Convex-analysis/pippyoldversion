@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<model name="VisionEncoder_Medium">
+    <components>
+        <!-- Medium version - approx 80% of original capacity -->
+        <component name="RGB_Backbone_Shallow" flops_per_sample="2.4e9" capacity="0.8e9" />
+        <component name="RGB_Backbone_Deep" flops_per_sample="4.0e9" capacity="1.2e9" />
+        
+        <component name="Lidar_Backbone_Shallow" flops_per_sample="3.2e9" capacity="1.0e9" />
+        <component name="Lidar_Backbone_Deep" flops_per_sample="4.8e9" capacity="1.4e9" />
+        
+        <component name="TransformerEncoder_Layer1" flops_per_sample="1.4e9" capacity="0.4e9" />
+        <component name="TransformerEncoder_Layer2" flops_per_sample="1.4e9" capacity="0.4e9" />
+        <component name="TransformerEncoder_Layer3" flops_per_sample="1.1e9" capacity="0.4e9" />
+        
+        <component name="TransformerDecoder_Layer1" flops_per_sample="1.4e9" capacity="0.5e9" />
+        <component name="TransformerDecoder_Layer2" flops_per_sample="1.4e9" capacity="0.5e9" />
+        <component name="TransformerDecoder_Layer3" flops_per_sample="1.5e9" capacity="0.5e9" />
+        
+        <component name="PredictionHeads_Traffic" flops_per_sample="0.4e9" capacity="0.2e9" />
+        <component name="PredictionHeads_Waypoints" flops_per_sample="0.4e9" capacity="0.2e9" />
+    </components>
+    <partitions>
+        <partition name="ShallowFeatureExtraction" communication_volume="0.5e9">
+            <component_ref name="RGB_Backbone_Shallow" />
+            <component_ref name="Lidar_Backbone_Shallow" />
+        </partition>
+        
+        <partition name="RGB_DeepProcessing" communication_volume="0.4e9">
+            <component_ref name="RGB_Backbone_Deep" />
+        </partition>
+        
+        <partition name="Lidar_DeepProcessing" communication_volume="0.4e9">
+            <component_ref name="Lidar_Backbone_Deep" />
+        </partition>
+        
+        <partition name="EncoderFusion_Early" communication_volume="0.35e9">
+            <component_ref name="TransformerEncoder_Layer1" />
+        </partition>
+        
+        <partition name="EncoderFusion_Middle" communication_volume="0.25e9">
+            <component_ref name="TransformerEncoder_Layer2" />
+        </partition>
+        
+        <partition name="EncoderFusion_Late" communication_volume="0.25e9">
+            <component_ref name="TransformerEncoder_Layer3" />
+        </partition>
+        
+        <partition name="DecoderProcessing_Early" communication_volume="0.35e9">
+            <component_ref name="TransformerDecoder_Layer1" />
+        </partition>
+        
+        <partition name="DecoderProcessing_Late" communication_volume="0.25e9">
+            <component_ref name="TransformerDecoder_Layer2" />
+            <component_ref name="TransformerDecoder_Layer3" />
+        </partition>
+        
+        <partition name="PredictionOutputs" communication_volume="0.15e9">
+            <component_ref name="PredictionHeads_Traffic" />
+            <component_ref name="PredictionHeads_Waypoints" />
+        </partition>
+    </partitions>
+</model>

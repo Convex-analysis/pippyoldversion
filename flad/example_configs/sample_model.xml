@@ -3,8 +3,8 @@
     <components>
         <component name="RGB_Backbone" flops_per_sample="5e9" capacity="2e9" />
         <component name="Lidar_Backbone" flops_per_sample="8e9" capacity="3e9" />
-        <component name="Encoder" flops_per_sample="3e9" capacity="1.5e9" />
-        <component name="Decoder" flops_per_sample="4e9" capacity="2e9" />
+        <component name="Encoder" flops_per_sample="5e9" capacity="1.5e9" />
+        <component name="Decoder" flops_per_sample="6e9" capacity="2e9" />
         <component name="OutputLayer" flops_per_sample="1e9" capacity="0.5e9" />
     </components>
     <partitions>
