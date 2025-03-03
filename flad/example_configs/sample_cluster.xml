@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<cluster name="SampleCluster">
+    <vehicles>
+        <vehicle id="v1" memory="4e9" comp_capability="8e9" comm_capability="1e9" />
+        <vehicle id="v2" memory="5e9" comp_capability="12e9" comm_capability="1.2e9" />
+        <vehicle id="v3" memory="3e9" comp_capability="6e9" comm_capability="0.8e9" />
+        <vehicle id="v4" memory="6e9" comp_capability="10e9" comm_capability="1.5e9" />
+        <vehicle id="v5" memory="7e9" comp_capability="15e9" comm_capability="1.8e9" />
+    </vehicles>
+    <dependencies>
+        <dependency source="v1" target="v3" />
+        <dependency source="v2" target="v4" />
+        <dependency source="v3" target="v5" />
+        <dependency source="v4" target="v5" />
+    </dependencies>
+</cluster>

@@ -11,3 +11,12 @@ dist
 **/*.out
 **/.DS_STORE
 ._*
+**/*.pyc
+*.png
+*.jpg
+*.jpeg
+*.pt
+*.pth
+*.txt
+*.png
+*.csv

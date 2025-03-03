@@ -15,6 +15,8 @@ FLAD (Federated Learning for Autonomous Driving) addresses the challenge of dist
 - `dqn_model.py`: Deep Q-Network implementation for reinforcement learning-based optimization
 - `visualizer.py`: Visualization tools for cluster DAGs and pipeline schedules
 - `swift_example.py`: Example usage of the SWIFT optimization algorithm
+- `cluster_util.py`: Utilities for cluster configuration, XML import/export, and visualization
+- `model_util.py`: Utilities for model configuration, XML import/export, and visualization
 
 ## Optimization Algorithms
 
@@ -53,6 +55,42 @@ t_pipeline = ∑ t_compute(v) + ∑ t_comm(v)
 2. DAG precedence constraints: Execution order must respect dependencies between vehicles
 3. Complete assignment: All model partitions must be assigned to exactly one vehicle
 
+## XML Configuration
+
+FLAD supports defining both cluster and model configurations through XML files, enabling easy reuse, sharing, and modification of configurations.
+
+### Cluster XML Format
+```xml
+<cluster name="ClusterName">
+    <vehicles>
+        <vehicle id="v1" memory="4e9" comp_capability="8e9" comm_capability="1e9" />
+        <vehicle id="v2" memory="5e9" comp_capability="12e9" comm_capability="1.2e9" />
+    </vehicles>
+    <dependencies>
+        <dependency source="v1" target="v3" />
+        <dependency source="v2" target="v4" />
+    </dependencies>
+</cluster>
+```
+
+### Model XML Format
+```xml
+<model name="ModelName">
+    <components>
+        <component name="RGB_Backbone" flops_per_sample="5e9" capacity="2e9" />
+        <component name="Lidar_Backbone" flops_per_sample="8e9" capacity="3e9" />
+    </components>
+    <partitions>
+        <partition name="RGB_Only" communication_volume="0.5e9">
+            <component_ref name="RGB_Backbone" />
+        </partition>
+        <partition name="Lidar_Only" communication_volume="0.8e9">
+            <component_ref name="Lidar_Backbone" />
+        </partition>
+    </partitions>
+</model>
+```
+
 ## Usage
 
 ### Basic Usage
@@ -82,11 +120,15 @@ optimizer = PipelineOptimizer(cluster, model)
 path, strategy, execution_time = optimizer.optimize()
 ```
 
-### SWIFT Optimization
+### SWIFT Optimization with XML Configuration
 ```python
 from flad.swift_optimizer import SWIFTOptimizer
+from flad.cluster_util import load_cluster_from_xml
+from flad.model_util import load_model_from_xml
 
-# Create model and cluster (as above)
+# Load model and cluster from XML files
+cluster = load_cluster_from_xml("configs/my_cluster.xml")
+model = load_model_from_xml("configs/my_model.xml")
 
 # Create SWIFT optimizer
 swift_optimizer = SWIFTOptimizer(
@@ -108,22 +150,51 @@ pipelines = swift_optimizer.optimize()
 best_path, best_strategy, best_time = swift_optimizer.get_best_pipeline()
 ```
 
+### Command-line Interface
+FLAD includes a command-line interface for running the SWIFT optimization workflow:
+
+```bash
+python swift_example.py --cluster=configs/my_cluster.xml --model=configs/my_model.xml --episodes=100 --output=results
+```
+
+Options:
+- `--cluster`, `-c`: Path to cluster XML configuration file
+- `--model`, `-m`: Path to model XML configuration file
+- `--output`, `-o`: Output directory for results (default: "output")
+- `--episodes`, `-e`: Number of training episodes (default: 50)
+- `--no-baseline`: Skip comparison with baseline optimizer
+- `--cpu`: Force CPU usage even if CUDA is available
+
 ## Visualization
 
 The package provides visualization capabilities through the `visualizer` module:
 
 ```python
 from flad.visualizer import plot_cluster_dag, plot_pipeline_schedule
+from flad.cluster_util import generate_cluster_dag
+from flad.model_util import model_to_graphviz
 
 # Visualize cluster dependencies
-plot_cluster_dag(cluster)
+generate_cluster_dag(cluster, output_path="cluster_dag.png", show=True)
+
+# Visualize model structure
+model_to_graphviz(model, output_path="model_graph", show_components=True)
 
 # Visualize execution schedule of a pipeline
 plot_pipeline_schedule(path, partition_strategy, execution_times)
 
 # Or use SWIFT's built-in visualizer
-swift_optimizer.visualize_pipelines()
+swift_optimizer.visualize_pipelines(save_path="pipelines.png")
 ```
+
+## Examples
+
+The repository includes several example files:
+- `swift_example.py`: Main example for XML-based workflow with SWIFT optimizer
+- `cluster_example.py`: Examples for cluster configuration and utilities
+- `model_example.py`: Examples for model configuration and utilities
+
+Example configuration XML files can be found in the `example_configs` directory.
 
 ## Requirements
 
@@ -133,3 +204,4 @@ swift_optimizer.visualize_pipelines()
 - NetworkX
 - Matplotlib
 - tqdm
+- Graphviz (optional, for enhanced model visualization)
