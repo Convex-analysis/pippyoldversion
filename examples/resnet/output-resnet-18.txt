@@ -1,0 +1,145 @@
+True
+[PiPPy] World size: 3, DP group size: 1, PP group size: 3
+rank = 0 host/pid/device = plm-CNP6S/16006/cuda:0
+REPLICATE config: 0 -> MultiUseParameterConfig.TRANSMIT
+Using schedule: 1F1B
+Using device: cuda:0
+Files already downloaded and verified
+GPU Before initializing model:0.0
+GPU After initializing model:0.0
+Unnamed module found in submod_0
+GPU After creating Pipe:42.67724609375
+1:44750336
+Before _init_remote_executors :42.67724609375MB
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 1[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 2[0m
+After _init_remote_executors :42.67724609375MB
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 1[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 2[0m
+GPU After creating optimizer:85.3056640625
+Epoch: 1
+GPU Start of epoch 1:85.3056640625
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.14
+GPU End of epoch 1:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 1[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 6.632646083831787 seconds[0m
+Epoch: 2
+GPU Start of epoch 2:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 2:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 1[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 6.0874810218811035 seconds[0m
+Epoch: 3
+GPU Start of epoch 3:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 3:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 1[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 6.191709041595459 seconds[0m
+Epoch: 4
+GPU Start of epoch 4:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 4:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 1[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 6.64901065826416 seconds[0m
+Epoch: 5
+GPU Start of epoch 5:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 5:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 1[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 5.378007888793945 seconds[0m
+Epoch: 6
+GPU Start of epoch 6:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 6:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 1[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 5.428176403045654 seconds[0m
+Epoch: 7
+GPU Start of epoch 7:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 7:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 1[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 4.9005982875823975 seconds[0m
+Epoch: 8
+GPU Start of epoch 8:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 8:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 1[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 4.956235885620117 seconds[0m
+Epoch: 9
+GPU Start of epoch 9:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 9:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 1[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 5.465396165847778 seconds[0m
+Epoch: 10
+GPU Start of epoch 10:85.8955078125
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.08
+GPU After processing batch 0 in valid loader:85.8955078125
+Loader: valid. Accuracy: 0.12
+GPU End of epoch 10:85.8955078125
+[31mSwitching template...[0m
+[32mCurrent descr name: submod_0, stage_id: 0, rank: 1[0m
+[32mCurrent descr name: submod_1, stage_id: 1, rank: 2[0m
+[31mSwitch template complete![0m
+[31mTime taken to switch template: 5.449124097824097 seconds[0m
+Finished
+GPU End of training:85.8955078125
+Communication overload: 2
+Data transferred: 0 MB
+192.168.2.12
+29500
