@@ -1543,42 +1543,10 @@ class PipelineDriverBase(torch.nn.Module):
 
         self.stage_to_executor: Dict = {}
 
-        # for stage_id, descr in enumerate(executor_descriptors):
-        #     # Assign stages to rank workers in a round-robin fashion
-        #     rank = self.all_ranks[stage_id % self.world_size]
-        #     logging.debug(f"[root] Sending stage_id = {stage_id} mod to worker")
-        #     self.remote_stage_executor_rrefs[descr.name] = (
-        #         stage_id,
-        #         self.rank_worker_rrefs[rank]
-        #         .remote()
-        #         .create_stage_executor(
-        #             stage_id=stage_id,
-        #             mod=descr.mod,
-        #             mod_name=descr.name,
-        #         ),
-        #     )
-        #     if Pipe.is_stage_init_deferred():
-        #         logging.debug(
-        #             f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
-        #         )
-        #         while not self.remote_stage_executor_rrefs[descr.name][
-        #             1
-        #         ].confirmed_by_owner():
-        #             pass
-        #     self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
-        #         descr.name
-        #     ][1]
-        #     self.communication_overload += 1  # Increment communication count
-
-        for i in range(len(executor_descriptors)):
-        # for i, descr in enumerate(executor_descriptors):                              # descr = submod0,submod1; submod0,submod1;
+        for stage_id, descr in enumerate(executor_descriptors):
             # Assign stages to rank workers in a round-robin fashion
-            assert self.template is not None and self.template_id is not None, "template and template_id must not be None"
-            descr = executor_descriptors[self.template[self.template_id][i]]
-            stage_id = self.template[self.template_id][i]                               # stage_id = 0,1;           1,0;
-            # rank = self.all_ranks[stage_id % self.world_size]
-            rank = self.all_ranks[i % self.world_size]                                  # rank = 0,1;               0,1;
-            logging.info(f"[root] Sending stage_id = {stage_id} mod to worker")
+            rank = self.all_ranks[stage_id % self.world_size]
+            logging.debug(f"[root] Sending stage_id = {stage_id} mod to worker")
             self.remote_stage_executor_rrefs[descr.name] = (
                 stage_id,
                 self.rank_worker_rrefs[rank]
@@ -1589,7 +1557,6 @@ class PipelineDriverBase(torch.nn.Module):
                     mod_name=descr.name,
                 ),
             )
-            print_green(f"Current descr name: {descr.name}, stage_id: {stage_id}, rank: {rank}")
             if Pipe.is_stage_init_deferred():
                 logging.debug(
                     f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
@@ -1602,6 +1569,39 @@ class PipelineDriverBase(torch.nn.Module):
                 descr.name
             ][1]
             self.communication_overload += 1  # Increment communication count
+
+        # for i in range(len(executor_descriptors)):
+        # # for i, descr in enumerate(executor_descriptors):                              # descr = submod0,submod1; submod0,submod1;
+        #     # Assign stages to rank workers in a round-robin fashion
+        #     assert self.template is not None and self.template_id is not None, "template and template_id must not be None"
+        #     descr = executor_descriptors[self.template[self.template_id][i]]
+        #     stage_id = self.template[self.template_id][i]                               # stage_id = 0,1;           1,0;
+        #     # rank = self.all_ranks[stage_id % self.world_size]
+        #     rank = self.all_ranks[i % self.world_size]                                  # rank = 0,1;               0,1;
+        #     logging.info(f"[root] Sending stage_id = {stage_id} mod to worker")
+        #     self.remote_stage_executor_rrefs[descr.name] = (
+        #         stage_id,
+        #         self.rank_worker_rrefs[rank]
+        #         .remote()
+        #         .create_stage_executor(
+        #             stage_id=stage_id,
+        #             mod=descr.mod,
+        #             mod_name=descr.name,
+        #         ),
+        #     )
+        #     print_green(f"Current descr name: {descr.name}, stage_id: {stage_id}, rank: {rank}")
+        #     if Pipe.is_stage_init_deferred():
+        #         logging.debug(
+        #             f"[root] Waiting stage_id = {stage_id} mod to be confirmed by worker"
+        #         )
+        #         while not self.remote_stage_executor_rrefs[descr.name][
+        #             1
+        #         ].confirmed_by_owner():
+        #             pass
+        #     self.stage_to_executor[stage_id] = self.remote_stage_executor_rrefs[
+        #         descr.name
+        #     ][1]
+        #     self.communication_overload += 1  # Increment communication count
 
 
         # Inform executors of their peers

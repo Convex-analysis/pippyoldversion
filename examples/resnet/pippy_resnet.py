@@ -111,12 +111,6 @@ def run_master(_, args):
                                                                 _record_mem_dumps=bool(args.record_mem_dumps),
                                                                 checkpoint=bool(args.checkpoint))
         
-        template = [
-            [0, 1],
-            [1, 0]
-        ]
-        pipe_driver.set_template(template)
-        pipe_driver.set_template_id(0)
 
         optimizer = pipe_driver.instantiate_optimizer(optim.Adam, lr=1e-3, betas=(0.9, 0.999), eps=1e-8)
         log_memory_usage("After creating optimizer")
@@ -174,16 +168,6 @@ def run_master(_, args):
                     break
                 print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
             log_memory_usage(f"End of epoch {epoch + 1}")
-
-            if True:
-                print_red(f"Switching template...")
-                if pipe_driver.template_id == 1:
-                    pipe_driver.set_template_id(0)
-                else:
-                    pipe_driver.set_template_id(1)
-                
-                pipe_driver._init_remote_executors()
-                print_red(f"Switch template complete!")
 
         if args.visualize:
             all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
