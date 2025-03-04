@@ -1,0 +1,522 @@
+python torchrunsample.py 0
+192.168.2.12
+29500
+master_addr is only used for static rdzv_backend and when rdzv_endpoint is not specified.
+True
+[PiPPy] World size: 3, DP group size: 1, PP group size: 3
+rank = 0 host/pid/device = plm-CNP6S/10626/cuda:0
+2025-03-03 14:27:18,702 - INFO - Added key: store_based_barrier_key:1 to store for rank: 0
+2025-03-03 14:27:18,713 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:1 with 3 nodes.
+2025-03-03 14:27:22,952 - INFO - Added key: store_based_barrier_key:2 to store for rank: 0
+2025-03-03 14:27:22,972 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:2 with 3 nodes.
+2025-03-03 14:27:22,972 - INFO - Added key: store_based_barrier_key:3 to store for rank: 0
+2025-03-03 14:27:22,983 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:3 with 3 nodes.
+2025-03-03 14:27:22,983 - INFO - Added key: store_based_barrier_key:4 to store for rank: 0
+2025-03-03 14:27:22,984 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:4 with 3 nodes.
+2025-03-03 14:27:22,984 - INFO - Added key: store_based_barrier_key:5 to store for rank: 0
+2025-03-03 14:27:23,005 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:5 with 3 nodes.
+2025-03-03 14:27:23,005 - INFO - Added key: store_based_barrier_key:6 to store for rank: 0
+2025-03-03 14:27:23,016 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:6 with 3 nodes.
+REPLICATE config: 0 -> MultiUseParameterConfig.TRANSMIT
+Using schedule: 1F1B
+Using device: cuda:0
+Files already downloaded and verified
+GPU Before initializing model:0.0
+GPU After initializing model:0.0
+2025-03-03 14:27:23,964 - INFO - Pipeline is in training mode, backward pass generated
+Unnamed module found in submod_0
+GraphModule(
+  (submod_0): GraphModule(
+    (module_conv1): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_relu): ReLU(inplace=True)
+    (module_layer1_0_conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_0_bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer1_0_conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_0_bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer1_1_conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_1_bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer1_1_conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_1_bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_0_conv1): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    (module_layer2_0_bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_0_conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer2_0_bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_0_shortcut_0): Conv2d(64, 128, kernel_size=(1, 1), stride=(2, 2), bias=False)
+    (module_layer2_0_shortcut_1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_1_conv1): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer2_1_bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_1_conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer2_1_bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_0_conv1): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    (module_layer3_0_bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_0_conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer3_0_bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_0_shortcut_0): Conv2d(128, 256, kernel_size=(1, 1), stride=(2, 2), bias=False)
+    (module_layer3_0_shortcut_1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_1_conv1): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer3_1_bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_1_conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer3_1_bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_0_conv1): Conv2d(256, 512, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    (module_layer4_0_bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_0_conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer4_0_bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_0_shortcut_0): Conv2d(256, 512, kernel_size=(1, 1), stride=(2, 2), bias=False)
+    (module_layer4_0_shortcut_1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_1_conv1): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer4_1_bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_1_conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer4_1_bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_avgpool): AdaptiveAvgPool2d(output_size=(1, 1))
+    (module_flatten): Flatten(start_dim=1, end_dim=-1)
+    (module_linear): Linear(in_features=512, out_features=10, bias=True)
+  )
+)
+
+
+
+def forward(self, input, target):
+    input_1 = input
+    submod_0 = self.submod_0(input_1, target)
+    getitem = submod_0[0]
+    getitem_1 = submod_0[1];  submod_0 = None
+    stage_backward = pippy_backward_stage_backward(stage_output = (getitem, getitem_1), output_grads = (None, None), input_values = [input_1, target], outputs_with_grads_idxs = [1], stage_info = 'stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})');  input_1 = target = None
+    getitem_2 = stage_backward[0]
+    getitem_3 = stage_backward[1];  stage_backward = None
+    getitem_4 = getitem_2[0]
+    getitem_5 = getitem_2[1]
+    sync_barrier = pippy_backward_sync_barrier({'output': getitem, 'loss': getitem_1}, [getitem_3], getitem_2);  getitem = getitem_1 = getitem_3 = getitem_2 = None
+    return sync_barrier
+    
+# To see more debug info, please use `graph_module.print_readable()`
+GPU After creating Pipe:42.67724609375
+1:44750336
+Before _init_remote_executors :42.67724609375MB
+2025-03-03 14:27:24,043 - INFO - [root] Creating pipeline driver with 2 workers: [1, 2]
+/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py:1526: UserWarning: Running pipeline with 1 stages on world_size of 2. Remaining ranks will be idle.
+  warnings.warn(
+2025-03-03 14:27:24,043 - INFO - [root] Sending stage_id = 0 mod to worker
+Current descr name: submod_0, stage_id: 0, rank: 1
+After _init_remote_executors :42.67724609375MB
+2025-03-03 14:27:28,487 - INFO - [root] Creating pipeline driver with 2 workers: [1, 2]
+2025-03-03 14:27:28,488 - INFO - [root] Sending stage_id = 0 mod to worker
+Current descr name: submod_0, stage_id: 0, rank: 1
+GPU After creating optimizer:85.3056640625
+Epoch: 1
+GPU Start of epoch 1:85.3056640625
+2025-03-03 14:27:38,406 - INFO - [root] Running pipeline with 2 micro-batches
+2025-03-03 14:27:38,406 - DEBUG - [root] Instantiating microbatch interpreter for chunk 0
+2025-03-03 14:27:38,406 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:27:38,406 - DEBUG - [root] Instantiating microbatch interpreter for chunk 1
+2025-03-03 14:27:38,406 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:27:38,406 - DEBUG - [root] 2 instantiated
+2025-03-03 14:27:38,406 - DEBUG - [0] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:27:38,406 - DEBUG - [0] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:27:38,406 - DEBUG - [1] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:27:38,406 - DEBUG - [1] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:27:38,406 - DEBUG - [0] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:27:38,406 - DEBUG - [root][0] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:27:38,407 - DEBUG - [0] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:27:38,407 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem', 2, ValueReference(0, 0_submod_0), 0)
+2025-03-03 14:27:38,407 - DEBUG - [0] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:27:38,407 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_1', 2, ValueReference(0, 0_submod_0), 1)
+2025-03-03 14:27:38,407 - DEBUG - [root][0] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:27:38,413 - DEBUG - [0] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:27:38,413 - DEBUG - [root][0] Issuing BW invocation for target submod_0 on stage 0
+2025-03-03 14:27:38,413 - DEBUG - [0] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:27:38,413 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_2', 3, ValueReference(0, 0_stage_backward), 0)
+2025-03-03 14:27:38,413 - DEBUG - [0] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:27:38,413 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_3', 1, ValueReference(0, 0_stage_backward), 1)
+2025-03-03 14:27:38,413 - DEBUG - [0] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:27:38,413 - DEBUG - [0] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:27:38,413 - DEBUG - [root][0] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:27:38,414 - DEBUG - [1] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:27:38,414 - DEBUG - [root][1] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:27:38,414 - DEBUG - [1] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:27:38,414 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem', 2, ValueReference(0, 1_submod_0), 0)
+2025-03-03 14:27:38,414 - DEBUG - [1] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:27:38,414 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_1', 2, ValueReference(0, 1_submod_0), 1)
+2025-03-03 14:27:38,414 - DEBUG - [root][1] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:27:38,414 - DEBUG - [0] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:27:38,414 - DEBUG - [root][0] Issuing sync invocation on stage 0
+2025-03-03 14:27:38,414 - DEBUG - [1] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:27:38,414 - DEBUG - [root][1] Issuing BW invocation for target submod_0 on stage 0
+2025-03-03 14:27:38,415 - DEBUG - [1] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:27:38,415 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_2', 3, ValueReference(0, 1_stage_backward), 0)
+2025-03-03 14:27:38,415 - DEBUG - [1] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:27:38,415 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_3', 1, ValueReference(0, 1_stage_backward), 1)
+2025-03-03 14:27:38,415 - DEBUG - [1] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:27:38,415 - DEBUG - [1] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:27:38,415 - DEBUG - [root][1] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:27:38,415 - DEBUG - [1] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:27:38,415 - DEBUG - [root][1] Issuing sync invocation on stage 0
+2025-03-03 14:27:38,415 - DEBUG - [root] Retrieving output values from 2 chunks
+2025-03-03 14:27:38,415 - DEBUG - [0] Issue command to run return sync_barrier
+2025-03-03 14:27:38,415 - DEBUG - [1] Issue command to run return sync_barrier
+2025-03-03 14:27:44,436 - DEBUG - [root] Synchronizing gradients for 0 sets of replicated parameters
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.06
+2025-03-03 14:27:44,523 - INFO - [root] Running pipeline with 2 micro-batches
+2025-03-03 14:27:44,523 - DEBUG - [root] Instantiating microbatch interpreter for chunk 0
+2025-03-03 14:27:44,524 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:27:44,524 - DEBUG - [root] Instantiating microbatch interpreter for chunk 1
+2025-03-03 14:27:44,524 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:27:44,524 - DEBUG - [root] 2 instantiated
+2025-03-03 14:27:44,524 - DEBUG - [0] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:27:44,524 - DEBUG - [0] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:27:44,524 - DEBUG - [1] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:27:44,524 - DEBUG - [1] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:27:44,524 - DEBUG - [0] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:27:44,524 - DEBUG - [root][0] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:27:44,525 - DEBUG - [0] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:27:44,525 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem', 1, ValueReference(0, 0_submod_0), 0)
+2025-03-03 14:27:44,525 - DEBUG - [0] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:27:44,525 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_1', 1, ValueReference(0, 0_submod_0), 1)
+2025-03-03 14:27:44,525 - DEBUG - [root][0] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:27:44,530 - DEBUG - [0] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:27:44,530 - DEBUG - [0] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:27:44,530 - DEBUG - [0] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:27:44,530 - DEBUG - [0] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:27:44,530 - DEBUG - [0] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:27:44,530 - DEBUG - [1] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:27:44,530 - DEBUG - [root][1] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:27:44,531 - DEBUG - [1] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:27:44,531 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem', 1, ValueReference(0, 1_submod_0), 0)
+2025-03-03 14:27:44,531 - DEBUG - [1] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:27:44,531 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_1', 1, ValueReference(0, 1_submod_0), 1)
+2025-03-03 14:27:44,531 - DEBUG - [root][1] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:27:44,531 - DEBUG - [0] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:27:44,531 - DEBUG - [root][0] Issuing sync invocation on stage 0
+2025-03-03 14:27:44,531 - DEBUG - [1] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:27:44,531 - DEBUG - [1] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:27:44,532 - DEBUG - [1] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:27:44,532 - DEBUG - [1] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:27:44,532 - DEBUG - [1] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:27:44,532 - DEBUG - [1] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:27:44,532 - DEBUG - [root][1] Issuing sync invocation on stage 0
+2025-03-03 14:27:44,532 - DEBUG - [root] Retrieving output values from 2 chunks
+2025-03-03 14:27:44,532 - DEBUG - [0] Issue command to run return sync_barrier
+2025-03-03 14:27:44,532 - DEBUG - [1] Issue command to run return sync_barrier
+[W tensorpipe_agent.cpp:939] RPC agent for worker0 encountered error when reading incoming response from worker1: EOF: end of file (this error originated at tensorpipe/transport/uv/connection_impl.cc:132)
+[W tensorpipe_agent.cpp:725] RPC agent for worker0 encountered error when reading incoming request from worker1: EOF: end of file (this error originated at tensorpipe/transport/uv/connection_impl.cc:132)
+Traceback (most recent call last):
+  File "/home/plm/cyhWorkspace/pippyoldversion-elastic/examples/resnet/pippy_resnet.py", line 256, in <module>
+    run_pippy(run_master, args)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/utils.py", line 163, in run_pippy
+    run_worker(args.rank, run_func, args, *extra_args)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/utils.py", line 280, in run_worker
+    run_func(my_pp_ranks, args, *extra_args)
+  File "/home/plm/cyhWorkspace/pippyoldversion-elastic/examples/resnet/pippy_resnet.py", line 179, in run_master
+    outp, _ = pipe_driver(x_batch, y_batch)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py", line 2318, in forward
+    local_results_and_last_grads = self._retrieve_output_values(
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py", line 1766, in _retrieve_output_values
+    return pippy.fx.node.map_aggregate(
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/fx/node.py", line 620, in map_aggregate
+    return immutable_list(map_aggregate(elem, fn, should_traverse_fn) for elem in a)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/fx/node.py", line 620, in <genexpr>
+    return immutable_list(map_aggregate(elem, fn, should_traverse_fn) for elem in a)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/fx/node.py", line 627, in map_aggregate
+    return fn(a)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py", line 1768, in <lambda>
+    lambda a: a.wait() if isinstance(a, torch._C.Future) else a,
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/futures/__init__.py", line 76, in wait
+    return super().wait()
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/futures/__init__.py", line 268, in raise_error
+    raise fut_result
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/rpc/rref_proxy.py", line 58, in _complete_op
+    result.set_result(fut.value())
+RuntimeError: EOF: end of file (this error originated at tensorpipe/transport/uv/connection_impl.cc:132)
+ERROR:torch.distributed.elastic.multiprocessing.api:failed (exitcode: 1) local_rank: 0 (pid: 10626) of binary: /home/plm/anaconda3/envs/pippy/bin/python
+True
+[PiPPy] World size: 3, DP group size: 1, PP group size: 3
+rank = 0 host/pid/device = plm-CNP6S/11250/cuda:0
+2025-03-03 14:28:06,693 - INFO - Added key: store_based_barrier_key:1 to store for rank: 0
+2025-03-03 14:28:06,703 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:1 with 3 nodes.
+2025-03-03 14:28:10,905 - INFO - Added key: store_based_barrier_key:2 to store for rank: 0
+2025-03-03 14:28:10,916 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:2 with 3 nodes.
+2025-03-03 14:28:10,916 - INFO - Added key: store_based_barrier_key:3 to store for rank: 0
+2025-03-03 14:28:10,927 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:3 with 3 nodes.
+2025-03-03 14:28:10,927 - INFO - Added key: store_based_barrier_key:4 to store for rank: 0
+2025-03-03 14:28:10,937 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:4 with 3 nodes.
+2025-03-03 14:28:10,938 - INFO - Added key: store_based_barrier_key:5 to store for rank: 0
+2025-03-03 14:28:10,959 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:5 with 3 nodes.
+2025-03-03 14:28:10,959 - INFO - Added key: store_based_barrier_key:6 to store for rank: 0
+2025-03-03 14:28:10,970 - INFO - Rank 0: Completed store-based barrier for key:store_based_barrier_key:6 with 3 nodes.
+REPLICATE config: 0 -> MultiUseParameterConfig.TRANSMIT
+Using schedule: 1F1B
+Using device: cuda:0
+Files already downloaded and verified
+GPU Before initializing model:0.0
+GPU After initializing model:0.0
+2025-03-03 14:28:11,918 - INFO - Pipeline is in training mode, backward pass generated
+Unnamed module found in submod_0
+GraphModule(
+  (submod_0): GraphModule(
+    (module_conv1): Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_relu): ReLU(inplace=True)
+    (module_layer1_0_conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_0_bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer1_0_conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_0_bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer1_1_conv1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_1_bn1): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer1_1_conv2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer1_1_bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_0_conv1): Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    (module_layer2_0_bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_0_conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer2_0_bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_0_shortcut_0): Conv2d(64, 128, kernel_size=(1, 1), stride=(2, 2), bias=False)
+    (module_layer2_0_shortcut_1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_1_conv1): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer2_1_bn1): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer2_1_conv2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer2_1_bn2): BatchNorm2d(128, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_0_conv1): Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    (module_layer3_0_bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_0_conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer3_0_bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_0_shortcut_0): Conv2d(128, 256, kernel_size=(1, 1), stride=(2, 2), bias=False)
+    (module_layer3_0_shortcut_1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_1_conv1): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer3_1_bn1): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer3_1_conv2): Conv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer3_1_bn2): BatchNorm2d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_0_conv1): Conv2d(256, 512, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), bias=False)
+    (module_layer4_0_bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_0_conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer4_0_bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_0_shortcut_0): Conv2d(256, 512, kernel_size=(1, 1), stride=(2, 2), bias=False)
+    (module_layer4_0_shortcut_1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_1_conv1): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer4_1_bn1): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_layer4_1_conv2): Conv2d(512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+    (module_layer4_1_bn2): BatchNorm2d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (module_avgpool): AdaptiveAvgPool2d(output_size=(1, 1))
+    (module_flatten): Flatten(start_dim=1, end_dim=-1)
+    (module_linear): Linear(in_features=512, out_features=10, bias=True)
+  )
+)
+
+
+
+def forward(self, input, target):
+    input_1 = input
+    submod_0 = self.submod_0(input_1, target)
+    getitem = submod_0[0]
+    getitem_1 = submod_0[1];  submod_0 = None
+    stage_backward = pippy_backward_stage_backward(stage_output = (getitem, getitem_1), output_grads = (None, None), input_values = [input_1, target], outputs_with_grads_idxs = [1], stage_info = 'stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})');  input_1 = target = None
+    getitem_2 = stage_backward[0]
+    getitem_3 = stage_backward[1];  stage_backward = None
+    getitem_4 = getitem_2[0]
+    getitem_5 = getitem_2[1]
+    sync_barrier = pippy_backward_sync_barrier({'output': getitem, 'loss': getitem_1}, [getitem_3], getitem_2);  getitem = getitem_1 = getitem_3 = getitem_2 = None
+    return sync_barrier
+    
+# To see more debug info, please use `graph_module.print_readable()`
+GPU After creating Pipe:42.67724609375
+1:44750336
+Before _init_remote_executors :42.67724609375MB
+2025-03-03 14:28:11,997 - INFO - [root] Creating pipeline driver with 2 workers: [1, 2]
+/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py:1526: UserWarning: Running pipeline with 1 stages on world_size of 2. Remaining ranks will be idle.
+  warnings.warn(
+2025-03-03 14:28:11,998 - INFO - [root] Sending stage_id = 0 mod to worker
+Current descr name: submod_0, stage_id: 0, rank: 1
+After _init_remote_executors :42.67724609375MB
+2025-03-03 14:28:16,415 - INFO - [root] Creating pipeline driver with 2 workers: [1, 2]
+2025-03-03 14:28:16,416 - INFO - [root] Sending stage_id = 0 mod to worker
+Current descr name: submod_0, stage_id: 0, rank: 1
+GPU After creating optimizer:85.3056640625
+Epoch: 1
+GPU Start of epoch 1:85.3056640625
+2025-03-03 14:28:26,011 - INFO - [root] Running pipeline with 2 micro-batches
+2025-03-03 14:28:26,011 - DEBUG - [root] Instantiating microbatch interpreter for chunk 0
+2025-03-03 14:28:26,012 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:28:26,012 - DEBUG - [root] Instantiating microbatch interpreter for chunk 1
+2025-03-03 14:28:26,012 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:28:26,012 - DEBUG - [root] 2 instantiated
+2025-03-03 14:28:26,012 - DEBUG - [0] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:28:26,012 - DEBUG - [0] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:28:26,012 - DEBUG - [1] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:28:26,012 - DEBUG - [1] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:28:26,012 - DEBUG - [0] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:28:26,012 - DEBUG - [root][0] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:28:26,012 - DEBUG - [0] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:28:26,013 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem', 2, ValueReference(0, 0_submod_0), 0)
+2025-03-03 14:28:26,013 - DEBUG - [0] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:28:26,013 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_1', 2, ValueReference(0, 0_submod_0), 1)
+2025-03-03 14:28:26,013 - DEBUG - [root][0] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:28:26,018 - DEBUG - [0] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:28:26,018 - DEBUG - [root][0] Issuing BW invocation for target submod_0 on stage 0
+2025-03-03 14:28:26,019 - DEBUG - [0] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:28:26,019 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_2', 3, ValueReference(0, 0_stage_backward), 0)
+2025-03-03 14:28:26,019 - DEBUG - [0] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:28:26,019 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_3', 1, ValueReference(0, 0_stage_backward), 1)
+2025-03-03 14:28:26,019 - DEBUG - [0] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:28:26,019 - DEBUG - [0] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:28:26,019 - DEBUG - [root][0] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:28:26,019 - DEBUG - [1] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:28:26,019 - DEBUG - [root][1] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:28:26,019 - DEBUG - [1] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:28:26,019 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem', 2, ValueReference(0, 1_submod_0), 0)
+2025-03-03 14:28:26,019 - DEBUG - [1] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:28:26,019 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_1', 2, ValueReference(0, 1_submod_0), 1)
+2025-03-03 14:28:26,019 - DEBUG - [root][1] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:28:26,020 - DEBUG - [0] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:28:26,020 - DEBUG - [root][0] Issuing sync invocation on stage 0
+2025-03-03 14:28:26,020 - DEBUG - [1] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:28:26,020 - DEBUG - [root][1] Issuing BW invocation for target submod_0 on stage 0
+2025-03-03 14:28:26,020 - DEBUG - [1] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:28:26,020 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_2', 3, ValueReference(0, 1_stage_backward), 0)
+2025-03-03 14:28:26,020 - DEBUG - [1] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:28:26,020 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_3', 1, ValueReference(0, 1_stage_backward), 1)
+2025-03-03 14:28:26,020 - DEBUG - [1] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:28:26,020 - DEBUG - [1] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:28:26,020 - DEBUG - [root][1] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:28:26,021 - DEBUG - [1] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:28:26,021 - DEBUG - [root][1] Issuing sync invocation on stage 0
+2025-03-03 14:28:26,021 - DEBUG - [root] Retrieving output values from 2 chunks
+2025-03-03 14:28:26,021 - DEBUG - [0] Issue command to run return sync_barrier
+2025-03-03 14:28:26,021 - DEBUG - [1] Issue command to run return sync_barrier
+2025-03-03 14:28:32,174 - DEBUG - [root] Synchronizing gradients for 0 sets of replicated parameters
+GPU After processing batch 0 in train loader:85.8984375
+Loader: train. Accuracy: 0.16
+2025-03-03 14:28:32,249 - INFO - [root] Running pipeline with 2 micro-batches
+2025-03-03 14:28:32,249 - DEBUG - [root] Instantiating microbatch interpreter for chunk 0
+2025-03-03 14:28:32,249 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:28:32,249 - DEBUG - [root] Instantiating microbatch interpreter for chunk 1
+2025-03-03 14:28:32,249 - DEBUG - [root] RemoteInterpreter created with 12 nodes
+2025-03-03 14:28:32,249 - DEBUG - [root] 2 instantiated
+2025-03-03 14:28:32,249 - DEBUG - [0] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:28:32,249 - DEBUG - [0] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:28:32,249 - DEBUG - [1] Issue command to run %input_1 : [#users=2] = placeholder[target=input]
+2025-03-03 14:28:32,249 - DEBUG - [1] Issue command to run %target : [#users=2] = placeholder[target=target]
+2025-03-03 14:28:32,249 - DEBUG - [0] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:28:32,249 - DEBUG - [root][0] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:28:32,250 - DEBUG - [0] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:28:32,250 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem', 1, ValueReference(0, 0_submod_0), 0)
+2025-03-03 14:28:32,250 - DEBUG - [0] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:28:32,250 - DEBUG - [root][0] Appending getitem tuple to stage 0: ('0_getitem_1', 1, ValueReference(0, 0_submod_0), 1)
+2025-03-03 14:28:32,250 - DEBUG - [root][0] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:28:32,256 - DEBUG - [0] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:28:32,256 - DEBUG - [0] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:28:32,256 - DEBUG - [0] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:28:32,256 - DEBUG - [0] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:28:32,256 - DEBUG - [0] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:28:32,256 - DEBUG - [1] Issue command to run %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})
+2025-03-03 14:28:32,256 - DEBUG - [root][1] Issuing Phase.FORWARD invocation for target submod_0 on stage 0
+2025-03-03 14:28:32,256 - DEBUG - [1] Issue command to run %getitem : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 0), kwargs = {})
+2025-03-03 14:28:32,256 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem', 1, ValueReference(0, 1_submod_0), 0)
+2025-03-03 14:28:32,256 - DEBUG - [1] Issue command to run %getitem_1 : [#users=2] = call_function[target=operator.getitem](args = (%submod_0, 1), kwargs = {})
+2025-03-03 14:28:32,256 - DEBUG - [root][1] Appending getitem tuple to stage 0: ('1_getitem_1', 1, ValueReference(0, 1_submod_0), 1)
+2025-03-03 14:28:32,256 - DEBUG - [root][1] Issuing getitem calls to stage: dict_keys([0])
+2025-03-03 14:28:32,257 - DEBUG - [0] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:28:32,257 - DEBUG - [root][0] Issuing sync invocation on stage 0
+2025-03-03 14:28:32,257 - DEBUG - [1] Issue command to run %stage_backward : [#users=2] = call_function[target=pippy.backward.stage_backward](args = (), kwargs = {stage_output: (%getitem, %getitem_1), output_grads: (None, None), input_values: [%input_1, %target], outputs_with_grads_idxs: [1], stage_info: stage_backward for stage %submod_0 : [#users=2] = call_module[target=submod_0](args = (%input_1, %target), kwargs = {})})
+2025-03-03 14:28:32,257 - DEBUG - [1] Issue command to run %getitem_2 : [#users=3] = call_function[target=operator.getitem](args = (%stage_backward, 0), kwargs = {})
+2025-03-03 14:28:32,257 - DEBUG - [1] Issue command to run %getitem_3 : [#users=1] = call_function[target=operator.getitem](args = (%stage_backward, 1), kwargs = {})
+2025-03-03 14:28:32,257 - DEBUG - [1] Issue command to run %getitem_4 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 0), kwargs = {})
+2025-03-03 14:28:32,257 - DEBUG - [1] Issue command to run %getitem_5 : [#users=0] = call_function[target=operator.getitem](args = (%getitem_2, 1), kwargs = {})
+2025-03-03 14:28:32,257 - DEBUG - [1] Issue command to run %sync_barrier : [#users=1] = call_function[target=pippy.backward.sync_barrier](args = ({output: %getitem, loss: %getitem_1}, [%getitem_3], %getitem_2), kwargs = {})
+2025-03-03 14:28:32,257 - DEBUG - [root][1] Issuing sync invocation on stage 0
+2025-03-03 14:28:32,257 - DEBUG - [root] Retrieving output values from 2 chunks
+2025-03-03 14:28:32,257 - DEBUG - [0] Issue command to run return sync_barrier
+2025-03-03 14:28:32,257 - DEBUG - [1] Issue command to run return sync_barrier
+[W tensorpipe_agent.cpp:725] RPC agent for worker0 encountered error when reading incoming request from worker2: EOF: end of file (this error originated at tensorpipe/transport/uv/connection_impl.cc:132)
+[W tensorpipe_agent.cpp:939] RPC agent for worker0 encountered error when reading incoming response from worker1: EOF: end of file (this error originated at tensorpipe/transport/uv/connection_impl.cc:132)
+[W tensorpipe_agent.cpp:725] RPC agent for worker0 encountered error when reading incoming request from worker1: EOF: end of file (this error originated at tensorpipe/transport/uv/connection_impl.cc:132)
+Traceback (most recent call last):
+  File "/home/plm/cyhWorkspace/pippyoldversion-elastic/examples/resnet/pippy_resnet.py", line 256, in <module>
+    run_pippy(run_master, args)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/utils.py", line 163, in run_pippy
+    run_worker(args.rank, run_func, args, *extra_args)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/utils.py", line 280, in run_worker
+    run_func(my_pp_ranks, args, *extra_args)
+  File "/home/plm/cyhWorkspace/pippyoldversion-elastic/examples/resnet/pippy_resnet.py", line 179, in run_master
+    outp, _ = pipe_driver(x_batch, y_batch)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py", line 2318, in forward
+    local_results_and_last_grads = self._retrieve_output_values(
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py", line 1766, in _retrieve_output_values
+    return pippy.fx.node.map_aggregate(
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/fx/node.py", line 620, in map_aggregate
+    return immutable_list(map_aggregate(elem, fn, should_traverse_fn) for elem in a)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/fx/node.py", line 620, in <genexpr>
+    return immutable_list(map_aggregate(elem, fn, should_traverse_fn) for elem in a)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/fx/node.py", line 627, in map_aggregate
+    return fn(a)
+  File "/home/plm/cyhWorkspace/pippyoldversion/pippy/PipelineDriver.py", line 1768, in <lambda>
+    lambda a: a.wait() if isinstance(a, torch._C.Future) else a,
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/futures/__init__.py", line 76, in wait
+    return super().wait()
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/futures/__init__.py", line 268, in raise_error
+    raise fut_result
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/rpc/rref_proxy.py", line 58, in _complete_op
+    result.set_result(fut.value())
+RuntimeError: EOF: end of file (this error originated at tensorpipe/transport/uv/connection_impl.cc:132)
+ERROR:torch.distributed.elastic.multiprocessing.api:failed (exitcode: 1) local_rank: 0 (pid: 11250) of binary: /home/plm/anaconda3/envs/pippy/bin/python
+^CWARNING:torch.distributed.elastic.agent.server.api:Received 2 death signal, shutting down workers
+Traceback (most recent call last):
+  File "/home/plm/anaconda3/envs/pippy/bin/torchrun", line 33, in <module>
+    sys.exit(load_entry_point('torch', 'console_scripts', 'torchrun')())
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 346, in wrapper
+    return f(*args, **kwargs)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/run.py", line 794, in main
+    run(args)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/run.py", line 785, in run
+    elastic_launch(
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/launcher/api.py", line 134, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/launcher/api.py", line 241, in launch_agent
+    result = agent.run()
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/metrics/api.py", line 129, in wrapper
+    result = f(*args, **kwargs)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/agent/server/api.py", line 723, in run
+    result = self._invoke_run(role)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/agent/server/api.py", line 887, in _invoke_run
+    self._restart_workers(self._worker_group)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/metrics/api.py", line 129, in wrapper
+    result = f(*args, **kwargs)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/agent/server/api.py", line 714, in _restart_workers
+    self._initialize_workers(worker_group)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/metrics/api.py", line 129, in wrapper
+    result = f(*args, **kwargs)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/agent/server/api.py", line 692, in _initialize_workers
+    self._rendezvous(worker_group)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/metrics/api.py", line 129, in wrapper
+    result = f(*args, **kwargs)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/agent/server/api.py", line 546, in _rendezvous
+    store, group_rank, group_world_size = spec.rdzv_handler.next_rendezvous()
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 1028, in next_rendezvous
+    self._op_executor.run(join_op, deadline)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 643, in run
+    _delay(seconds=1)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/rendezvous/utils.py", line 178, in _delay
+    time.sleep(seconds)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 62, in _terminate_process_handler
+    raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+torch.distributed.elastic.multiprocessing.api.SignalException: Process 10619 got signal: 2
+Traceback (most recent call last):
+  File "/home/plm/cyhWorkspace/pippyoldversion-elastic/examples/resnet/torchrunsample.py", line 67, in <module>
+    main(node_rank, 6300)
+  File "/home/plm/cyhWorkspace/pippyoldversion-elastic/examples/resnet/torchrunsample.py", line 53, in main
+    subprocess.run(command)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/subprocess.py", line 503, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/subprocess.py", line 1122, in communicate
+    self.wait()
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/subprocess.py", line 1185, in wait
+    return self._wait(timeout=timeout)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/subprocess.py", line 1915, in _wait
+    (pid, sts) = self._try_wait(0)
+  File "/home/plm/anaconda3/envs/pippy/lib/python3.9/subprocess.py", line 1873, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+KeyboardInterrupt
+^C
+
