@@ -3,6 +3,7 @@ import time
 import os
 import sys
 import argparse
+import csv
 from typing import OrderedDict
 import torch
 #import resource, psutil
@@ -63,7 +64,9 @@ pippy.fx.Tracer.proxy_buffer_attributes = True
 USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
 
 def log_memory_usage(stage):
-    print("1:{}".format(torch.cuda.memory_allocated(0)))
+    memory_mb = torch.cuda.memory_allocated(0)/1024/1024
+    print("GPU {}:{}".format(stage, memory_mb))
+    return memory_mb
 
 def debug_pickle(obj, name):
     try:
@@ -246,6 +249,11 @@ def train_one_epoch_pipeline(
     losses_stop_sign = AverageMeter()
     start = time.time()
     pipelineDriver.train()
+    
+    # Track metrics for this epoch
+    memory_measurements = []
+    memory_measurements.append(log_memory_usage(f"Start of epoch {epoch}"))
+    total_samples_processed = 0
 
     end = time.time()
     last_idx = len(loader) - 1
@@ -259,6 +267,10 @@ def train_one_epoch_pipeline(
             batch_size = input[list(input.keys())[0]].size(0)
         else:
             batch_size = input.size(0)
+            
+        # Update total samples count
+        total_samples_processed += batch_size
+        
         # CYH: not prefetcher, move to cuda here, so prefetcher needs to be False, i.e. args.-no-prefetcher = True
         if not args.prefetcher:
             if isinstance(input, (tuple, list)):
@@ -314,13 +326,28 @@ def train_one_epoch_pipeline(
 
         end = time.time()
         batch_time_m.update(end - start)
+        
+        # Record memory usage after batch
+        memory_measurements.append(log_memory_usage(f"After batch {batch_idx} in epoch {epoch}"))
 
         print_red(f"Epoch: {epoch}, Batch: {batch_idx}/{last_idx} finished!")
 
+    # Calculate average memory usage for this epoch
+    avg_memory_usage = sum(memory_measurements) / len(memory_measurements)
+    print(f"Epoch {epoch} average memory usage: {avg_memory_usage:.2f} MB")
+    print(f"Epoch {epoch} total samples processed: {total_samples_processed}")
+    
     if hasattr(optimizer, "sync_lookahead"):
         optimizer.sync_lookahead()
 
-    return OrderedDict([("loss", losses_m.avg)])
+    # Return metrics along with standard return value
+    epoch_metrics = {
+        "loss": losses_m.avg,
+        "total_samples": total_samples_processed,
+        "avg_memory_usage": avg_memory_usage,
+        "epoch_time": end - start
+    }
+    return epoch_metrics
 
 def main():
     _logger = logging.getLogger("train")
@@ -487,7 +514,7 @@ def run_master(_, args):
         args.prefetcher = not args.no_prefetcher
         annotate_split_points(model, {
             'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-            #'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+            'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
         })
 
         wrapper = OutputLossWrapper(model, MemFuserLoss())
@@ -529,8 +556,17 @@ def run_master(_, args):
         pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
         batches_events_contexts = []
         
+        # Create a CSV file for metrics
+        metrics_file = f"{this_file_name}_metrics_{args.rank}.csv"
+        with open(metrics_file, 'w', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(['Epoch', 'Epoch execution time (s)', 'Total samples', 'Average memory usage (MB)'])
+        
         for i in range(NUM_ITERATION):
-            train_one_epoch_pipeline(
+            epoch_start_time = time.time()
+            
+            # Run one epoch and get metrics
+            metrics = train_one_epoch_pipeline(
                 i,
                 pipe_driver,
                 loader_train,
@@ -546,6 +582,22 @@ def run_master(_, args):
                 model_ema=None,
                 mixup_fn=None,
             )
+            
+            # Calculate epoch execution time
+            epoch_execution_time = time.time() - epoch_start_time
+            
+            # Write metrics to CSV
+            with open(metrics_file, 'a', newline='') as csvfile:
+                csv_writer = csv.writer(csvfile)
+                csv_writer.writerow([
+                    i + 1,
+                    f"{epoch_execution_time:.2f}",
+                    metrics["total_samples"],
+                    f"{metrics['avg_memory_usage']:.2f}"
+                ])
+            
+            print(f"Epoch {i+1} execution time: {epoch_execution_time:.2f} seconds")
+            print(f"Metrics saved to {metrics_file}")
 
         if args.visualize:
             all_events_contexts: EventsContext = reduce(lambda c1, c2: EventsContext().update(c1).update(c2),
@@ -856,3 +908,4 @@ if __name__ == "__main__":
     
     print(torch.cuda.is_available())
     run_pippy(run_master, args)
+
