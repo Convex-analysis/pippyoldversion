@@ -513,7 +513,7 @@ def run_master(_, args):
             )
         args.prefetcher = not args.no_prefetcher
         annotate_split_points(model, {
-            'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
+            # 'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
             'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
         })
 
@@ -893,18 +893,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     from datetime import datetime
-    logging_path = '/home/cailab/xtaWorkspace/logs/' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + '_pipeline_driver.log'
+    # logging_path = '/home/cailab/xtaWorkspace/logs/' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + '_pipeline_driver.log'
     logging.basicConfig(
         level=logging.INFO,
         force=True,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(logging_path),
+            # logging.FileHandler(logging_path),
             logging.StreamHandler()
         ]
     )
 
-    print(f"Logging to {logging_path}")
+    # print(f"Logging to {logging_path}")
     
     print(torch.cuda.is_available())
     run_pippy(run_master, args)

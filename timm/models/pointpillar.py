@@ -4,6 +4,8 @@ Credit: Tianwei Yin
 
 from os import stat
 import logging
+
+import pippy.fx
 from torch_scatter import scatter_mean, scatter_max
 from torch import nn
 from .registry import register_model
@@ -12,6 +14,9 @@ import torch
 import pippy
 
 _logger = logging.getLogger(__name__)
+
+pippy.fx.wrap('scatter_mean')
+pippy.fx.wrap('scatter_max')
 
 class LidarModel(nn.Module):
     def __init__(self, num_input=9, num_features=[32,32],

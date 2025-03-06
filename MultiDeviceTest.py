@@ -173,7 +173,7 @@ def initialize_pipeline(model):
     # This avoids the issue where we try to split a submodule of an already wrapped module
     split_points = {
         'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-        'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+        'decoder': PipeSplitWrapper.SplitPoint.BEGINNING,
     }
     
     print("Using split points:", split_points)

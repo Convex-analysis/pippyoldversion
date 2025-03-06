@@ -7,6 +7,7 @@ import csv
 from functools import reduce
 import psutil
 import resource
+import logging
 
 def set_memory_limit(max_memory_mb):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -90,7 +91,7 @@ def run_master(_, args):
 
         log_memory_usage("Before initializing model")
 
-        model = ResNet152()
+        model = ResNet101()
 
         log_memory_usage("After initializing model")
 
@@ -243,9 +244,19 @@ if __name__ == "__main__":
     
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
     
-    parser.add_argument('--num_worker_threads', type=int, default=16)
+    parser.add_argument('--num_worker_threads', type=int, default=512)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        force=True,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            # logging.FileHandler(logging_path),
+            logging.StreamHandler()
+        ]
+    )
     
     # Set memory limit
     #set_memory_limit(args.max_memory_mb)

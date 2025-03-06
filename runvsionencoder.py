@@ -3,11 +3,6 @@ import subprocess
 import sys
 import resource
 
-DEVICE_IP_LIST = [
-    "192.168.2.14",
-    "192.168.2.13"
-]
-
 
 def set_memory_limit(max_memory_mb):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -18,7 +13,7 @@ def main(node_rank, max_memory_mb):
     set_memory_limit(max_memory_mb)
 
     # Set environment variables
-    os.environ["MASTER_ADDR"] = "192.168.2.14"
+    os.environ["MASTER_ADDR"] = "219.216.64.215"
     os.environ["MASTER_PORT"] = "29500"
     os.environ["WORLD_SIZE"] = "2"
     os.environ["NODE_RANK"] = str(node_rank)
