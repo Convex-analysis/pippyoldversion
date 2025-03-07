@@ -207,7 +207,6 @@ def run_master(_, args):
                         batches_events_contexts.append(pipe_driver.retrieve_events())
                     
                     memory_measurements.append(log_memory_usage(f"After processing batch {i} in {k} loader"))
-                    break
                 
                 print(f"Loader: {k}. Accuracy: {epoch_correct / epoch_all}")
                 print(f"Total {k} samples processed this epoch: {total_samples_processed}")
@@ -216,6 +215,7 @@ def run_master(_, args):
             memory_measurements.append(log_memory_usage(f"End of epoch {epoch + 1}"))
             
             # Calculate average memory usage
+            print(memory_measurements)
             avg_memory_usage = sum(memory_measurements) / len(memory_measurements)
             
             # Calculate epoch execution time
