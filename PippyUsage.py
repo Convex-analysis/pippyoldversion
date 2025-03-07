@@ -405,7 +405,28 @@ def main():
 import sys
 
 # Increase the recursion limit
-sys.setrecursionlimit(3000)
+
+def worker_memory_monitor(args, stop_event):
+    """Monitor memory usage every minute and write to CSV"""
+    worker_metrics_file = f"{os.path.splitext(os.path.basename(__file__))[0]}_worker_{args.rank}_memory.csv"
+    
+    with open(worker_metrics_file, 'w', newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        csv_writer.writerow(['Timestamp', 'Memory usage (MB)'])
+        
+        start_time = time.time()
+        while not stop_event.is_set():
+            # Record memory usage
+            memory_usage = log_memory_usage(f"Worker {args.rank} memory check")
+            current_time = time.time() - start_time
+            
+            # Write to CSV
+            with open(worker_metrics_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([f"{current_time:.2f}", f"{memory_usage:.2f}"])
+            
+            # Wait for 60 seconds before next measurement
+            time.sleep(60)
 
 # Your existing code
 def run_master(_, args):
@@ -611,6 +632,18 @@ def run_master(_, args):
 
     else:
         print("This is a worker rank")
+        
+        # Create event to signal thread termination
+        stop_monitoring = threading.Event()
+        
+        # Start memory monitoring thread
+        import threading
+        monitor_thread = threading.Thread(
+            target=worker_memory_monitor,
+            args=(args, stop_monitoring)
+        )
+        monitor_thread.start()
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
