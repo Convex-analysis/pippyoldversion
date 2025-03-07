@@ -13,7 +13,7 @@ def main(node_rank, max_memory_mb):
     set_memory_limit(max_memory_mb)
 
     # Set environment variables
-    os.environ["MASTER_ADDR"] = "219.216.64.215"
+    os.environ["MASTER_ADDR"] = "219.216.64.145"
     os.environ["MASTER_PORT"] = "29500"
     os.environ["WORLD_SIZE"] = "2"
     os.environ["NODE_RANK"] = str(node_rank)
