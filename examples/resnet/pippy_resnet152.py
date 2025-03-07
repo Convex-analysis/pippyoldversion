@@ -29,6 +29,7 @@ from pippy.events import EventsContext
 from pippy.microbatch import sum_reducer, TensorChunkSpec
 from pippy.visualizer import events_to_json
 from resnet import ResNet50, ResNet34, ResNet101, ResNet152
+import jtop
 
 PROFILING_ENABLED = True
 CHECK_NUMERIC_EQUIVALENCE = True
@@ -44,9 +45,30 @@ pippy.fx.Tracer.proxy_buffer_attributes = True
 USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
 
 def log_memory_usage(stage):
-    memory_mb = torch.cuda.memory_allocated(0)/1024/1024
-    print("GPU {}:{}".format(stage, memory_mb))
-    return memory_mb
+    try:
+        # Try to use jtop for more detailed GPU metrics
+        with jtop.jtop() as jetson:
+            if jetson.ok():
+                # Wait for jtop to gather stats
+                jetson.loop_for_stats(wait_after_max=1)
+                
+                # Get GPU stats - according to jtop API
+                gpu_usage = jetson.gpu['val']  # GPU usage percentage
+                gpu_freq = jetson.gpu['frq']   # GPU frequency in MHz
+                gpu_temp = jetson.gpu.get('gpu', 'N/A')  # GPU temperature in °C
+                
+                # Get memory stats from memory attribute, not from GPU
+                memory_used = jetson.memory['used'] * gpu_usage  # Memory used in MB
+                memory_total = jetson.memory['total'] # Total memory in MB
+                
+                print(f"GPU {stage}: {memory_used:.2f}MB/{memory_total:.2f}MB ({(memory_used/memory_total)*100:.1f}%), "
+                      f"Usage: {gpu_usage}%, Freq: {gpu_freq}MHz, Temp: {gpu_temp}°C")
+                return memory_used
+    except Exception as e:
+        # Fallback to PyTorch's built-in memory tracking
+        memory_mb = torch.cuda.memory_allocated(0)/1024/1024
+        print(f"GPU {stage}: {memory_mb:.2f}MB (PyTorch measurement)")
+        return memory_mb
 
 def run_master(_, args):
     MULTI_USE_PARAM_CONFIG = MultiUseParameterConfig.REPLICATE if args.replicate else MultiUseParameterConfig.TRANSMIT
