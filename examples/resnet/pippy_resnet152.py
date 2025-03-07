@@ -113,16 +113,16 @@ def run_master(_, args):
 
         log_memory_usage("Before initializing model")
 
-        model = ResNet101()
+        model = ResNet34()
 
         log_memory_usage("After initializing model")
 
         annotate_split_points(model, {
             #'layer': PipeSplitWrapper.SplitPoint.END,
             'layer1': PipeSplitWrapper.SplitPoint.END,
-            'layer2': PipeSplitWrapper.SplitPoint.END,
+            #'layer2': PipeSplitWrapper.SplitPoint.END,
             #'layer2.0': PipeSplitWrapper.SplitPoint.END,
-            'layer3': PipeSplitWrapper.SplitPoint.END,
+            #'layer3': PipeSplitWrapper.SplitPoint.END,
         })
 
         wrapper = OutputLossWrapper(model, cross_entropy)

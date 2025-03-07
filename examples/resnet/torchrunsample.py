@@ -6,7 +6,7 @@ import sys
 def main(node_rank, max_memory_mb):
 
     # Set environment variables
-    os.environ["MASTER_ADDR"] = "219.216.64.157"
+    os.environ["MASTER_ADDR"] = "192.168.2.14"
     os.environ["MASTER_PORT"] = "29500"
     os.environ["WORLD_SIZE"] = "4"
     os.environ["OMP_NUM_THREADS"] = "4"  # Set this to the number of CPU cores
