@@ -65,10 +65,7 @@ def log_memory_usage(stage):
                       f"Usage: {gpu_usage}%, Freq: {gpu_freq}MHz, Temp: {gpu_temp}°C")
                 return memory_used
     except Exception as e:
-        # Fallback to PyTorch's built-in memory tracking
-        memory_mb = torch.cuda.memory_allocated(0)/1024/1024
-        print(f"GPU {stage}: {memory_mb:.2f}MB (PyTorch measurement)")
-        return memory_mb
+        print(f"Error reading GPU memory: {e}")
 
 def run_master(_, args):
     MULTI_USE_PARAM_CONFIG = MultiUseParameterConfig.REPLICATE if args.replicate else MultiUseParameterConfig.TRANSMIT
