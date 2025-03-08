@@ -48,21 +48,10 @@ def log_memory_usage(stage):
     try:
         # Try to use jtop for more detailed GPU metrics
         with jtop.jtop() as jetson:
-            if jetson.ok():
-                # Wait for jtop to gather stats
-                jetson.loop_for_stats(wait_after_max=1)
-                
-                # Get GPU stats - according to jtop API
-                gpu_usage = jetson.gpu['val']  # GPU usage percentage
-                gpu_freq = jetson.gpu['frq']   # GPU frequency in MHz
-                gpu_temp = jetson.gpu.get('gpu', 'N/A')  # GPU temperature in °C
-                
+            if jetson.ok(): 
                 # Get memory stats from memory attribute, not from GPU
-                memory_used = jetson.memory['used'] * gpu_usage  # Memory used in MB
-                memory_total = jetson.memory['total'] # Total memory in MB
+                memory_used = jetson.memory.RAM["shared"]  # Memory used in MB
                 
-                print(f"GPU {stage}: {memory_used:.2f}MB/{memory_total:.2f}MB ({(memory_used/memory_total)*100:.1f}%), "
-                      f"Usage: {gpu_usage}%, Freq: {gpu_freq}MHz, Temp: {gpu_temp}°C")
                 return memory_used
     except Exception as e:
         print(f"Error reading GPU memory: {e}")
