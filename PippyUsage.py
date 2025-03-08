@@ -63,31 +63,18 @@ pippy.fx.Tracer.proxy_buffer_attributes = True
 
 USE_TQDM = bool(int(os.getenv('USE_TQDM', '1')))
 
+
 def log_memory_usage(stage):
     try:
         # Try to use jtop for more detailed GPU metrics
         with jtop.jtop() as jetson:
-            if jetson.ok():
-                # Wait for jtop to gather stats
-                jetson.loop_for_stats(wait_after_max=1)
-                
-                # Get GPU stats - according to jtop API
-                gpu_usage = jetson.gpu['val']  # GPU usage percentage
-                gpu_freq = jetson.gpu['frq']   # GPU frequency in MHz
-                gpu_temp = jetson.gpu.get('gpu', 'N/A')  # GPU temperature in °C
-                
+            if jetson.ok(): 
                 # Get memory stats from memory attribute, not from GPU
-                memory_used = jetson.memory['used'] * gpu_usage  # Memory used in MB
-                memory_total = jetson.memory['total'] # Total memory in MB
-                
-                print(f"GPU {stage}: {memory_used:.2f}MB/{memory_total:.2f}MB ({(memory_used/memory_total)*100:.1f}%), "
-                      f"Usage: {gpu_usage}%, Freq: {gpu_freq}MHz, Temp: {gpu_temp}°C")
+                memory_used = jetson.memory['RAM']["shared"]  # Memory used in MB
+                print_green("Memory used: {:.2f} KB".format(memory_used))
                 return memory_used
     except Exception as e:
-        # Fallback to PyTorch's built-in memory tracking
-        memory_mb = torch.cuda.memory_allocated(0)/1024/1024
-        print(f"GPU {stage}: {memory_mb:.2f}MB (PyTorch measurement)")
-        return memory_mb
+        print(f"Error reading GPU memory: {e}")
 
 def debug_pickle(obj, name):
     try:
@@ -674,7 +661,7 @@ if __name__ == "__main__":
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
     parser.add_argument('--max_epochs', type=int, default=10)
-    parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--batch_size', type=int, default=16)
 
     # CYH: Schedules 0:FillDrain, 1:1F1B, 2:Interleaved1F1B
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
