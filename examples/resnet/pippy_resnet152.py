@@ -50,7 +50,7 @@ def log_memory_usage(stage):
         with jtop.jtop() as jetson:
             if jetson.ok(): 
                 # Get memory stats from memory attribute, not from GPU
-                memory_used = jetson.memory.RAM["shared"]  # Memory used in MB
+                memory_used = jetson.memory['RAM']["shared"]  # Memory used in MB
                 
                 return memory_used
     except Exception as e:
