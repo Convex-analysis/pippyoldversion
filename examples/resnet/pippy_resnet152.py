@@ -51,7 +51,7 @@ def log_memory_usage(stage):
             if jetson.ok(): 
                 # Get memory stats from memory attribute, not from GPU
                 memory_used = jetson.memory['RAM']["shared"]  # Memory used in MB
-                
+                print_green("Memory used: {:.2f} MB".format(memory_used))
                 return memory_used
     except Exception as e:
         print(f"Error reading GPU memory: {e}")
