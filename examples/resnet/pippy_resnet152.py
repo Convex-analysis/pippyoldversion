@@ -151,7 +151,7 @@ def run_master(_, args):
             print(f"Epoch: {epoch + 1}")
             epoch_start_time = time.time()
             memory_measurements = []
-            memory_measurements.append(log_memory_usage(f"Start of epoch {epoch + 1}"))
+            #memory_measurements.append(log_memory_usage(f"Start of epoch {epoch + 1}"))
             
             total_epoch_samples = 0
             
