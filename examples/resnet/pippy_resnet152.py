@@ -50,7 +50,8 @@ def log_memory_usage(stage):
         with jtop.jtop() as jetson:
             if jetson.ok(): 
                 # Get memory stats from memory attribute, not from GPU
-                memory_used = jetson.memory['RAM']["shared"]  # Memory used in MB
+                memory_used = jetson.memory['RAM']["shared"]  # Memory used in KB
+                memory_used = memory_used / 1024  # Convert to MB
                 print_green("Memory used: {:.2f} KB".format(memory_used))
                 return memory_used
     except Exception as e:
@@ -140,9 +141,10 @@ def run_master(_, args):
         this_file_name = os.path.splitext(os.path.basename(__file__))[0]
         pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
         batches_events_contexts = []
-        
+        time.time()
+        filecreatetime = time.strftime("%Y%m%d-%H%M%S")
         # Create a CSV file for metrics
-        metrics_file = f"{this_file_name}_metrics_{args.rank}.csv"
+        metrics_file = f"{this_file_name}_metrics_{args.rank}_{filecreatetime}.csv"
         with open(metrics_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(['Epoch', 'Epoch execution time (s)', 'Total samples', 'Average memory usage (MB)'])

@@ -51,7 +51,7 @@ from pippy.PipelineDriver import print_blue, print_red, print_green
 PROFILING_ENABLED = True
 CHECK_NUMERIC_EQUIVALENCE = True
 
-NUM_ITERATION = 2
+NUM_ITERATION = 20
 
 schedules = {
     'FillDrain': PipelineDriverFillDrain,
@@ -70,7 +70,8 @@ def log_memory_usage(stage):
         with jtop.jtop() as jetson:
             if jetson.ok(): 
                 # Get memory stats from memory attribute, not from GPU
-                memory_used = jetson.memory['RAM']["shared"]  # Memory used in MB
+                memory_used = jetson.memory['RAM']["shared"]  # Memory used in KB
+                memory_used = memory_used / 1024  # Convert to MB
                 print_green("Memory used: {:.2f} KB".format(memory_used))
                 return memory_used
     except Exception as e:
@@ -416,12 +417,13 @@ import sys
 
 def worker_memory_monitor(args, stop_event):
     """Monitor memory usage every minute and write to CSV"""
+    print_blue(f"Worker {args.rank} memory monitor started")
     worker_metrics_file = f"{os.path.splitext(os.path.basename(__file__))[0]}_worker_{args.rank}_memory.csv"
     
     with open(worker_metrics_file, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(['Timestamp', 'Memory usage (MB)'])
-        
+        print_green(f"The information is recorded in {worker_metrics_file}")
         start_time = time.time()
         while not stop_event.is_set():
             # Record memory usage
@@ -444,8 +446,9 @@ def run_master(_, args):
     print("Using device:", args.device)
 
     if args.rank == 0:
-        number_of_workers = 2
+        number_of_workers = args.world_size
         all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
+        #all_worker_ranks = list(range(1, 1 + number_of_workers))
         chunks = len(all_worker_ranks)
         batch_size = args.batch_size * chunks
 
@@ -535,14 +538,15 @@ def run_master(_, args):
             interpolation=train_interpolation,
             mean=data_config["mean"],
             std=data_config["std"],
-            #num_workers=args.workers,
+            num_workers=2,
             #distributed=args.distributed,
             collate_fn=collate_fn,
             pin_memory=args.pin_mem,
+            #persistent_workers=False,  # Add this line
             )
         args.prefetcher = not args.no_prefetcher
         annotate_split_points(model, {
-            # 'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
+            #'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
             'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
         })
 
@@ -585,8 +589,10 @@ def run_master(_, args):
         pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
         batches_events_contexts = []
         
+        time.time()
+        filecreatetime = time.strftime("%Y%m%d-%H%M%S")
         # Create a CSV file for metrics
-        metrics_file = f"{this_file_name}_metrics_{args.rank}.csv"
+        metrics_file = f"{this_file_name}_metrics_{args.rank}_{filecreatetime}.csv"
         with open(metrics_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(['Epoch', 'Epoch execution time (s)', 'Total samples', 'Average memory usage (MB)'])
@@ -661,7 +667,7 @@ if __name__ == "__main__":
     parser.add_argument('--master_port', type=str, default=os.getenv('MASTER_PORT', '29500'))
 
     parser.add_argument('--max_epochs', type=int, default=10)
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=2)
 
     # CYH: Schedules 0:FillDrain, 1:1F1B, 2:Interleaved1F1B
     parser.add_argument('-s', '--schedule', type=str, default=list(schedules.keys())[0], choices=schedules.keys())
