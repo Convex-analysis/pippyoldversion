@@ -27,8 +27,5 @@ if __name__ == "__main__":
         # jetson.ok() will provide the proper update frequency
         if jetson.ok():
             # Print all cpu
-            print(type(jetson.memory['RAM']))
-            for name, data in jetson.memory.items():
-                print("------ {name} ------".format(name=name))
-                print(data)
+            print(jetson.memory['RAM']['shared'])
 # EOF

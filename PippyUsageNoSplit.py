@@ -166,7 +166,7 @@ def initialize_pipeline(model):
     annotate_split_points(model, {
         #'position_encoding': PipeSplitWrapper.SplitPoint.END,
         #'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-        'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+        #'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
     })
     output_loss_value_spec = (False, True)
     pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)
@@ -447,7 +447,11 @@ def run_master(_, args):
 
     if args.rank == 0:
         number_of_workers = args.world_size
-        all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
+        if args.world_size == 1:
+            number_of_workers = 1
+            all_worker_ranks = [0]
+        else:
+            all_worker_ranks = list(range(0, number_of_workers))  # include master rank = 0
         #all_worker_ranks = list(range(1, 1 + number_of_workers))
         chunks = len(all_worker_ranks)
         batch_size = args.batch_size * chunks
@@ -515,6 +519,10 @@ def run_master(_, args):
             freeze_num=-1,
         )
         debug_pickle(model, "model")
+        annotate_split_points(model, {
+            #'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
+            #'decoder': PipeSplitWrapper.SplitPoint.END
+        })
 
         log_memory_usage("After initializing model")
 
@@ -545,10 +553,6 @@ def run_master(_, args):
             #persistent_workers=False,  # Add this line
             )
         args.prefetcher = not args.no_prefetcher
-        annotate_split_points(model, {
-            'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-            #'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
-        })
 
         wrapper = OutputLossWrapper(model, MemFuserLoss())
 

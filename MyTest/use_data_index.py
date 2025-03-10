@@ -11,6 +11,7 @@ from typing import List, Dict, Set, Tuple
 
 from data_index_sub_gen import generate_subset, collect_paths_from_file, filter_paths_by_criteria
 
+
 def parse_path_info(path: str) -> Tuple[str, str, str]:
     """
     Parse a path to extract town, size, and weather information.
@@ -107,7 +108,7 @@ def main():
         'weathers': None  # Use all available weathers
     }
     
-    subset_size = 100  # Define your desired subset size N
+    subset_size = 60  # Define your desired subset size N
     
     # Read dataset index and filter paths using functions from data_index_sub_gen.py
     all_paths = collect_paths_from_file(dataset_index_path)
@@ -139,3 +140,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    #remove_paths_from_navigation()

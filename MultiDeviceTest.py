@@ -155,29 +155,18 @@ def initialize_pipeline(model):
     debug_pickle(loss_wrapper, "loss_wrapper")
 
     # Print out the full model structure to find valid split points
-    print("Full model structure (all modules):")
-    all_modules = {}
-    for name, module in model.named_modules():
-        if name:  # Skip the root module
-            all_modules[name] = type(module).__name__
-            print(f"Module: {name} - {type(module).__name__}")
-    
-    # Find all decoder-related modules for potential split points
-    decoder_modules = {name: module_type for name, module_type in all_modules.items() 
-                      if 'decoder' in name.lower()}
-    print("\nDecoder-related modules:")
-    for name, module_type in decoder_modules.items():
-        print(f"  {name}: {module_type}")
     
     # Approach 1: Use only top-level module split points that don't conflict
     # This avoids the issue where we try to split a submodule of an already wrapped module
+    print(model)
     annotate_split_points(model, {
             #'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-            'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+            #'decoder': PipeSplitWrapper.SplitPoint.END
+            #'velocity_fc': PipeSplitWrapper.SplitPoint.END,
+            #'waypoints_generator': PipeSplitWrapper.SplitPoint.END,
+            #'traffic_pred_head': PipeSplitWrapper.SplitPoint.BEGINNING,
+            #'loss_fn' : PipeSplitWrapper.SplitPoint.END
         })
-    
-    print("Using split points:", split_points)
-    annotate_split_points(model, split_points)
     
     # Approach 2 (alternative): Split the model into 5 stages manually by directly accessing submodules
     # This would require more knowledge of the specific model structure
@@ -186,6 +175,7 @@ def initialize_pipeline(model):
     output_loss_value_spec = (False, True)
     pipe = Pipe.from_tracing(loss_wrapper, output_loss_value_spec=output_loss_value_spec)
     debug_pickle(pipe, "pipe")
+    print(pipe)
     
     # Count the number of stages in the generated pipe to confirm our splits worked
     print(f"Number of stages in the pipe: {len(pipe.split_gm.submodules)}")
