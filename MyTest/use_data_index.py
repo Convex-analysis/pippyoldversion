@@ -104,8 +104,9 @@ def main():
     # Define your requirements here
     requirements = {
         'towns': ['town01', 'town06', 'town10'],
-        'sizes': ['tiny', 'short', 'long'],
-        'weathers': None  # Use all available weathers
+        'sizes': ['tiny', 'short'],
+        #'weathers': None
+        'weathers': ['w0','w1', 'w2','w3','w4','w5','w6','w7','w8','w9','w10','w11', 'w12','w13','w14','w15','w16','w17','w18','w19','w20']  # Use all available weathers
     }
     
     subset_size = 60  # Define your desired subset size N
