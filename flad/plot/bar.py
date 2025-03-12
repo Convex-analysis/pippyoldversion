@@ -305,7 +305,136 @@ def plot_VE_mem():
         plt.savefig(f"{OUTPUT_DIR}vision_encoder_memory.png", dpi=300, bbox_inches='tight')
     plt.show()
     
+def plot_model_architecture():
+    """
+    Plot a simplified visualization of the Vision-Encoder model architecture.
+    This diagram shows the high-level structure rather than all individual layers.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import numpy as np
+    from matplotlib.path import Path
     
+    # Create figure with consistent styling
+    fig, ax = plt.subplots(figsize=(14, 10))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    ax.axis('off')
+    
+    # Define colors
+    COLORS = {
+        'rgb': '#64A0D0',      # Light blue
+        'lidar': '#8FB3D9',    # Mid blue
+        'encoder': '#2978B5',  # Dark blue
+        'decoder': '#2978B5',  # Dark blue
+        'heads': '#A3C4DC',    # Very light blue
+        'arrow': '#333333',    # Dark gray
+        'text': '#000000',     # Black
+        'border': '#000000',   # Black
+    }
+    
+    # Helper function to draw blocks
+    def draw_block(x, y, width, height, label, color, sublabels=None):
+        rect = patches.FancyBboxPatch(
+            (x, y), width, height, 
+            boxstyle=patches.BoxStyle("Round", pad=0.6),
+            facecolor=color, edgecolor=COLORS['border'], linewidth=1.5, alpha=0.9
+        )
+        ax.add_patch(rect)
+        
+        # Add main label
+        ax.text(x + width/2, y + height/2, label, 
+                ha='center', va='center', fontsize=12, fontweight='bold')
+        
+        # Add sublabels if provided
+        if sublabels:
+            y_offset = height / (len(sublabels) + 1)
+            for i, sublabel in enumerate(sublabels):
+                ax.text(x + width/2, y + (i+1)*y_offset, 
+                        sublabel, ha='center', va='center', fontsize=9)
+    
+    # Helper function to draw arrows
+    def draw_arrow(start, end, label=None):
+        ax.annotate('', xy=end, xytext=start,
+                   arrowprops=dict(facecolor=COLORS['arrow'], shrink=0.05, 
+                                  width=1.5, headwidth=8, alpha=0.9))
+        if label:
+            mid_x = (start[0] + end[0]) / 2
+            mid_y = (start[1] + end[1]) / 2
+            ax.text(mid_x, mid_y, label, ha='center', va='center', 
+                   fontsize=9, fontweight='bold', color=COLORS['text'])
+    
+    # Draw title
+    ax.text(50, 95, 'Vision-Encoder Model Architecture', 
+            ha='center', va='center', fontsize=16, fontweight='bold')
+    
+    # Draw input nodes
+    draw_block(10, 80, 20, 10, "RGB Input", "#e0e0e0", ["3×H×W"])
+    draw_block(70, 80, 20, 10, "LiDAR Input", "#e0e0e0", ["N×9 points"])
+    draw_block(40, 80, 20, 10, "Velocity", "#e0e0e0", ["1D"])
+    
+    # Draw backbone blocks
+    draw_block(10, 65, 20, 10, "RGB Backbone", COLORS['rgb'], ["ResNet"])
+    draw_block(70, 65, 20, 10, "LiDAR Backbone", COLORS['lidar'], ["PointPillar"])
+    
+    # Draw feature processing
+    draw_block(10, 50, 20, 10, "RGB Features", COLORS['rgb'], ["2048→256"])
+    draw_block(70, 50, 20, 10, "LiDAR Features", COLORS['lidar'], ["192→256"])
+    draw_block(40, 50, 20, 10, "Velocity Embed", COLORS['rgb'], ["1→256"])
+    
+    # Draw encoder block
+    draw_block(40, 35, 20, 10, "Transformer\nEncoder", COLORS['encoder'], ["1 layer"])
+    
+    # Draw decoder block
+    draw_block(40, 20, 20, 10, "Transformer\nDecoder", COLORS['decoder'], ["3 layers"])
+    
+    # Draw prediction heads
+    draw_block(10, 5, 15, 10, "Traffic\nPrediction", COLORS['heads'])
+    draw_block(30, 5, 15, 10, "Waypoints", COLORS['heads'], ["GRU"])
+    draw_block(50, 5, 15, 10, "Traffic Light", COLORS['heads'])
+    draw_block(70, 5, 15, 10, "Stop Sign", COLORS['heads'])
+    
+    # Draw arrows
+    # Input to backbone
+    draw_arrow((20, 80), (20, 75))
+    draw_arrow((80, 80), (80, 75))
+    draw_arrow((50, 80), (50, 50))
+    
+    # Backbone to features
+    draw_arrow((20, 65), (20, 60))
+    draw_arrow((80, 65), (80, 60))
+    
+    # Features to encoder
+    draw_arrow((20, 50), (40, 40))
+    draw_arrow((50, 50), (45, 40))
+    draw_arrow((80, 50), (50, 40))
+    
+    # Encoder to decoder
+    draw_arrow((50, 35), (50, 30))
+    
+    # Decoder to heads
+    draw_arrow((40, 20), (17.5, 15))
+    draw_arrow((43, 20), (37.5, 15))
+    draw_arrow((47, 20), (57.5, 15))
+    draw_arrow((50, 20), (77.5, 15))
+    
+    # Add a note about split points
+    ax.text(5, 95, "Pipeline Split Points:", ha='left', va='center', fontsize=10, fontweight='bold')
+    
+    # Draw split point indicators
+    # Encoder beginning
+    ax.axhline(y=42, xmin=0.05, xmax=0.95, color='red', linestyle='--', linewidth=2, alpha=0.8)
+    ax.text(95, 42, "Encoder\nBeginning", ha='right', va='center', color='red', fontsize=10)
+    
+    # Decoder beginning
+    ax.axhline(y=27, xmin=0.05, xmax=0.95, color='blue', linestyle='--', linewidth=2, alpha=0.8)
+    ax.text(95, 27, "Decoder\nBeginning", ha='right', va='center', color='blue', fontsize=10)
+    
+    plt.tight_layout()
+    
+    if SAVE_PLOTS:
+        plt.savefig(f"{OUTPUT_DIR}model_architecture.png", dpi=300, bbox_inches='tight')
+    plt.show()
 
 if __name__ == "__main__":
     setup_environment()
@@ -317,7 +446,8 @@ if __name__ == "__main__":
     #plot_optimization_times()
     #plot_model_size_comparison()
     #plot_recovery_time()
-    plot_VE_throughout()
-    plot_VE_mem()
+    #plot_VE_throughout()
+    #plot_VE_mem()
+    plot_model_architecture()
     
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
