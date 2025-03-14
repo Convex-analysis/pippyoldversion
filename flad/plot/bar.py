@@ -304,7 +304,102 @@ def plot_VE_mem():
     if SAVE_PLOTS:
         plt.savefig(f"{OUTPUT_DIR}vision_encoder_memory.png", dpi=300, bbox_inches='tight')
     plt.show()
+import matplotlib.pyplot as plt
+import numpy as np
+
+def create_model_architecture():
+    # Set figure size and style
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig = plt.figure(figsize=(15, 12))
     
+    # Define colors
+    COLORS = {
+        'input': '#AED6F1',
+        'encoder': '#F5B7B1',
+        'transformer': '#D2B4DE',
+        'fusion': '#F9E79F',
+        'output': '#A2D9CE'
+    }
+    
+    # Create subplot
+    ax = fig.add_subplot(111)
+    
+    # Define component positions
+    y_levels = {
+        'input': 5,
+        'encoder': 4,
+        'transformer': 3,
+        'fusion': 2,
+        'output': 1
+    }
+    
+    # Draw input layer
+    inputs = ['Front', 'Left', 'Right', 'Rear', 'Center', 'LiDAR']
+    for i, inp in enumerate(inputs):
+        x_pos = i if i < 5 else 5
+        ax.add_patch(plt.Rectangle((x_pos-0.4, 4.8), 0.8, 0.4, 
+                                 facecolor=COLORS['input'], edgecolor='black'))
+        plt.text(x_pos, 5, inp, ha='center', va='center')
+    
+    # Draw encoders
+    ax.add_patch(plt.Rectangle((2, 3.8), 2, 0.4, 
+                             facecolor=COLORS['encoder'], edgecolor='black'))
+    plt.text(3, 4, 'ResNet50 CNN', ha='center', va='center')
+    
+    ax.add_patch(plt.Rectangle((5, 3.8), 1, 0.4, 
+                             facecolor=COLORS['encoder'], edgecolor='black'))
+    plt.text(5.5, 4, 'PointPillar', ha='center', va='center')
+    
+    # Draw transformer components
+    ax.add_patch(plt.Rectangle((2, 2.8), 4, 0.4, 
+                             facecolor=COLORS['transformer'], edgecolor='black'))
+    plt.text(4, 3, 'Transformer (1 Encoder + 3 Decoder Layers)', ha='center', va='center')
+    
+    # Draw feature fusion
+    ax.add_patch(plt.Rectangle((2, 1.8), 4, 0.4, 
+                             facecolor=COLORS['fusion'], edgecolor='black'))
+    plt.text(4, 2, 'Multi-head Self Attention + Cross Attention', ha='center', va='center')
+    
+    # Draw output heads
+    outputs = ['Traffic\nDetection', 'Waypoint\nPrediction', 
+              'Traffic Light\nState', 'Stop Sign\nDetection']
+    for i, out in enumerate(outputs):
+        x_pos = i * 1.5 + 1.5
+        ax.add_patch(plt.Rectangle((x_pos-0.4, 0.8), 0.8, 0.4, 
+                                 facecolor=COLORS['output'], edgecolor='black'))
+        plt.text(x_pos, 1, out, ha='center', va='center')
+    
+    # Draw arrows
+    def draw_arrow(start, end):
+        plt.arrow(start[0], start[1], end[0]-start[0], end[1]-start[1],
+                 head_width=0.1, head_length=0.1, fc='k', ec='k', length_includes_head=True)
+    
+    # Input to encoder arrows
+    for i in range(5):
+        draw_arrow((i, 4.8), (3, 4.2))
+    draw_arrow((5, 4.8), (5.5, 4.2))
+    
+    # Encoder to transformer arrows
+    draw_arrow((3, 3.8), (4, 3.2))
+    draw_arrow((5.5, 3.8), (4, 3.2))
+    
+    # Transformer to fusion arrow
+    draw_arrow((4, 2.8), (4, 2.2))
+    
+    # Fusion to outputs arrows
+    for i, x_pos in enumerate([1.5, 3, 4.5, 6]):
+        draw_arrow((4, 1.8), (x_pos, 1.2))
+    
+    # Customize plot
+    ax.set_xlim(-1, 7)
+    ax.set_ylim(0.5, 5.5)
+    ax.axis('off')
+    plt.title('MemFuser Model Architecture', pad=20, fontsize=16)
+    
+    # Save plot
+    plt.savefig('./flad/plot/figures/memfuser_architecture.png', 
+                dpi=300, bbox_inches='tight')
+    plt.show()  
     
 
 if __name__ == "__main__":
@@ -317,7 +412,10 @@ if __name__ == "__main__":
     #plot_optimization_times()
     #plot_model_size_comparison()
     #plot_recovery_time()
-    plot_VE_throughout()
-    plot_VE_mem()
+    #plot_VE_throughout()
+    #plot_VE_mem()
+    create_model_architecture()
     
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
+
+

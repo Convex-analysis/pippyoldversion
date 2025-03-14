@@ -621,7 +621,7 @@ class RankWorker(EventRecorder):
             work_item = self.waiting_runlist[runlist_key]
             work_item.ready_args[arg_idx] = value
             work_item.blocked_args_count -= 1
-            print(f'Before WorkItem Ready if: work_item.blocked_args_count({work_item.blocked_args_count}) should be 0')
+            # print(f'Before WorkItem Ready if: work_item.blocked_args_count({work_item.blocked_args_count}) should be 0')
             if work_item.blocked_args_count == 0:
                 with self.ready_runlist_cv:
                     work_item.state = SchedState.READY

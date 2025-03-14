@@ -301,10 +301,11 @@ def train_one_epoch_pipeline(
 
         print(f"Input: {input.keys()}")
         result = pipelineDriver(input, target)
+        
         output = result['output']
         loss = result['loss']
         losses_m.update(loss.item(), batch_size)
-
+        #from here
         optimizer.zero_grad()
         if loss_scaler is not None:
             loss_scaler(
@@ -326,7 +327,7 @@ def train_one_epoch_pipeline(
                     mode=args.clip_mode,
                 )
             optimizer.step()
-
+        #not the issue of optimizer
         if model_ema is not None:
             model_ema.update(pipelineDriver)
 
@@ -335,7 +336,7 @@ def train_one_epoch_pipeline(
 
         end = time.time()
         batch_time_m.update(end - start)
-        
+        continue
         # Record memory usage after batch
         memory_measurements.append(log_memory_usage(f"After batch {batch_idx} in epoch {epoch}"))
 
@@ -941,15 +942,15 @@ if __name__ == "__main__":
 
     from datetime import datetime
     # logging_path = '/home/cailab/xtaWorkspace/logs/' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + '_pipeline_driver.log'
-    logging.basicConfig(
-        level=logging.INFO,
-        force=True,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            # logging.FileHandler(logging_path),
-            logging.StreamHandler()
-        ]
-    )
+    # logging.basicConfig(
+    #     level=logging.INFO,
+    #     force=True,
+    #     format='%(asctime)s - %(levelname)s - %(message)s',
+    #     handlers=[
+    #         # logging.FileHandler(logging_path),
+    #         logging.StreamHandler()
+    #     ]
+    # )
 
     # print(f"Logging to {logging_path}")
     
