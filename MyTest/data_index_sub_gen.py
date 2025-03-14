@@ -43,8 +43,8 @@ def filter_paths_by_criteria(paths, towns=None, weathers=None, sizes=None):
     filtered_paths = []
     for path in paths:
         parts = path.split('/')
-        if len(parts) < 2:
-            continue
+        #if len(parts) < 2:
+            #continue
         
         route_info = parts[0]
         if not route_info.startswith('routes_'):
