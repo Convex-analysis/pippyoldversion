@@ -956,3 +956,5 @@ if __name__ == "__main__":
     plot_combined_driving_score_bar()
    
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
+
+
