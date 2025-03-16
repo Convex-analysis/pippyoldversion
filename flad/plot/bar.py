@@ -9,7 +9,7 @@ import glob
 # Set consistent plot style
 plt.style.use('seaborn-v0_8-whitegrid')
 BLUE_PALETTE = ['#2978B5', '#64A0D0', '#8FB3D9', '#A3C4DC']
-FIG_SIZE = (10, 6)
+FIG_SIZE = (6, 5)  # Updated to specified dimensions
 SAVE_PLOTS = True
 OUTPUT_DIR = './flad/plot/figures/'
 
@@ -19,13 +19,13 @@ def setup_environment():
     if SAVE_PLOTS and not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
     
-    # Set consistent font sizes
-    plt.rcParams['font.size'] = 12
-    plt.rcParams['axes.labelsize'] = 14
-    plt.rcParams['axes.titlesize'] = 16
-    plt.rcParams['xtick.labelsize'] = 12
-    plt.rcParams['ytick.labelsize'] = 12
-    plt.rcParams['legend.fontsize'] = 12
+    # Set consistent font sizes with updated values
+    plt.rcParams['font.size'] = 16  # Base font size
+    plt.rcParams['axes.labelsize'] = 25  # Increased for x and y labels
+    plt.rcParams['axes.titlesize'] = 25  # Increased for title
+    plt.rcParams['xtick.labelsize'] = 16
+    plt.rcParams['ytick.labelsize'] = 16
+    plt.rcParams['legend.fontsize'] = 16  # Increased for legend
 
 def process_csv_files():
     """Process CSV files and extract execution times"""
@@ -80,22 +80,22 @@ def plot_execution_times():
     if any(incomplete):
         inc_bars = ax.bar(x[incomplete] - 0.2, [100] * sum(incomplete), width=0.4, align='center',
                           hatch='////', color='lightgray', edgecolor='black', linewidth=1,
-                          label='Base (Did not complete)')
+                          label='Failed')
         
         
     
     # Customize plot
     ax.set_xlabel('Cluster Size')
-    ax.set_ylabel('Average Execution Time (s)')
-    ax.set_title('Execution Time Comparison by Cluster Size', fontsize=16, pad=20)
+    ax.set_ylabel('Avg Execution Time (s)')
+    #ax.set_title('Execution Time Comparison by Cluster Size', fontsize=16, pad=20)
     ax.set_xticks(x)
     ax.set_xticklabels(x_values)
-    ax.legend(loc='upper right')
+    ax.legend(loc='best')
     ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
     if SAVE_PLOTS:
-        plt.savefig(f"{OUTPUT_DIR}execution_time_comparison.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUTPUT_DIR}execution_time_comparison.png", dpi=400, bbox_inches='tight')
     plt.show()
 
 def plot_optimization_times():
@@ -126,21 +126,21 @@ def plot_optimization_times():
     if any(incomplete):
         ax.bar(x[incomplete] - 0.2, [0.01] * sum(incomplete), width=0.4, align='center',
               hatch='////', color='lightgray', edgecolor='black', linewidth=1,
-              label='Phase1 (Did not complete)')
+              label='Failed')
         
 
     
     # Customize plot
     ax.set_xlabel('Problem Scale')
-    ax.set_ylabel('Average Optimization Time (s)')
-    ax.set_title('Optimization Time Comparison by Problem Scale', fontsize=16, pad=20)
+    ax.set_ylabel('Avg Optimization Time (s)')
+    #ax.set_title('Optimization Time Comparison by Problem Scale', fontsize=16, pad=20)
     ax.set_xticks(x)
-    ax.legend()
+    ax.legend(loc='best')
     ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
     if SAVE_PLOTS:
-        plt.savefig(f"{OUTPUT_DIR}optimization_time_comparison.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUTPUT_DIR}optimization_time_comparison.png", dpi=400, bbox_inches='tight')
     plt.show()
 
 def plot_model_size_comparison():
@@ -174,7 +174,7 @@ def plot_model_size_comparison():
         incomplete_positions = bar_position[incomplete]
         ax.bar(incomplete_positions - 0.2, [100] * len(incomplete_positions), width=0.4, align='center',
               hatch='////', color='lightgray', edgecolor='black', linewidth=1, 
-              label='Base (Did not complete)')
+              label='Failed')
         
     
     
@@ -182,14 +182,14 @@ def plot_model_size_comparison():
     # Customize plot
     plt.xticks(bar_position, model_sizes)
     plt.xlabel('Model Size')
-    plt.ylabel('Average Execution Time (s)')
-    plt.title('Execution Time Comparison by Model Size', fontsize=16, pad=20)
+    plt.ylabel('Avg Execution Time (s)')
+    #plt.title('Execution Time Comparison by Model Size', fontsize=16, pad=20)
     plt.legend(loc='upper left')
     ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
     if SAVE_PLOTS:
-        plt.savefig(f"{OUTPUT_DIR}model_size_comparison.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUTPUT_DIR}model_size_comparison.png", dpi=400, bbox_inches='tight')
     plt.show()
 
 def plot_recovery_time():
@@ -213,15 +213,15 @@ def plot_recovery_time():
     bars[2].set_hatch('\\\\')
 
     # Customize plot
-    ax.set_title('Recovery Time Comparison Between Methods', fontsize=16, pad=20)
-    ax.set_xlabel('Recovery Method', fontsize=14, labelpad=10)
-    ax.set_ylabel('Recovery Time (s)', fontsize=14, labelpad=10)
+    #ax.set_title('Recovery Time Comparison Between Methods', fontsize=16, pad=20)
+    ax.set_xlabel('Recovery Method', fontsize=24, labelpad=10)
+    ax.set_ylabel('Recovery Time (s)', fontsize=24, labelpad=10)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.set_ylim(0, max(Recovery_time.values()) * 1.15)  # Add 15% headroom
     
     plt.tight_layout()
     if SAVE_PLOTS:
-        plt.savefig(f"{OUTPUT_DIR}recovery_time_comparison.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUTPUT_DIR}recovery_time_comparison.png", dpi=400, bbox_inches='tight')
     plt.show()
 
 def plot_VE_throughout():
@@ -250,15 +250,15 @@ def plot_VE_throughout():
     )
     
     # Customize plot
-    ax.set_title('Vision Encoder Throughput Comparison', fontsize=16, pad=20)
-    ax.set_xlabel('Schemes', fontsize=14, labelpad=10)
-    ax.set_ylabel('Throughput (samples/minute)', fontsize=14, labelpad=10)
+    #ax.set_title('Vision Encoder Throughput Comparison', fontsize=16, pad=20)
+    ax.set_xlabel('Schemes', fontsize=24, labelpad=10)
+    ax.set_ylabel('Throughput (samples/min)', fontsize=24, labelpad=10)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
      
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])  # Make room for the note
     
     if SAVE_PLOTS:
-        plt.savefig(f"{OUTPUT_DIR}vision_encoder_throughput.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUTPUT_DIR}vision_encoder_throughput.png", dpi=400, bbox_inches='tight')
     plt.show()
     
     
@@ -293,16 +293,16 @@ def plot_VE_mem():
     
     
     # Customize plot
-    ax.set_title('Memory Usage Comparison', fontsize=16, pad=20)
-    ax.set_xlabel('Schemes', fontsize=14, labelpad=10)
-    ax.set_ylabel('Memory Usage per Device (GB)', fontsize=14, labelpad=10)
+    #ax.set_title('Memory Usage Comparison', fontsize=16, pad=20)
+    ax.set_xlabel('Schemes', fontsize=24, labelpad=10)
+    ax.set_ylabel('Avg Memory Usage (GB)', fontsize=24, labelpad=10)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])  # Make room for the note
     
     if SAVE_PLOTS:
-        plt.savefig(f"{OUTPUT_DIR}vision_encoder_memory.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUTPUT_DIR}vision_encoder_memory.png", dpi=400, bbox_inches='tight')
     plt.show()
     
 def plot_model_architecture():
@@ -433,7 +433,507 @@ def plot_model_architecture():
     plt.tight_layout()
     
     if SAVE_PLOTS:
-        plt.savefig(f"{OUTPUT_DIR}model_architecture.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{OUTPUT_DIR}model_architecture.png", dpi=400, bbox_inches='tight')
+    plt.show()
+
+def plot_traffic_light_training_progress():
+    """
+    Plot training progress using data from 100roundVEmodel.csv
+    Shows just traffic lights accuracy metrics over training rounds
+    Samples data every 5 rounds to reduce visual clutter
+    """
+    # Read the CSV file
+    csv_path = os.path.join(os.path.dirname(os.getcwd()), '100roundVEmodel.csv')
+    try:
+        df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        print(f"Error: File {csv_path} not found. Looking for file in current directory...")
+        try:
+            df = pd.read_csv('100roundVEmodel.csv')
+        except FileNotFoundError:
+            print("Error: 100roundVEmodel.csv not found in current directory either.")
+            return
+    
+    # Sample the data every 5 points
+    sampled_df = df[(df['round'] % 2 == 0) & (df['round'] < 61)]
+    
+    # Also include the first round if not already included
+    if not sampled_df.empty and sampled_df.iloc[0]['round'] != 1:
+        first_row = df.iloc[0:1]
+        sampled_df = pd.concat([first_row, sampled_df])
+    
+    # Create figure
+    plt.figure(figsize=FIG_SIZE)
+    
+    # Plot traffic lights accuracy
+    plt.plot(sampled_df['round'], sampled_df['traffic_lights_acc'], 'o-', color=BLUE_PALETTE[0], 
+            label='Traffic Light Accuracy', markersize=5)
+    
+    # Add error bands using standard deviation
+    plt.fill_between(sampled_df['round'], 
+                    sampled_df['traffic_lights_acc'] - sampled_df['traffic_lights_std'], 
+                    sampled_df['traffic_lights_acc'] + sampled_df['traffic_lights_std'], 
+                    alpha=0.2, color=BLUE_PALETTE[0])
+    
+    # Set labels and title with updated font sizes
+    plt.xlabel('Round', fontdict={'size': 24})
+    plt.ylabel('Accuracy', fontdict={'size': 24})
+    #plt.title('Traffic Light Detection Accuracy Over Training', fontdict={'size': 25}, pad=20)
+    
+    # Set y-axis limits
+    plt.ylim(0.4, 1.05)
+    
+    # Add gridlines and legend with updated styles
+    plt.grid(color='silver', linestyle='--', linewidth=1, alpha=0.3)
+    plt.grid(True)
+    plt.legend(loc='lower right', fontsize=16)
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    if SAVE_PLOTS:
+        plt.savefig(f"{OUTPUT_DIR}traffic_light_accuracy_sampled.png", dpi=400, bbox_inches='tight')
+    
+    plt.show()
+
+def plot_stop_sign_training_progress():
+    """
+    Plot training progress using data from 100roundVEmodel.csv
+    Shows just traffic lights accuracy metrics over training rounds
+    Samples data every 5 rounds to reduce visual clutter
+    """
+    # Read the CSV file
+    csv_path = os.path.join(os.path.dirname(os.getcwd()), '100roundVEmodel.csv')
+    try:
+        df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        print(f"Error: File {csv_path} not found. Looking for file in current directory...")
+        try:
+            df = pd.read_csv('100roundVEmodel.csv')
+        except FileNotFoundError:
+            print("Error: 100roundVEmodel.csv not found in current directory either.")
+            return
+    
+    # Sample the data every 5 points
+    # Fix: Use proper pandas boolean operations with & (and) operator instead of Python's 'and'
+    sampled_df = df[(df['round'] % 2 == 0) & (df['round'] < 1001)]  # Get rows where round is divisible by 5 and < 65
+    
+    # Also include the first round if not already included
+    if not sampled_df.empty and sampled_df.iloc[0]['round'] != 1:
+        first_row = df.iloc[0:1]
+        sampled_df = pd.concat([first_row, sampled_df])
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    
+    # Plot traffic lights accuracy
+    ax.plot(sampled_df['round'], sampled_df['stop_sign_acc'], 'o-', color=BLUE_PALETTE[0], 
+            label='Traffic Light Accuracy', markersize=5)
+    
+    # Add error bands using standard deviation
+    ax.fill_between(sampled_df['round'], 
+                    sampled_df['stop_sign_acc'] - sampled_df['stop_sign_std'], 
+                    sampled_df['stop_sign_acc'] + sampled_df['stop_sign_std'], 
+                    alpha=0.2, color=BLUE_PALETTE[0])
+    
+    # Set labels and title
+    ax.set_xlabel('Training Round')
+    ax.set_ylabel('Accuracy')
+    #plt.title('Stop Sign Detection Accuracy Over Training', pad=20)
+    
+    # Set y-axis limits
+    ax.set_ylim(0.4, 1.05)
+    
+    # Add gridlines and legend
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='lower right')
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    if SAVE_PLOTS:
+        plt.savefig(f"{OUTPUT_DIR}stop_sign_accuracy_sampled.png", dpi=400, bbox_inches='tight')
+    
+    plt.show()
+
+def plot_route_completion_score_bar():
+    """
+    Plot a bar chart comparing route completion scores for different model configurations:
+    - Untrained LLM + Our VE
+    - Untrained LLM + Raw VE
+    - Trained LLM + Raw VE
+    - Trained LLM + Our VE
+    
+    Values are shown with error bars representing the min/max range.
+    """
+    # Data with mean values and min/max bounds
+    data = {
+        "Untrained LLM\n+ Raw VE": {"mean": 0.535, "min": 0.27, "max": 0.8},
+        "Untrained LLM\n+ FLAD VE": {"mean": 0.585, "min": 0.35, "max": 0.82},
+        "Trained LLM\n+ Raw VE": {"mean": 14.5, "min": 0.0, "max": 29.0},
+        "Trained LLM\n+ FLAD VE": {"mean": 30.8, "min": 24.7, "max": 37.43}
+    }
+    
+    # Extract values
+    labels = list(data.keys())
+    means = [data[label]["mean"] for label in labels]
+    
+    # Calculate errors for error bars (distance from mean to min/max)
+    lower_errors = [means[i] - data[labels[i]]["min"] for i in range(len(labels))]
+    upper_errors = [data[labels[i]]["max"] - means[i] for i in range(len(labels))]
+    
+    # Create asymmetric error bars
+    yerr = [lower_errors, upper_errors]
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    
+    # Create bar colors with the first two using one color (untrained) and the last two using another (trained)
+    colors = [BLUE_PALETTE[2], BLUE_PALETTE[2], BLUE_PALETTE[0], BLUE_PALETTE[0]]
+    
+    # Plot bars with error bars
+    bars = ax.bar(
+        range(len(labels)),
+        means,
+        width=0.7,
+        color=colors,
+        edgecolor='black',
+        linewidth=1,
+        capsize=8,
+        yerr=yerr,
+        error_kw={'elinewidth': 1.5, 'capthick': 1.5}
+    )
+    
+    # Highlight "Our VE" bars with patterns
+    bars[1].set_hatch('///')
+    bars[3].set_hatch('///')
+    
+    # Set axis labels and title
+    ax.set_xlabel('AD Model Configuration', fontsize=24, labelpad=10)
+    ax.set_ylabel('Route Completion Score', fontsize=24, labelpad=10)
+    #ax.set_title('Route Completion Performance by Model Configuration', fontsize=16, pad=20)
+    
+    # Set x-tick labels
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontdict={'fontsize': 13})
+    
+    # Add a grid for better readability
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Adjust y-axis to start from 0 with some padding at the top
+    y_max = max([data[label]["max"] for label in labels])
+    ax.set_ylim(0, y_max * 1.1)
+    
+    # Add a legend for the patterns
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='gray', hatch='///', edgecolor='black', label='FLAD VE'),
+        Patch(facecolor='gray', edgecolor='black', label='Raw VE')
+    ]
+    ax.legend(handles=legend_elements, loc='best')
+    
+    # Add a horizontal line at y=0
+    ax.axhline(y=0, color='black', linewidth=0.5)
+    """
+    # Add text annotations for the values
+    for i, bar in enumerate(bars):
+        height = means[i]
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            height + yerr[1][i] + 0.8,
+            f'{height:.1f}',
+            ha='center',
+            va='bottom',
+            fontsize=10,
+            fontweight='bold'
+        )
+    """
+    plt.tight_layout()
+    
+    # Save the plot
+    if SAVE_PLOTS:
+        plt.savefig(f"{OUTPUT_DIR}route_completion_scores.png", dpi=400, bbox_inches='tight')
+    
+    plt.show()
+
+def plot_infraction_score_bar():
+    """
+    Plot a bar chart comparing infraction scores for different model configurations:
+    - Untrained LLM + Raw VE (did not complete routes)
+    - Untrained LLM + FLAD VE (did not complete routes)
+    - Trained LLM + Raw VE
+    - Trained LLM + FLAD VE
+    
+    Lower scores are better - indicating fewer infractions.
+    """
+    # Data with mean values and min/max bounds
+    data = {
+        "Untrained LLM\n+ Raw VE": {"mean": 0, "status": "failure"},
+        "Untrained LLM\n+ FLAD VE": {"mean": 0, "status": "failure"},
+        "Trained LLM\n+ Raw VE": {"mean": 2.49, "min": 0.0, "max": 4.99},
+        "Trained LLM\n+ FLAD VE": {"mean": 0.38, "min": 0, "max": 0.76}
+    }
+    
+    # Extract values
+    labels = list(data.keys())
+    
+    # Create a list for means, handling 'failure' cases
+    means = []
+    failed_indices = []
+    for i, label in enumerate(labels):
+        if "status" in data[label] and data[label]["status"] == "failure":
+            means.append(0)  # Placeholder for failed cases
+            failed_indices.append(i)
+        else:
+            means.append(data[label]["mean"])
+    
+    # Calculate errors for error bars (distance from mean to min/max)
+    lower_errors = []
+    upper_errors = []
+    
+    for i, label in enumerate(labels):
+        if i in failed_indices:
+            lower_errors.append(0)
+            upper_errors.append(0)
+        else:
+            lower_errors.append(means[i] - data[label].get("min", means[i]))
+            upper_errors.append(data[label].get("max", means[i]) - means[i])
+    
+    # Create asymmetric error bars
+    yerr = [lower_errors, upper_errors]
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    
+    # Create bar colors - lower is better for infractions, so use green for low values
+    colors = [BLUE_PALETTE[3], BLUE_PALETTE[3], BLUE_PALETTE[1], BLUE_PALETTE[0]]
+    
+    # Plot bars with error bars for completed runs
+    valid_indices = [i for i in range(len(labels)) if i not in failed_indices]
+    valid_labels = [labels[i] for i in valid_indices]
+    valid_means = [means[i] for i in valid_indices]
+    valid_yerr = [[lower_errors[i] for i in valid_indices], [upper_errors[i] for i in valid_indices]]
+    valid_colors = [colors[i] for i in valid_indices]
+    
+    bars = ax.bar(
+        valid_indices,
+        valid_means,
+        width=0.7,
+        color=valid_colors,
+        edgecolor='black',
+        linewidth=1,
+        capsize=8,
+        yerr=valid_yerr,
+        error_kw={'elinewidth': 1.5, 'capthick': 1.5}
+    )
+    
+    # For failed runs, create a special bar with hatching
+    if failed_indices:
+        failed_bars = ax.bar(
+            failed_indices,
+            [0.1] * len(failed_indices),  # Small height for visibility
+            width=0.7,
+            color='lightgray',
+            edgecolor='black',
+            linewidth=1,
+            hatch='xxx',
+            label='Failed'
+        )
+    
+    # Highlight "FLAD VE" bars with patterns
+    if 1 in valid_indices:
+        bars[valid_indices.index(1)].set_hatch('///')
+    if 3 in valid_indices:
+        bars[valid_indices.index(3)].set_hatch('///')
+    
+    # Set axis labels and title
+    ax.set_xlabel('AD Model Configuration', fontsize=24, labelpad=10)
+    ax.set_ylabel('Infraction Score', fontsize=24, labelpad=10)
+    #ax.set_title('Infraction Score by Model Configuration', fontsize=16, pad=20)
+    
+    # Set x-tick labels
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontdict={'fontsize': 13})
+    
+    # Add a grid for better readability
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Adjust y-axis to start from 0 with some padding at the top
+    max_value = max([data[label].get("max", 0) for label in labels if "max" in data[label]])
+    ax.set_ylim(0, max_value * 1.2)
+    
+    # Add a legend for the patterns
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='gray', hatch='///', edgecolor='black', label='FLAD VE'),
+        Patch(facecolor='gray', edgecolor='black', label='Raw VE')
+    ]
+    if failed_indices:
+        legend_elements.append(Patch(facecolor='lightgray', hatch='xxx', edgecolor='black', label='Failed'))
+    
+    ax.legend(handles=legend_elements, loc='upper left')
+    
+    # Add a horizontal line at y=0
+    ax.axhline(y=0, color='black', linewidth=0.5)
+    """
+    # Add text annotations for the values
+    for i, value in enumerate(valid_means):
+        position = valid_indices[i]
+        ax.text(
+            position,
+            value + valid_yerr[1][i] + 0.1,
+            f'{value:.2f}',
+            ha='center',
+            va='bottom',
+            fontsize=10,
+            fontweight='bold'
+        )
+    """
+    # Add "Failed" text for the failed runs
+    for idx in failed_indices:
+        ax.text(
+            idx,
+            0.3,
+            'Failed',
+            ha='center',
+            va='bottom',
+            fontsize=10,
+            fontweight='bold',
+            color='darkred'
+        )
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    if SAVE_PLOTS:
+        plt.savefig(f"{OUTPUT_DIR}infraction_scores.png", dpi=400, bbox_inches='tight')
+    
+    plt.show()
+
+
+
+def plot_combined_driving_score_bar():
+    """
+    Plot a bar chart showing the combined driving score, calculated as:
+    Combined Driving Score = Route Completion Score - Infraction Score
+    
+    This combined metric provides a single measure of overall driving performance,
+    balancing route progress against safety violations.
+    """
+    # Data with mean values and min/max bounds
+    route_completion_data = {
+        "Untrained LLM\n+ Raw VE": {"mean": 0.535, "min": 0.27, "max": 0.8},
+        "Untrained LLM\n+ FLAD VE": {"mean": 0.585, "min": 0.35, "max": 0.82},
+        "Trained LLM\n+ Raw VE": {"mean": 14.5, "min": 0.0, "max": 29.0},
+        "Trained LLM\n+ FLAD VE": {"mean": 30.8, "min": 24.7, "max": 37.43}
+    }
+
+    infraction_data = {
+        "Untrained LLM\n+ Raw VE": {"mean": 0, "status": "failure"},
+        "Untrained LLM\n+ FLAD VE": {"mean": 0, "status": "failure"},
+        "Trained LLM\n+ Raw VE": {"mean": 2.49, "min": 0.0, "max": 4.99},
+        "Trained LLM\n+ FLAD VE": {"mean": 0.38, "min": 0, "max": 0.76}
+    }
+    
+    # Calculate combined driving scores
+    labels = list(route_completion_data.keys())
+    combined_data = {}
+    
+    for label in labels:
+        # For failed models, set combined score equal to route completion score
+        if "status" in infraction_data[label] and infraction_data[label]["status"] == "failure":
+            combined_data[label] = {
+                "mean": route_completion_data[label]["mean"],
+                "min": route_completion_data[label]["min"],
+                "max": route_completion_data[label]["max"],
+                "status": "minimal_progress"
+            }
+        else:
+            # Calculate combined score as route completion minus infractions
+            mean_score = route_completion_data[label]["mean"] - infraction_data[label]["mean"]
+            
+            # Calculate min and max for error bars
+            # Min combined = Min route - Max infraction
+            min_score = route_completion_data[label]["min"] - infraction_data[label].get("max", 0)
+            # Max combined = Max route - Min infraction
+            max_score = route_completion_data[label]["max"] - infraction_data[label].get("min", 0)
+            
+            combined_data[label] = {
+                "mean": mean_score,
+                "min": min_score,
+                "max": max_score
+            }
+    
+    # Extract values for plotting
+    means = [combined_data[label]["mean"] for label in labels]
+    
+    # Calculate errors for error bars (distance from mean to min/max)
+    lower_errors = [means[i] - combined_data[labels[i]].get("min", means[i]) for i in range(len(labels))]
+    upper_errors = [combined_data[labels[i]].get("max", means[i]) - means[i] for i in range(len(labels))]
+    
+    # Create asymmetric error bars
+    yerr = [lower_errors, upper_errors]
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    
+    # Create bar colors - use a gradient from light to dark blue based on performance
+    colors = [BLUE_PALETTE[3], BLUE_PALETTE[3], BLUE_PALETTE[1], BLUE_PALETTE[0]]
+    
+    # Plot bars with error bars
+    bars = ax.bar(
+        range(len(labels)),
+        means,
+        width=0.7,
+        color=colors,
+        edgecolor='black',
+        linewidth=1,
+        capsize=8,
+        yerr=yerr,
+        error_kw={'elinewidth': 1.5, 'capthick': 1.5}
+    )
+    
+    # Highlight FLAD VE bars with patterns
+    bars[1].set_hatch('///')
+    bars[3].set_hatch('///')
+    
+    # Set axis labels and title with updated font sizes
+    ax.set_xlabel('AD Model Configuration', fontdict={'size': 25})
+    ax.set_ylabel('Driving Score', fontdict={'size': 25})
+    #ax.set_title('Driving Score by AD Model Configuration', fontdict={'size': 25}, pad=20)
+    
+    # Set x-tick labels
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontdict={'fontsize': 13})
+    
+    # Add a grid for better readability with updated style
+    ax.grid(color='silver', linestyle='--', linewidth=1, alpha=0.3)
+    ax.grid(True)
+    
+    # Determine y-axis limits, ensuring 0 is included
+    y_min = min(0, min([combined_data[label].get("min", 0) for label in labels]))
+    y_max = max([combined_data[label].get("max", 0) for label in labels])
+    padding = (y_max - y_min) * 0.1
+    ax.set_ylim(y_min - padding, y_max + padding)
+    
+    # Add a legend for the patterns with updated font size
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='gray', hatch='///', edgecolor='black', label='FLAD VE'),
+        Patch(facecolor='gray', edgecolor='black', label='Raw VE')
+    ]
+    ax.legend(handles=legend_elements, loc='upper left', fontsize=16)
+    
+    # Add a horizontal line at y=0
+    ax.axhline(y=0, color='black', linewidth=0.5)
+    
+    
+    plt.tight_layout(rect=[0, 0.06, 1, 0.98])
+    
+    # Save the plot
+    if SAVE_PLOTS:
+        plt.savefig(f"{OUTPUT_DIR}combined_driving_score.png", dpi=400, bbox_inches='tight')
+    
     plt.show()
 
 if __name__ == "__main__":
@@ -442,12 +942,17 @@ if __name__ == "__main__":
     # results = process_csv_files()
     
     # Generate all plots
-    #plot_execution_times()
-    #plot_optimization_times()
-    #plot_model_size_comparison()
-    #plot_recovery_time()
-    #plot_VE_throughout()
-    #plot_VE_mem()
-    plot_model_architecture()
-    
+    plot_execution_times()
+    plot_optimization_times()
+    plot_model_size_comparison()
+    plot_recovery_time()
+    plot_VE_throughout()
+    plot_VE_mem()
+    #plot_model_architecture()
+    plot_traffic_light_training_progress()
+    plot_stop_sign_training_progress()
+    plot_route_completion_score_bar()
+    plot_infraction_score_bar()
+    plot_combined_driving_score_bar()
+   
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
