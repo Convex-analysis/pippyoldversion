@@ -1,0 +1,13 @@
+<cluster name="ClusterName">
+    <vehicles>
+        <vehicle id="v1" memory="3e9" comp_capability="6e9" comm_capability="1e8" />
+        <vehicle id="v2" memory="2.3e9" comp_capability="4e9" comm_capability="1.6e8" />
+        <vehicle id="v3" memory="3.2e9" comp_capability="2e9" comm_capability="3e8" />
+        <vehicle id="v4" memory="2.1e9" comp_capability="4e9" comm_capability="1e8" />
+        <vehicle id="v5" memory="3e9" comp_capability="2e9" comm_capability="3.4e8" />
+        <vehicle id="v6" memory="3.2e9" comp_capability="6e9" comm_capability="2e8" />
+    </vehicles>
+    <dependencies>
+        
+    </dependencies>
+</cluster>

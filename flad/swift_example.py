@@ -191,7 +191,7 @@ def plot_pipeline_comparison(pipelines):
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(os.path.join(output_dir, "pipeline_comparison.png"))
     
-    plt.show()
+    #plt.show()
 
 def compare_with_baseline(swift_optimizer, model, cluster):
     """Compare SWIFT optimizer with baseline optimizer."""
@@ -581,8 +581,8 @@ def xml_workflow(cluster_xml_path, model_xml_path, output_dir="output", train_ep
         
         # Plot stability scores
         stability_plot_path = os.path.join(output_dir, "stability_scores.png")
-        plot_stability_scores(swift_optimizer.stability_scores)
-        plt.savefig(stability_plot_path)
+        #plot_stability_scores(swift_optimizer.stability_scores)
+        #plt.savefig(stability_plot_path)
         
         results["stability_scores"] = swift_optimizer.stability_scores
         results["files"]["stability_scores_plot"] = stability_plot_path
@@ -612,7 +612,7 @@ def xml_workflow(cluster_xml_path, model_xml_path, output_dir="output", train_ep
         plt.ylabel('Total Reward')
         plt.grid(True, alpha=0.3)
         plt.savefig(rewards_plot_path)
-        plt.show()
+        #plt.show()
         
         results["training"] = {
             "episodes": train_episodes,

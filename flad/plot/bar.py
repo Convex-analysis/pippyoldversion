@@ -53,8 +53,8 @@ def process_csv_files():
 def plot_execution_times():
     """Plot execution times comparing Base vs Swift"""
     # Data for execution time comparison
-    base_results = {3: 1081.6197, 5: 2494.7078, 7: 910.5060, 9: np.nan}  # Use NaN for incomplete
-    swift_results = {3: 1064.1329, 5: 2339.8869, 7: 899.6769, 9: 901.1903}
+    base_results = {3: 1608.9600, 5: 2494.7078, 7: 3436.8156, 9: np.nan}  # Use NaN for incomplete
+    swift_results = {3: 1367.0400, 5: 2339.8869, 7: 2768.0314, 9: 2950.6813}
     
     fig, ax = plt.subplots(figsize=FIG_SIZE)
     
@@ -100,41 +100,48 @@ def plot_execution_times():
 
 def plot_optimization_times():
     """Plot optimization times comparing Phase1 vs Phase2"""
-    base_optimization = {3: 0.01, 5: 0.01, 7: 0.01, 9: np.nan}  # Use NaN for incomplete
-    swift_optimization = {3: 0.04, 5: 0.29, 7: 0.4, 9: 0.25}
+    base_optimization = {'3': 0.01, '4': 0.01,'5': 0.01, '7': 0.01}  # Use NaN for incomplete
+    swift_optimization = {'3': 0.04,'4': 0.04,'5': 0.29, '7': 0.4}
     
     fig, ax = plt.subplots(figsize=FIG_SIZE)
     
     # Extract data
     x_values = list(swift_optimization.keys())
-    x = np.array(x_values)
-    base_values = [base_optimization.get(k, np.nan) for k in x_values]
     
-    # Plot Swift/Phase2 data
-    swift_bars = ax.bar(x + 0.2, swift_optimization.values(), width=0.4, align='center', 
+    # Convert string keys to numeric positions for plotting
+    x_positions = np.arange(len(x_values))
+    base_values = [base_optimization.get(k, np.nan) for k in x_values]
+    swift_values = list(swift_optimization.values())
+    
+    # Plot Swift/Phase2 data - use numeric positions instead of string keys
+    swift_bars = ax.bar(x_positions + 0.2, swift_values, width=0.4, align='center', 
                         label='Phase2', color=BLUE_PALETTE[0], edgecolor='black', linewidth=1)
     
     # Plot completed Base/Phase1 data
     completed = ~np.isnan(base_values)
     if any(completed):
-        base_bars = ax.bar(x[completed] - 0.2, np.array(base_values)[completed], width=0.4, 
+        completed_positions = x_positions[completed]
+        completed_values = np.array(base_values)[completed]
+        base_bars = ax.bar(completed_positions - 0.2, completed_values, width=0.4, 
                          align='center', label='Phase1', color=BLUE_PALETTE[2], 
                          edgecolor='black', linewidth=1)
     
     # Plot special bar for incomplete Phase1 data
     incomplete = np.isnan(base_values)
     if any(incomplete):
-        ax.bar(x[incomplete] - 0.2, [0.01] * sum(incomplete), width=0.4, align='center',
+        incomplete_positions = x_positions[incomplete]
+        ax.bar(incomplete_positions - 0.2, [0.01] * sum(incomplete), width=0.4, align='center',
               hatch='////', color='lightgray', edgecolor='black', linewidth=1,
               label='Failed')
-        
-
     
     # Customize plot
     ax.set_xlabel('Problem Scale')
     ax.set_ylabel('Avg Optimization Time (s)')
-    #ax.set_title('Optimization Time Comparison by Problem Scale', fontsize=16, pad=20)
-    ax.set_xticks(x)
+    
+    # Set x-ticks at numeric positions but with string labels
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(x_values)
+    
     ax.legend(loc='best')
     ax.grid(axis='y', alpha=0.3)
     
@@ -443,7 +450,7 @@ def plot_traffic_light_training_progress():
     Samples data every 5 rounds to reduce visual clutter
     """
     # Read the CSV file
-    csv_path = os.path.join(os.path.dirname(os.getcwd()), '100roundVEmodel.csv')
+    csv_path = os.path.join(os.path.dirname(os.getcwd()), 'D:/EXP/pippyoldversion/flad/used_with_stats.csv')
     try:
         df = pd.read_csv(csv_path)
     except FileNotFoundError:
@@ -455,7 +462,7 @@ def plot_traffic_light_training_progress():
             return
     
     # Sample the data every 5 points
-    sampled_df = df[(df['round'] % 2 == 0) & (df['round'] < 61)]
+    sampled_df = df[(df['round'] % 2 == 0) & (df['round'] < 70)]
     
     # Also include the first round if not already included
     if not sampled_df.empty and sampled_df.iloc[0]['round'] != 1:
@@ -936,24 +943,76 @@ def plot_combined_driving_score_bar():
     
     plt.show()
 
+def execute_csv_std(file_path):
+    """
+    Compute average accuracy and corresponding standard deviation for each row in a CSV file.
+    Adds 'avg acc' and 'std' columns to the dataframe.
+    
+    Args:
+        file_path (str): Path to the CSV file containing accuracy data.
+        
+    Returns:
+        pd.DataFrame: DataFrame with added 'avg acc' and 'std' columns.
+    """
+    try:
+        # Read the CSV file
+        df = pd.read_csv(file_path)
+        print(f"Successfully loaded {file_path}")
+        
+        # Print columns to help debug
+        print(f"Columns in the CSV: {df.columns.tolist()}")
+        
+        # Identify accuracy columns (containing 'acc' in their name)
+        accuracy_columns = [col for col in df.columns if 'acc' in col.lower()]
+        
+        if not accuracy_columns:
+            print("No accuracy metrics found in the CSV file.")
+            return df
+        
+        print(f"Found accuracy columns: {accuracy_columns}")
+        
+        # Calculate row-wise mean (average) for accuracy columns
+        df['avg acc'] = df[accuracy_columns].mean(axis=1)
+        
+        # Calculate row-wise standard deviation for accuracy columns
+        df['std'] = df[accuracy_columns].std(axis=1)
+        
+        # Print summary statistics
+        print("\nSummary statistics:")
+        print(f"Overall average accuracy: {df['avg acc'].mean():.4f}")
+        print(f"Overall standard deviation: {df['std'].mean():.4f}")
+        
+        # Optionally save the modified DataFrame
+        output_path = file_path.replace('.csv', '_with_stats.csv')
+        df.to_csv(output_path, index=False)
+        print(f"Saved results to {output_path}")
+        
+        return df
+    
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+        return None
+
 if __name__ == "__main__":
     setup_environment()
     # Process CSV files if needed
     # results = process_csv_files()
     
     # Generate all plots
-    plot_execution_times()
+    #plot_execution_times()
     plot_optimization_times()
-    plot_model_size_comparison()
-    plot_recovery_time()
-    plot_VE_throughout()
-    plot_VE_mem()
+    #plot_model_size_comparison()
+    #plot_recovery_time()
+    #plot_VE_throughout()
+    #plot_VE_mem()
     #plot_model_architecture()
-    plot_traffic_light_training_progress()
-    plot_stop_sign_training_progress()
-    plot_route_completion_score_bar()
-    plot_infraction_score_bar()
-    plot_combined_driving_score_bar()
+    #plot_traffic_light_training_progress()
+    #plot_stop_sign_training_progress()
+    #plot_route_completion_score_bar()
+    #plot_infraction_score_bar()
+    #plot_combined_driving_score_bar()
+    file_path = "flad/used.csv"
+    #execute_csv_std(file_path)
    
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
 

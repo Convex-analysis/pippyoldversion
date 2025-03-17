@@ -1,14 +1,14 @@
 <cluster name="ClusterName">
     <vehicles>
-        <vehicle id="v1" memory="1.67e9" comp_capability="2e9" comm_capability="0.3e9" />
-        <vehicle id="v2" memory="1.67e9" comp_capability="2e9" comm_capability="1.2e9" />
-        <vehicle id="v3" memory="1.67e9" comp_capability="2.1e9" comm_capability="1.3e9" />
-        <vehicle id="v4" memory="1.67e9" comp_capability="1.2e9" comm_capability="1.5e9" />
-        <vehicle id="v5" memory="1.66e9" comp_capability="1e9" comm_capability="1.3e9" />
-        <vehicle id="v6" memory="1.66e9" comp_capability="1.5e9" comm_capability="1.3e9" />
-        <vehicle id="v7" memory="1.66e9" comp_capability="1.8e9" comm_capability="1.3e9" />
-        <vehicle id="v8" memory="1.67e9" comp_capability="2e9" comm_capability="1e9" />
-        <vehicle id="v9" memory="1.67e9" comp_capability="0.8e9" comm_capability="2e9" />
+        <vehicle id="v1" memory="2e9" comp_capability="2e9" comm_capability="0.5e8" />
+        <vehicle id="v2" memory="2e9" comp_capability="2e9" comm_capability="1.2e8" />
+        <vehicle id="v3" memory="2e9" comp_capability="2.1e9" comm_capability="1.3e8" />
+        <vehicle id="v4" memory="2e9" comp_capability="1.2e9" comm_capability="1e8" />
+        <vehicle id="v5" memory="2e9" comp_capability="1e9" comm_capability="1.3e8" />
+        <vehicle id="v6" memory="2e9" comp_capability="1.5e9" comm_capability="1.3e8" />
+        <vehicle id="v7" memory="1.66e9" comp_capability="1.8e9" comm_capability="1.3e8" />
+        <vehicle id="v8" memory="1.67e9" comp_capability="2e9" comm_capability="1e8" />
+        <vehicle id="v9" memory="1.67e9" comp_capability="0.8e9" comm_capability="1.5e8" />
     </vehicles>
     <dependencies>
         
