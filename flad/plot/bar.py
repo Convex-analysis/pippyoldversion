@@ -9,7 +9,7 @@ import glob
 # Set consistent plot style
 plt.style.use('seaborn-v0_8-whitegrid')
 BLUE_PALETTE = ['#2978B5', '#64A0D0', '#8FB3D9', '#A3C4DC']
-FIG_SIZE = (6, 5)  # Updated to specified dimensions
+FIG_SIZE = (4, 5)  # Updated to specified dimensions
 SAVE_PLOTS = True
 OUTPUT_DIR = './flad/plot/figures/'
 
