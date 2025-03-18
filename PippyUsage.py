@@ -276,6 +276,8 @@ def train_one_epoch_pipeline(
             batch_size = input[list(input.keys())[0]].size(0)
         else:
             batch_size = input.size(0)
+
+        print_green(f"Batch: {batch_idx}/{last_idx}, Batch size: {batch_size}")
             
         # Update total samples count
         total_samples_processed += batch_size
@@ -547,8 +549,8 @@ def run_master(_, args):
             )
         args.prefetcher = not args.no_prefetcher
         annotate_split_points(model, {
-            'encoder': PipeSplitWrapper.SplitPoint.BEGINNING,
-            #'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
+            'encoder': PipeSplitWrapper.SplitPoint.BEGINNING
+            # 'decoder': PipeSplitWrapper.SplitPoint.BEGINNING
         })
 
         wrapper = OutputLossWrapper(model, MemFuserLoss())
@@ -618,6 +620,9 @@ def run_master(_, args):
                 model_ema=None,
                 mixup_fn=None,
             )
+
+            print_red('---------------------------epoch done-----------------------------------------------')
+            break
             
             # Calculate epoch execution time
             epoch_execution_time = time.time() - epoch_start_time
