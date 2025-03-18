@@ -78,7 +78,7 @@ def plot_execution_times():
     # Plot incomplete Base data
     incomplete = np.isnan(base_values)
     if any(incomplete):
-        inc_bars = ax.bar(x[incomplete] - 0.2, [100] * sum(incomplete), width=0.4, align='center',
+        inc_bars = ax.bar(x[incomplete] - 0.2, [1100] * sum(incomplete), width=0.4, align='center',
                           hatch='////', color='lightgray', edgecolor='black', linewidth=1,
                           label='Failed')
         
@@ -87,6 +87,7 @@ def plot_execution_times():
     # Customize plot
     ax.set_xlabel('Cluster Size')
     ax.set_ylabel('Avg Execution Time (s)')
+    ax.set_ylim(1000, 3500)  # Set y-axis limit to 4000s
     #ax.set_title('Execution Time Comparison by Cluster Size', fontsize=16, pad=20)
     ax.set_xticks(x)
     ax.set_xticklabels(x_values)
@@ -991,7 +992,156 @@ def execute_csv_std(file_path):
     
     except Exception as e:
         print(f"Error processing {file_path}: {str(e)}")
+        
         return None
+
+def plot_diff_LLM__scores_bar():
+    """
+    Plot bar charts comparing different LLM models with FLAD VE:
+    - Route Completion Score (higher is better)
+    - Infraction Score (lower is better)
+    - Overall Driving Score
+    
+    Each metric is saved as a separate figure.
+    """
+    # Data with mean values and min/max bounds
+    RC_data = {
+        "Llamma\n+ FLAD VE": {"mean": 30.8},
+        "Llava\n+ FLAD VE": {"mean": 4},
+        "Vicuna\n+ FLAD VE": {"mean": 11.4}
+    }
+    IS_data = {
+        "Llamma\n+ FLAD VE": {"mean": 0.38},
+        "Llava\n+ FLAD VE": {"mean": 20},
+        "Vicuna\n+ FLAD VE": {"mean": 13}
+    }
+    DS_data = {
+        "Llamma\n+ FLAD VE": {"mean": 30},
+        "Llava\n+ FLAD VE": {"mean": -16},
+        "Vicuna\n+ FLAD VE": {"mean": -1.6}
+    }
+    
+    # Plot Route Completion Scores
+    plot_llm_comparison(RC_data, "Route Completion Score", "route_completion_llm_comparison.png", 
+                        higher_is_better=True)
+    
+    # Plot Infraction Scores
+    plot_llm_comparison(IS_data, "Infraction Score", "infraction_score_llm_comparison.png", 
+                        higher_is_better=False)
+    
+    # Plot Driving Scores
+    plot_llm_comparison(DS_data, "Driving Score", "driving_score_llm_comparison.png", 
+                        higher_is_better=True, has_error_bars=False)
+
+def plot_llm_comparison(data, y_label, filename, higher_is_better=True, has_error_bars=True):
+    """
+    Helper function to plot LLM comparison bar charts with consistent styling
+    
+    Args:
+        data: Dictionary containing the data to plot
+        y_label: Label for the y-axis
+        filename: Filename to save the plot
+        higher_is_better: Whether higher values are better (affects color scheme)
+        has_error_bars: Whether to include error bars (some data doesn't have min/max values)
+    """
+    # Extract values
+    labels = list(data.keys())
+    means = [data[label]["mean"] for label in labels]
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    
+    # Choose colors based on performance metric (higher is better or lower is better)
+    if higher_is_better:
+        # For metrics where higher is better (e.g., route completion)
+        # Use darker blue for better performance
+        performance_order = sorted(range(len(means)), key=lambda i: means[i], reverse=True)
+        colors = [BLUE_PALETTE[min(i, len(BLUE_PALETTE)-1)] for i in performance_order]
+    else:
+        # For metrics where lower is better (e.g., infractions)
+        # Use darker blue for better performance (lower values)
+        performance_order = sorted(range(len(means)), key=lambda i: means[i])
+        colors = [BLUE_PALETTE[min(i, len(BLUE_PALETTE)-1)] for i in performance_order]
+    
+    # Sort colors back to original data order
+    colors_in_order = [colors[performance_order.index(i)] for i in range(len(means))]
+    
+    # Add error bars if applicable
+    if has_error_bars:
+        # Calculate errors for error bars (distance from mean to min/max)
+        lower_errors = [means[i] - data[labels[i]].get("min", means[i]) for i in range(len(labels))]
+        upper_errors = [data[labels[i]].get("max", means[i]) - means[i] for i in range(len(labels))]
+        yerr = [lower_errors, upper_errors]
+        
+        # Plot bars with error bars
+        bars = ax.bar(
+            range(len(labels)),
+            means,
+            width=0.6,
+            color=colors_in_order,
+            edgecolor='black',
+            linewidth=1,
+            capsize=8,
+            yerr=yerr,
+            error_kw={'elinewidth': 1.5, 'capthick': 1.5}
+        )
+    else:
+        # Plot bars without error bars
+        bars = ax.bar(
+            range(len(labels)),
+            means,
+            width=0.6,
+            color=colors_in_order,
+            edgecolor='black',
+            linewidth=1
+        )
+    
+    # Set axis labels and title
+    ax.set_xlabel('LLM Model', fontsize=24, labelpad=10)
+    ax.set_ylabel(y_label, fontsize=24, labelpad=10)
+    
+    # Set x-tick labels
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontdict={'fontsize': 16})
+    
+    # Add a grid for better readability
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Adjust y-axis
+    if higher_is_better:
+        # For metrics where higher is better
+        y_min = min(0, min(means) * 1.1)  # Include 0 or lower if negative values exist
+        y_max = max(means) * 1.2  # Add 20% headroom
+    else:
+        # For metrics where lower is better
+        y_min = 0  # Start at 0
+        y_max = max(means) * 1.2  # Add 20% headroom
+    
+    ax.set_ylim(y_min, y_max)
+    
+    # Add value labels on top of bars
+    for i, bar in enumerate(bars):
+        height = means[i]
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            height + (y_max - y_min) * 0.02,  # Position slightly above bar
+            f'{height:.1f}',
+            ha='center',
+            va='bottom',
+            fontsize=14,
+            fontweight='bold'
+        )
+    
+    # Add a horizontal line at y=0
+    ax.axhline(y=0, color='black', linewidth=0.5)
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    if SAVE_PLOTS:
+        plt.savefig(f"{OUTPUT_DIR}{filename}", dpi=400, bbox_inches='tight')
+    
+    plt.show()
 
 if __name__ == "__main__":
     setup_environment()
@@ -999,8 +1149,8 @@ if __name__ == "__main__":
     # results = process_csv_files()
     
     # Generate all plots
-    #plot_execution_times()
-    plot_optimization_times()
+    plot_execution_times()
+    #plot_optimization_times()
     #plot_model_size_comparison()
     #plot_recovery_time()
     #plot_VE_throughout()
@@ -1013,7 +1163,8 @@ if __name__ == "__main__":
     #plot_combined_driving_score_bar()
     file_path = "flad/used.csv"
     #execute_csv_std(file_path)
-   
+    #plot_diff_LLM__scores_bar()
+    #plot_diff_LLM__scores_bar()
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
 
 
