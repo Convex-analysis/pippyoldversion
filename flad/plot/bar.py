@@ -153,8 +153,8 @@ def plot_optimization_times():
 
 def plot_model_size_comparison():
     """Plot execution times by model size"""
-    base_model_size = {"5.55 GB": 1390.7427, "11.10 GB": 2998.2761, "14.01 GB": np.nan}
-    swift_model_size = {"5.55 GB": 1252.8087, "11.10 GB": 2911, "14.01 GB": 2944.5439}
+    base_model_size = {"5.55": 1390.7427, "11.10": 2998.2761, "14.01": np.nan}
+    swift_model_size = {"5.55": 1252.8087, "11.10": 2911, "14.01": 2944.5439}
     
     # Get keys and positions
     model_sizes = list(swift_model_size.keys())
@@ -189,7 +189,7 @@ def plot_model_size_comparison():
     
     # Customize plot
     plt.xticks(bar_position, model_sizes)
-    plt.xlabel('Model Size')
+    plt.xlabel('Model Size (GB)')
     plt.ylabel('Avg Execution Time (s)')
     #plt.title('Execution Time Comparison by Model Size', fontsize=16, pad=20)
     plt.legend(loc='upper left')
@@ -450,8 +450,9 @@ def plot_traffic_light_training_progress():
     Shows just traffic lights accuracy metrics over training rounds
     Samples data every 5 rounds to reduce visual clutter
     """
-    # Read the CSV file
-    csv_path = os.path.join(os.path.dirname(os.getcwd()), 'D:/EXP/pippyoldversion/flad/used_with_stats.csv')
+    # Read the CSV file  #100roundVEmodel.csv
+    csv_path = os.path.join(os.path.dirname(os.getcwd()), '100roundVEmodel.csv')
+    #csv_path = os.path.join(os.path.dirname(os.getcwd()), 'D:/EXP/pippyoldversion/flad/used_with_stats.csv')
     try:
         df = pd.read_csv(csv_path)
     except FileNotFoundError:
@@ -1006,19 +1007,19 @@ def plot_diff_LLM__scores_bar():
     """
     # Data with mean values and min/max bounds
     RC_data = {
-        "Llamma\n+ FLAD VE": {"mean": 30.8},
-        "Llava\n+ FLAD VE": {"mean": 4},
-        "Vicuna\n+ FLAD VE": {"mean": 11.4}
+        "Llamma": {"mean": 30.8},
+        "Llava": {"mean": 4},
+        "Vicuna": {"mean": 11.4}
     }
     IS_data = {
-        "Llamma\n+ FLAD VE": {"mean": 0.38},
-        "Llava\n+ FLAD VE": {"mean": 20},
-        "Vicuna\n+ FLAD VE": {"mean": 13}
+        "Llamma": {"mean": 0.38},
+        "Llava": {"mean": 20},
+        "Vicuna": {"mean": 13}
     }
     DS_data = {
-        "Llamma\n+ FLAD VE": {"mean": 30},
-        "Llava\n+ FLAD VE": {"mean": -16},
-        "Vicuna\n+ FLAD VE": {"mean": -1.6}
+        "Llamma": {"mean": 30},
+        "Llava": {"mean": -16},
+        "Vicuna": {"mean": -1.6}
     }
     
     # Plot Route Completion Scores
@@ -1149,7 +1150,7 @@ if __name__ == "__main__":
     # results = process_csv_files()
     
     # Generate all plots
-    plot_execution_times()
+    #plot_execution_times()
     #plot_optimization_times()
     #plot_model_size_comparison()
     #plot_recovery_time()
@@ -1164,7 +1165,7 @@ if __name__ == "__main__":
     file_path = "flad/used.csv"
     #execute_csv_std(file_path)
     #plot_diff_LLM__scores_bar()
-    #plot_diff_LLM__scores_bar()
+    plot_diff_LLM__scores_bar()
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
 
 
