@@ -185,11 +185,13 @@ def run_worker(rank, run_func, args, *extra_args):
     else:
         rpc_timeout = 1800
 
+    # Configure RPC options
     options = rpc.TensorPipeRpcBackendOptions(
         num_worker_threads=num_worker_threads,
         rpc_timeout=rpc_timeout,
         _transports=tp_transports(),
     )
+
     if args.cuda:
         n_devs = torch.cuda.device_count()
         if n_devs > 0:
@@ -208,30 +210,83 @@ def run_worker(rank, run_func, args, *extra_args):
         f"{socket.gethostname()}/{os.getpid()}/{args.device}"
     )
 
-    # Init DDP process group
-    backend = "nccl" if args.cuda else "gloo"
-    torch.distributed.init_process_group(
-        backend=backend, rank=rank, world_size=actual_world_size
-    )
+    # Check if we should use C10d for wireless communication
+    use_c10d = hasattr(args, "use_c10d") and args.use_c10d
 
-    rpc.init_rpc(
-        f"worker{rank}",
-        rank=rank,
-        world_size=actual_world_size,
-        rpc_backend_options=options,
-    )
+    if use_c10d:
+        try:
+            # Import wireless utilities
+            from pippy.wireless_utils import setup_wireless_c10d, create_jetson_optimized_groups, reliable_broadcast
 
-    
+            # Get timeout in minutes (default to 30 if not specified)
+            timeout_min = args.c10d_timeout_min if hasattr(args, "c10d_timeout_min") else 30
 
-    global dp_pg_per_pp_rank
-    dp_ranks_per_pp_rank = (
-        torch.arange(actual_world_size)
-        .reshape(args.pp_group_size, args.dp_group_size)
-        .tolist()
-    )
-    dp_pg_per_pp_rank = [  # type: ignore[name-defined]
-        torch.distributed.new_group(ranks) for ranks in dp_ranks_per_pp_rank
-    ]
+            # Initialize C10d with wireless optimizations
+            print(f"Initializing C10d with wireless optimizations (rank {rank})")
+            setup_wireless_c10d(
+                rank=rank,
+                world_size=actual_world_size,
+                master_addr=args.master_addr,
+                master_port=args.master_port,
+                timeout_min=timeout_min,
+                backend="nccl" if args.cuda else "gloo"
+            )
+
+            # Create optimized process groups for Jetson devices
+            dp_groups, pp_groups, dp_ranks_per_pp_rank, pp_ranks_per_dp_rank = create_jetson_optimized_groups(
+                world_size=actual_world_size,
+                pp_group_size=args.pp_group_size,
+                dp_group_size=args.dp_group_size
+            )
+
+            # Store the groups for later use
+            global dp_pg_per_pp_rank
+            dp_pg_per_pp_rank = dp_groups
+
+            # Initialize RPC for control messages
+            rpc.init_rpc(
+                f"worker{rank}",
+                rank=rank,
+                world_size=actual_world_size,
+                rpc_backend_options=options,
+            )
+
+            print(f"Successfully initialized C10d with wireless optimizations (rank {rank})")
+
+        except ImportError as e:
+            print(f"Warning: Could not import wireless_utils: {e}. Falling back to standard initialization.")
+            # Fall back to standard initialization
+            use_c10d = False
+
+    if not use_c10d:
+        # Standard initialization
+        # Init DDP process group
+        backend = "nccl" if args.cuda else "gloo"
+        torch.distributed.init_process_group(
+            backend=backend, rank=rank, world_size=actual_world_size
+        )
+
+        rpc.init_rpc(
+            f"worker{rank}",
+            rank=rank,
+            world_size=actual_world_size,
+            rpc_backend_options=options,
+        )
+
+        # Create standard process groups
+        global dp_pg_per_pp_rank
+        dp_ranks_per_pp_rank = (
+            torch.arange(actual_world_size)
+            .reshape(args.pp_group_size, args.dp_group_size)
+            .tolist()
+        )
+        dp_pg_per_pp_rank = [
+            torch.distributed.new_group(ranks) for ranks in dp_ranks_per_pp_rank
+        ]
+
+
+
+    # Process groups are already created in the C10d or standard initialization above
 
     pp_ranks_per_dp_group = [
         [i * args.dp_group_size + rank for i in range(args.pp_group_size)]

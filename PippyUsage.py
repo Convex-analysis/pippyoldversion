@@ -709,6 +709,12 @@ if __name__ == "__main__":
     parser.add_argument('--record_mem_dumps', type=int, default=0, choices=[0, 1])
     parser.add_argument('--num_worker_threads', type=int, default=512)
     parser.add_argument('--checkpoint', type=int, default=0, choices=[0, 1])
+    # C10d wireless network optimization arguments
+    parser.add_argument('--use_c10d', action='store_true', help='Use C10d for tensor communication (optimized for wireless networks)')
+    parser.add_argument('--c10d_timeout_min', type=int, default=30, help='Timeout in minutes for C10d operations')
+    parser.add_argument('--compress_tensors', action='store_true', help='Use tensor compression to reduce bandwidth usage')
+    parser.add_argument('--compression_bits', type=int, default=8, choices=[8, 16], help='Number of bits for tensor compression (8 or 16)')
+    parser.add_argument('--wireless_retry_count', type=int, default=3, help='Number of retries for failed communications')
     #The following arguments are used for the dataloader
     parser.add_argument("--train-towns", type=int, nargs="+", default=[1,2,3,4,5,6,7,10])
     parser.add_argument("--val-towns", type=int, nargs="+", default=[1])

@@ -26,6 +26,7 @@ PiPPy provides the following features that make pipeline parallelism easier:
 * First-class support for cross-host pipeline parallelism, as this is where PP is typically used (over slower interconnects). This is currently missing from the torchgpipe-based `torch.distributed.pipeline.sync.Pipe`.
 * Composability with other parallelism schemes such as data parallelism or tensor splitting model parallelism (overall, known as "3d parallelism"). Currently, pipelining and data parallelism can be composed. Other compositions will be available in the future.
 * Support for pipeline scheduling paradigms, including static schedules like fill-drain (GPipe), 1f1b, interleaved 1f1b and dynamic schedules like lookahead or registers/back-pressure.
+* Support for wireless communication optimizations using PyTorch's C10d library, including tensor compression and reliable communication for devices in wireless networks. See [wireless_c10d.md](docs/wireless_c10d.md) for details.
 
 For in-depth technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 

@@ -29,7 +29,7 @@ from pippy.microbatch import (
     merge_chunks,
 )
 
-#from jtop import jtop 
+#from jtop import jtop
 # TODO: Define the strategy for replicating the computation. In particular, we will likely make the assumption
 # that the operations in the program are batch-wise commutative (my term), i.e. we can guarantee equivalence
 # with splitting up the operation along the batch dimension, applying the computation to those sub-batches,
@@ -147,7 +147,7 @@ class WorkItem:
 
         for arg in args_to_fwd:
             setattr(self, arg, locals()[arg])
-        
+
         logging.info(f"Created WorkItem: {self}")
 
     def __del__(self):
@@ -812,7 +812,7 @@ class PipeStageExecutor(EventRecorder):
         logging.debug(
             f"[{self.stage_id}][{cur_microbatch}] Invoke call found {len(value_ref_args)} ValueReference arguments"
         )
-        
+
         # Construct WorkItem for this microbatch+phase and record it in the
         # waiting runlist
 
@@ -1057,12 +1057,47 @@ class PipeStageExecutor(EventRecorder):
                 if refcounted_future.release():
                     self.value_store.pop(value_ref_arg.unique_key)
 
-            # Instead of return value let's do a send call
-            if torch.distributed.get_backend() == "gloo":
-                # Gloo P2P does not support work.get_future, so we use send instead
-                torch.distributed.send(value, caller_stage, tag=tag)
+            # Check if we should use tensor compression
+            if hasattr(self, 'compress_tensors') and self.compress_tensors and isinstance(value, torch.Tensor):
+                try:
+                    from pippy.wireless_utils import compress_tensor, reliable_broadcast
+
+                    # Compress the tensor before sending
+                    compressed_value, scale = compress_tensor(value, bits=self.compression_bits if hasattr(self, 'compression_bits') else 8)
+
+                    # Send the compressed tensor and scale
+                    if torch.distributed.get_backend() == "gloo":
+                        # Gloo P2P does not support work.get_future, so we use send instead
+                        if hasattr(self, 'wireless_retry_count') and self.wireless_retry_count > 0:
+                            from pippy.wireless_utils import reliable_broadcast
+                            reliable_broadcast(compressed_value, self.stage_id, max_retries=self.wireless_retry_count)
+                            reliable_broadcast(scale, self.stage_id, max_retries=self.wireless_retry_count)
+                        else:
+                            torch.distributed.send(compressed_value, caller_stage, tag=tag)
+                            torch.distributed.send(scale, caller_stage, tag=tag+10000)  # Use a different tag for scale
+                    else:
+                        torch.distributed.isend(compressed_value, caller_stage, tag=tag)
+                        torch.distributed.isend(scale, caller_stage, tag=tag+10000)  # Use a different tag for scale
+
+                    # Log compression ratio
+                    original_size = value.numel() * value.element_size()
+                    compressed_size = compressed_value.numel() * compressed_value.element_size() + scale.numel() * scale.element_size()
+                    compression_ratio = original_size / compressed_size if compressed_size > 0 else 0
+                    logging.debug(f"[{self.stage_id}] Compressed tensor: {original_size/1024:.2f} KB -> {compressed_size/1024:.2f} KB (ratio: {compression_ratio:.2f}x)")
+
+                except ImportError:
+                    # Fall back to standard send if wireless_utils is not available
+                    if torch.distributed.get_backend() == "gloo":
+                        torch.distributed.send(value, caller_stage, tag=tag)
+                    else:
+                        torch.distributed.isend(value, caller_stage, tag=tag)
             else:
-                torch.distributed.isend(value, caller_stage, tag=tag)
+                # Standard send without compression
+                if torch.distributed.get_backend() == "gloo":
+                    # Gloo P2P does not support work.get_future, so we use send instead
+                    torch.distributed.send(value, caller_stage, tag=tag)
+                else:
+                    torch.distributed.isend(value, caller_stage, tag=tag)
 
         # Notify next send that's potentially waiting
         with self.caller_recv_tag_cv:
@@ -1084,17 +1119,77 @@ class PipeStageExecutor(EventRecorder):
                 tm.shape, dtype=tm.dtype, device=self.device
             )
 
-            if torch.distributed.get_backend() == "gloo":
-                # Gloo P2P does not support work.get_future, so we need to:
-                # - manually create the Future,
-                # - use recv instead, and
-                # - manually set_result to the Future
-                fut: torch.futures.Future = self.create_future()
-                torch.distributed.recv(recv_buff, callee_stage, tag=tag)
-                fut.set_result(recv_buff)
+            # Check if we should handle tensor decompression
+            if hasattr(self, 'compress_tensors') and self.compress_tensors:
+                try:
+                    from pippy.wireless_utils import decompress_tensor
+
+                    # Create a buffer for the compressed tensor and scale
+                    compressed_buff = torch.empty(
+                        tm.shape,
+                        dtype=torch.int8 if hasattr(self, 'compression_bits') and self.compression_bits == 8 else torch.int16,
+                        device=self.device
+                    )
+                    scale_buff = torch.empty(1, dtype=torch.float32, device=self.device)
+
+                    if torch.distributed.get_backend() == "gloo":
+                        # Gloo P2P does not support work.get_future, so we need to:
+                        # - manually create the Future,
+                        # - use recv instead, and
+                        # - manually set_result to the Future
+                        fut: torch.futures.Future = self.create_future()
+
+                        # Receive the compressed tensor and scale
+                        torch.distributed.recv(compressed_buff, callee_stage, tag=tag)
+                        torch.distributed.recv(scale_buff, callee_stage, tag=tag+10000)  # Use the same tag offset as in batch_send
+
+                        # Decompress the tensor
+                        decompressed_tensor = decompress_tensor(compressed_buff, scale_buff)
+                        fut.set_result(decompressed_tensor)
+                    else:
+                        # Create futures for both compressed tensor and scale
+                        compressed_work = torch.distributed.irecv(compressed_buff, callee_stage, tag=tag)
+                        scale_work = torch.distributed.irecv(scale_buff, callee_stage, tag=tag+10000)
+
+                        # Wait for both to complete
+                        compressed_fut = compressed_work.get_future()  # type: ignore[attr-defined]
+                        scale_fut = scale_work.get_future()  # type: ignore[attr-defined]
+
+                        # Create a combined future that waits for both and then decompresses
+                        fut = torch.futures.Future()
+
+                        def decompress_and_set_result(compressed_fut, scale_fut):
+                            compressed_tensor = compressed_fut.wait()[0]  # Unpack from list
+                            scale = scale_fut.wait()[0]  # Unpack from list
+                            decompressed_tensor = decompress_tensor(compressed_tensor, scale)
+                            fut.set_result(decompressed_tensor)
+
+                        # Chain the futures
+                        torch.futures.collect_all([compressed_fut, scale_fut]).add_done_callback(
+                            lambda _: decompress_and_set_result(compressed_fut, scale_fut)
+                        )
+                except ImportError:
+                    # Fall back to standard receive if wireless_utils is not available
+                    if torch.distributed.get_backend() == "gloo":
+                        fut: torch.futures.Future = self.create_future()
+                        torch.distributed.recv(recv_buff, callee_stage, tag=tag)
+                        fut.set_result(recv_buff)
+                    else:
+                        work = torch.distributed.irecv(recv_buff, callee_stage, tag=tag)
+                        fut = work.get_future()  # type: ignore[attr-defined]
             else:
-                work = torch.distributed.irecv(recv_buff, callee_stage, tag=tag)
-                fut = work.get_future()  # type: ignore[attr-defined]
+                # Standard receive without decompression
+                if torch.distributed.get_backend() == "gloo":
+                    # Gloo P2P does not support work.get_future, so we need to:
+                    # - manually create the Future,
+                    # - use recv instead, and
+                    # - manually set_result to the Future
+                    fut: torch.futures.Future = self.create_future()
+                    torch.distributed.recv(recv_buff, callee_stage, tag=tag)
+                    fut.set_result(recv_buff)
+                else:
+                    work = torch.distributed.irecv(recv_buff, callee_stage, tag=tag)
+                    fut = work.get_future()  # type: ignore[attr-defined]
 
             def bottom_half(fut):
                 logging.debug(
@@ -1155,7 +1250,7 @@ class PipeStageExecutor(EventRecorder):
         self.lr_scheduler.step(*args, **kwargs)  # type: ignore[union-attr]
 
     def _check_cleanup(self) -> bool:
-        
+
         if len(self.value_store):
             logging.warning(
                 f"[{self.stage_id}] Unclean value store: {self.value_store}"
@@ -1425,6 +1520,9 @@ class PipelineDriverBase(torch.nn.Module):
         self.optimizer_inited = False
         self.checkpoint = checkpoint
         self.use_c10d = use_c10d
+        self.compress_tensors = compress_tensors
+        self.compression_bits = compression_bits
+        self.wireless_retry_count = wireless_retry_count
 
         self.communication_overload = 0
         self.data_transferred_mb = 0
@@ -1446,7 +1544,7 @@ class PipelineDriverBase(torch.nn.Module):
         if template_id >= len(self.template):
             raise ValueError("template_id should be less than the length of the template")
         self.template_id = template_id
-    
+
     def set_template(self, template: List[List[int]]):
         if len(template[0]) > self.world_size:
             raise ValueError("template should have less than world_size stages")
@@ -2183,6 +2281,9 @@ class PipelineDriverFillDrain(PipelineDriverBase):
         _record_mem_dumps=False,
         checkpoint=False,
         use_c10d=False,
+        compress_tensors=False,
+        compression_bits=8,
+        wireless_retry_count=3,
         loss_reducer: LossReducer = sum_reducer,
     ):
         super().__init__(
@@ -2199,6 +2300,9 @@ class PipelineDriverFillDrain(PipelineDriverBase):
             _record_mem_dumps=_record_mem_dumps,
             checkpoint=checkpoint,
             use_c10d=use_c10d,
+            compress_tensors=compress_tensors,
+            compression_bits=compression_bits,
+            wireless_retry_count=wireless_retry_count,
             loss_reducer=loss_reducer,
         )
         self.single_loss = single_loss
@@ -2207,7 +2311,7 @@ class PipelineDriverFillDrain(PipelineDriverBase):
 
         self._init_remote_executors()
 
-        
+
 
     def forward(self, *args, **kwargs):
         if self.single_loss:
@@ -2344,6 +2448,9 @@ class PipelineDriver1F1B(PipelineDriverFillDrain):
         _record_mem_dumps=False,
         checkpoint=False,
         use_c10d=False,
+        compress_tensors=False,
+        compression_bits=8,
+        wireless_retry_count=3,
         loss_reducer: LossReducer = sum_reducer,
     ):
         # In 1F1B with backward stages, the maximum number of outstanding
@@ -2367,6 +2474,9 @@ class PipelineDriver1F1B(PipelineDriverFillDrain):
             _record_mem_dumps=_record_mem_dumps,
             checkpoint=checkpoint,
             use_c10d=use_c10d,
+            compress_tensors=compress_tensors,
+            compression_bits=compression_bits,
+            wireless_retry_count=wireless_retry_count,
             loss_reducer=loss_reducer,
         )
 
@@ -2386,6 +2496,9 @@ class PipelineDriverInterleaved1F1B(PipelineDriver1F1B):
         _record_mem_dumps=False,
         checkpoint=False,
         use_c10d=False,
+        compress_tensors=False,
+        compression_bits=8,
+        wireless_retry_count=3,
         loss_reducer: LossReducer = sum_reducer,
     ):
         super().__init__(
@@ -2402,6 +2515,9 @@ class PipelineDriverInterleaved1F1B(PipelineDriver1F1B):
             _record_mem_dumps=_record_mem_dumps,
             checkpoint=checkpoint,
             use_c10d=use_c10d,
+            compress_tensors=compress_tensors,
+            compression_bits=compression_bits,
+            wireless_retry_count=wireless_retry_count,
             loss_reducer=loss_reducer,
         )
 
