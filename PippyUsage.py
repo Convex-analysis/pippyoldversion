@@ -68,20 +68,45 @@ def log_memory_usage(stage):
     try:
         # Try to use jtop for more detailed GPU metrics
         with jtop.jtop() as jetson:
-            if jetson.ok(): 
+            if jetson.ok():
                 # Get memory stats from memory attribute, not from GPU
                 memory_used = jetson.memory['RAM']["shared"]  # Memory used in KB
                 memory_used = memory_used / 1024  # Convert to MB
-                print_green("Memory used: {:.2f} KB".format(memory_used))
+                print_green(f"Memory used at {stage}: {memory_used:.2f} MB")
                 return memory_used
     except Exception as e:
-        print(f"Error reading GPU memory: {e}")
+        print(f"Error reading GPU memory with jtop: {e}")
+
+    # Fallback to PyTorch's memory tracking if jtop fails
+    try:
+        if torch.cuda.is_available():
+            memory_allocated = torch.cuda.memory_allocated() / 1024 / 1024  # Convert to MB
+            memory_reserved = torch.cuda.memory_reserved() / 1024 / 1024  # Convert to MB
+            print_green(f"CUDA Memory at {stage}: Allocated: {memory_allocated:.2f} MB, Reserved: {memory_reserved:.2f} MB")
+            return memory_allocated
+        else:
+            print("CUDA not available for memory tracking")
+            return 0.0
+    except Exception as e:
+        print(f"Error reading CUDA memory: {e}")
+        return 0.0
 
 def debug_pickle(obj, name):
     try:
         pickle.dumps(obj)
-    except TypeError as e:
-        print(f"Error pickling {name}: {e}")
+        print_green(f"Successfully pickled {name}")
+        return True
+    except (TypeError, AttributeError) as e:
+        print_red(f"Error pickling {name}: {e}")
+
+        # Try to identify problematic attributes
+        if hasattr(obj, '__dict__'):
+            for attr_name, attr_value in obj.__dict__.items():
+                try:
+                    pickle.dumps(attr_value)
+                except Exception as sub_e:
+                    print_red(f"  - Problem with attribute '{attr_name}': {sub_e}")
+        return False
 
 def is_pycapsule(obj):
     PyCapsule_CheckExact = ctypes.pythonapi.PyCapsule_CheckExact
@@ -135,7 +160,7 @@ class MemFuserLoss(nn.Module):
         loss_waypoints = self.waypoints(output[1], target[1])
         loss_traffic_light_state = self.cls(output[2], target[3])
         loss_stop_sign = self.stop_cls(output[3], target[6])
-        
+
         loss = (
             loss_traffic * 0.5
             + loss_waypoints * 0.5
@@ -258,7 +283,7 @@ def train_one_epoch_pipeline(
     losses_stop_sign = AverageMeter()
     start = time.time()
     pipelineDriver.train()
-    
+
     # Track metrics for this epoch
     memory_measurements = []
     memory_measurements.append(log_memory_usage(f"Start of epoch {epoch}"))
@@ -278,10 +303,10 @@ def train_one_epoch_pipeline(
             batch_size = input.size(0)
 
         print_green(f"Batch: {batch_idx}/{last_idx}, Batch size: {batch_size}")
-            
+
         # Update total samples count
         total_samples_processed += batch_size
-        
+
         # CYH: not prefetcher, move to cuda here, so prefetcher needs to be False, i.e. args.-no-prefetcher = True
         if not args.prefetcher:
             if isinstance(input, (tuple, list)):
@@ -303,7 +328,7 @@ def train_one_epoch_pipeline(
 
         print(f"Input: {input.keys()}")
         result = pipelineDriver(input, target)
-        
+
         output = result['output']
         loss = result['loss']
         losses_m.update(loss.item(), batch_size)
@@ -338,9 +363,11 @@ def train_one_epoch_pipeline(
 
         end = time.time()
         batch_time_m.update(end - start)
-        continue
+
         # Record memory usage after batch
-        memory_measurements.append(log_memory_usage(f"After batch {batch_idx} in epoch {epoch}"))
+        memory_usage = log_memory_usage(f"After batch {batch_idx} in epoch {epoch}")
+        if memory_usage is not None:
+            memory_measurements.append(memory_usage)
 
         print_red(f"Epoch: {epoch}, Batch: {batch_idx}/{last_idx} finished!")
 
@@ -348,7 +375,7 @@ def train_one_epoch_pipeline(
     avg_memory_usage = sum(memory_measurements) / len(memory_measurements)
     print(f"Epoch {epoch} average memory usage: {avg_memory_usage:.2f} MB")
     print(f"Epoch {epoch} total samples processed: {total_samples_processed}")
-    
+
     if hasattr(optimizer, "sync_lookahead"):
         optimizer.sync_lookahead()
 
@@ -385,14 +412,14 @@ def main():
     optimizer = get_optimizer(args, model, _logger)
     #initalize the optimizer for pipeline training
     optimizer_pipe = pipelineDriver.instantiate_optimizer(optimizer)
-    
+
     lr_scheduler, num_epochs = create_scheduler(args, optimizer)
     lr_scheduler_pipe = pipelineDriver.instantiate_lr_scheduler(
         lr_scheduler, total_iters=num_epochs
     )
-    
-    
-    
+
+
+
     NUM_ITERATIONs = 100
 
     for i in range(NUM_ITERATIONs):
@@ -412,8 +439,8 @@ def main():
             model_ema=None,
             mixup_fn=None,
         )
- '''   
-    
+ '''
+
 import sys
 
 # Increase the recursion limit
@@ -422,7 +449,7 @@ def worker_memory_monitor(args, stop_event):
     """Monitor memory usage every minute and write to CSV"""
     print_blue(f"Worker {args.rank} memory monitor started")
     worker_metrics_file = f"{os.path.splitext(os.path.basename(__file__))[0]}_worker_{args.rank}_memory.csv"
-    
+
     with open(worker_metrics_file, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(['Timestamp', 'Memory usage (MB)'])
@@ -432,12 +459,12 @@ def worker_memory_monitor(args, stop_event):
             # Record memory usage
             memory_usage = log_memory_usage(f"Worker {args.rank} memory check")
             current_time = time.time() - start_time
-            
+
             # Write to CSV
             with open(worker_metrics_file, 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([f"{current_time:.2f}", f"{memory_usage:.2f}"])
-            
+
             # Wait for 60 seconds before next measurement
             time.sleep(60)
 
@@ -484,7 +511,7 @@ def run_master(_, args):
             augment_prob=args.augment_prob,
             temporal_frames=args.temporal_frames,
         )
-        
+
         collate_fn = None
         mixup_fn = None
 
@@ -525,11 +552,11 @@ def run_master(_, args):
         data_config = resolve_data_config(
         vars(args), model=model, verbose=args.local_rank == 0
         )
-        
+
         train_interpolation = args.train_interpolation
         if args.no_aug or not train_interpolation:
             train_interpolation = data_config["interpolation"]
-        
+
         loader_train = create_carla_loader(
             dataset_train,
             input_size=data_config["input_size"],
@@ -568,7 +595,7 @@ def run_master(_, args):
             'output': (TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0), TensorChunkSpec(0)),
             'loss': LossReducer(0.0, loss_reducer_fn)
         }
-        
+
         pipe_driver: PipelineDriverBase = schedules[args.schedule](pipe, chunks,
                                                                 len(all_worker_ranks),
                                                                 all_ranks=all_worker_ranks,
@@ -584,14 +611,14 @@ def run_master(_, args):
             lr_scheduler, total_iters=num_epochs
         )
         '''
-        
-        
+
+
         log_memory_usage("After creating optimizer")
-        
+
         this_file_name = os.path.splitext(os.path.basename(__file__))[0]
         pipe_visualized_filename = f"{this_file_name}_visualized_{args.rank}.json"
         batches_events_contexts = []
-        
+
         time.time()
         filecreatetime = time.strftime("%Y%m%d-%H%M%S")
         # Create a CSV file for metrics
@@ -599,10 +626,10 @@ def run_master(_, args):
         with open(metrics_file, 'w', newline='') as csvfile:
             csv_writer = csv.writer(csvfile)
             csv_writer.writerow(['Epoch', 'Epoch execution time (s)', 'Total samples', 'Average memory usage (MB)'])
-        
+
         for i in range(NUM_ITERATION):
             epoch_start_time = time.time()
-            
+
             # Run one epoch and get metrics
             metrics = train_one_epoch_pipeline(
                 i,
@@ -622,11 +649,10 @@ def run_master(_, args):
             )
 
             print_red('---------------------------epoch done-----------------------------------------------')
-            break
-            
+
             # Calculate epoch execution time
             epoch_execution_time = time.time() - epoch_start_time
-            
+
             # Write metrics to CSV
             with open(metrics_file, 'a', newline='') as csvfile:
                 csv_writer = csv.writer(csvfile)
@@ -636,7 +662,7 @@ def run_master(_, args):
                     metrics["total_samples"],
                     f"{metrics['avg_memory_usage']:.2f}"
                 ])
-            
+
             print(f"Epoch {i+1} execution time: {epoch_execution_time:.2f} seconds")
             print(f"Metrics saved to {metrics_file}")
 
@@ -652,10 +678,10 @@ def run_master(_, args):
 
     else:
         print("This is a worker rank")
-        
+
         # Create event to signal thread termination
         stop_monitoring = threading.Event()
-        
+
         # Start memory monitoring thread
         import threading
         monitor_thread = threading.Thread(
@@ -663,7 +689,7 @@ def run_master(_, args):
             args=(args, stop_monitoring)
         )
         monitor_thread.start()
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -940,9 +966,9 @@ if __name__ == "__main__":
     parser.add_argument('--rpc_timeout', type=int, default=600)
 
 
-    
-    
-    
+
+
+
     args = parser.parse_args()
 
     from datetime import datetime
@@ -958,7 +984,7 @@ if __name__ == "__main__":
     # )
 
     # print(f"Logging to {logging_path}")
-    
+
     print(torch.cuda.is_available())
     run_pippy(run_master, args)
 

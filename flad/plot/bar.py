@@ -192,7 +192,7 @@ def plot_model_size_comparison():
     plt.xlabel('Model Size (GB)')
     plt.ylabel('Avg Execution Time (s)')
     #plt.title('Execution Time Comparison by Model Size', fontsize=16, pad=20)
-    plt.legend(loc='upper left')
+    plt.legend(loc='lower left')
     ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
@@ -1150,12 +1150,12 @@ if __name__ == "__main__":
     # results = process_csv_files()
     
     # Generate all plots
-    #plot_execution_times()
-    #plot_optimization_times()
-    #plot_model_size_comparison()
-    #plot_recovery_time()
-    #plot_VE_throughout()
-    #plot_VE_mem()
+    plot_execution_times()
+    plot_optimization_times()
+    plot_model_size_comparison()
+    plot_recovery_time()
+    plot_VE_throughout()
+    plot_VE_mem()
     #plot_model_architecture()
     #plot_traffic_light_training_progress()
     #plot_stop_sign_training_progress()
@@ -1165,7 +1165,7 @@ if __name__ == "__main__":
     file_path = "flad/used.csv"
     #execute_csv_std(file_path)
     #plot_diff_LLM__scores_bar()
-    plot_diff_LLM__scores_bar()
+    #plot_diff_LLM__scores_bar()
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
 
 

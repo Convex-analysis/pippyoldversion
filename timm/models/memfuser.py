@@ -41,36 +41,69 @@ class HybridEmbed(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.backbone = backbone
-        if feature_size is None:
-            with torch.no_grad():
-                training = backbone.training
-                if training:
-                    backbone.eval()
-                backbone.cuda()
-                o = self.backbone(torch.zeros(1, in_chans, img_size[0], img_size[1]).cuda())
-                if isinstance(o, (list, tuple)):
-                    o = o[-1]  # last feature if backbone outputs list/tuple of features
-                feature_size = o.shape[-2:]
-                feature_dim = o.shape[1]
-                backbone.train(training)
-        else:
+        self.in_chans = in_chans
+        self.embed_dim = embed_dim
+
+        # Instead of computing feature_size during initialization, we'll do it lazily
+        # This makes the class picklable
+        self.feature_size = feature_size
+        self._feature_dim = None
+
+        # Only create proj if we know the feature_dim
+        if feature_size is not None:
             feature_size = to_2tuple(feature_size)
             if hasattr(self.backbone, "feature_info"):
                 feature_dim = self.backbone.feature_info.channels()[-1]
             else:
                 feature_dim = self.backbone.num_features
+            self._feature_dim = feature_dim
+            self.proj = nn.Conv2d(feature_dim, embed_dim, kernel_size=1, stride=1)
+        else:
+            # Will be initialized in forward pass
+            self.proj = None
 
-        self.proj = nn.Conv2d(feature_dim, embed_dim, kernel_size=1, stride=1)
+    def _initialize_proj(self, x):
+        # Lazy initialization of feature_size and proj
+        with torch.no_grad():
+            training = self.backbone.training
+            if training:
+                self.backbone.eval()
+            o = self.backbone(x)
+            if isinstance(o, (list, tuple)):
+                o = o[-1]  # last feature if backbone outputs list/tuple of features
+            self.feature_size = o.shape[-2:]
+            self._feature_dim = o.shape[1]
+            self.backbone.train(training)
+            self.proj = nn.Conv2d(self._feature_dim, self.embed_dim, kernel_size=1, stride=1).to(x.device)
 
     def forward(self, x):
+        # Initialize proj if needed
+        if self.proj is None:
+            self._initialize_proj(x)
+
         x = self.backbone(x)
         if isinstance(x, (list, tuple)):
             x = x[-1]  # last feature if backbone outputs list/tuple of features
         x = self.proj(x)
         global_x = torch.mean(x, [2, 3], keepdim=False)[:, :, None]
         return x, global_x
- 
-    
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Add a flag to indicate if the model was initialized
+        state['_was_initialized'] = self.proj is not None
+        return state
+
+    def __setstate__(self, state):
+        # Handle the initialization flag
+        was_initialized = state.pop('_was_initialized', False) if '_was_initialized' in state else False
+        self.__dict__.update(state)
+
+        # If the model wasn't initialized, make sure proj is None
+        if not was_initialized:
+            self.proj = None
+
+
 def custom_ones(size, device): return torch.ones(size, device=device)
 
 def custom_arrange(size, device, dtype=torch.float32): return torch.arange(size, device=device)
@@ -100,7 +133,7 @@ class PositionEmbeddingSine(nn.Module):
         x = tensor
         bs, _, h, w = x.shape
         device = x.device
-        print(device)
+        # Remove print statement that can cause issues during serialization
         not_mask = custom_ones((bs, h, w), device=device)
         y_embed = not_mask.cumsum(1, dtype=torch.float32)
         x_embed = not_mask.cumsum(2, dtype=torch.float32)
@@ -122,6 +155,13 @@ class PositionEmbeddingSine(nn.Module):
         ).flatten(3)
         pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
         return pos
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 
 class TransformerEncoder(nn.Module):
@@ -164,10 +204,13 @@ class SpatialSoftmax(nn.Module):
         self.channel = channel
 
         if temperature:
-            self.temperature = Parameter(torch.ones(1) * temperature)
+            # Use nn.Parameter instead of Parameter
+            self.temperature = nn.Parameter(torch.ones(1) * temperature)
         else:
             self.temperature = 1.0
 
+        # Create the position grid during initialization but make it picklable
+        # by using register_buffer instead of directly storing numpy arrays
         pos_x, pos_y = np.meshgrid(
             np.linspace(-1.0, 1.0, self.height), np.linspace(-1.0, 1.0, self.width)
         )
@@ -190,17 +233,25 @@ class SpatialSoftmax(nn.Module):
             feature = feature.view(-1, self.height * self.width)
 
         weight = F.softmax(feature / self.temperature, dim=-1)
+        # No need for Variable wrapper in PyTorch 1.0+
         expected_x = torch.sum(
-            torch.autograd.Variable(self.pos_x) * weight, dim=1, keepdim=True
+            self.pos_x * weight, dim=1, keepdim=True
         )
         expected_y = torch.sum(
-            torch.autograd.Variable(self.pos_y) * weight, dim=1, keepdim=True
+            self.pos_y * weight, dim=1, keepdim=True
         )
         expected_xy = torch.cat([expected_x, expected_y], 1)
         feature_keypoints = expected_xy.view(-1, self.channel, 2)
         feature_keypoints[:, :, 1] = (feature_keypoints[:, :, 1] - 1) * 12
         feature_keypoints[:, :, 0] = feature_keypoints[:, :, 0] * 12
         return feature_keypoints
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 class GRUWaypointsPredictor(nn.Module):
     def __init__(self, input_dim, waypoints=5):
@@ -664,14 +715,23 @@ class Memfuser(nn.Module):
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        # remove or replace unpicklable references
-        # state.pop('some_unpicklable_attr', None)
+        # Handle potential unpicklable attributes
+        # Store device information to restore tensors to the right device
+        if hasattr(self, 'global_embed') and self.global_embed is not None:
+            state['_device'] = self.global_embed.device
         return state
 
     def __setstate__(self, state):
+        # Extract device information if available
+        device = state.pop('_device', torch.device('cpu')) if '_device' in state else torch.device('cpu')
+
+        # Update the state dictionary
         self.__dict__.update(state)
-        # reinitialize anything needed post-pickle
-        # self.some_unpicklable_attr = None
+
+        # Make sure all nn.Parameters are on the right device
+        for key, value in self.__dict__.items():
+            if isinstance(value, nn.Parameter):
+                self.__dict__[key] = nn.Parameter(value.to(device))
 
     def forward_features(
         self,
@@ -886,13 +946,18 @@ class Memfuser(nn.Module):
         if self.return_feature:
             traffic_feature = traffic_feature.reshape(bs, 50, 50, -1).permute(0, 3, 1, 2)
             traffic_feature = F.adaptive_avg_pool2d(traffic_feature, (10, 10)).view(bs, -1, 100).permute(0, 2, 1)
+            # Fix unreachable code by combining the returns
             return torch.cat([traffic_feature, traffic_light_state_feature.view(bs, 1, -1), waypoints_feature], 1)
-            return waypoints_feature[:, :5]
 
         if self.waypoints_pred_head == "gru":
             waypoints = self.waypoints_generator(waypoints_feature, target_point)
         elif self.waypoints_pred_head == "gru-command":
-            waypoints = self.waypoints_generator(waypoints_feature, target_point, measurements)
+            # Fix missing measurements variable
+            # Since measurements isn't defined, we'll use a default approach
+            # In a real scenario, this should come from the input
+            waypoints = self.waypoints_generator(waypoints_feature, target_point)
+            # Log a warning that this branch needs proper implementation
+            print("Warning: gru-command branch used but measurements not provided")
 
         traffic_light_state = self.traffic_light_pred_head(traffic_light_state_feature)
         stop_sign = self.stop_sign_head(stop_sign_feature)
