@@ -9,7 +9,7 @@ import logging
 import datetime
 import torch
 import torch.distributed as dist
-from typing import Optional, List, Tuple, Dict, Any, Callable
+from typing import Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,8 @@ def measure_network_bandwidth(
         Estimated bandwidth in MB/s
     """
     rank = dist.get_rank()
-    world_size = dist.get_world_size()
+    # Get world size (used for logging)
+    _ = dist.get_world_size()
 
     # Create test tensor
     num_elements = int(tensor_size_mb * 1024 * 1024 / 4)  # 4 bytes per float32

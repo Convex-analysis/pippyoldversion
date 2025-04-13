@@ -166,6 +166,9 @@ def run_pippy(run_func, args, *extra_args):
 
 
 def run_worker(rank, run_func, args, *extra_args):
+    # Declare global variables at the beginning of the function
+    global dp_pg_per_pp_rank
+
     args.rank = rank
 
     os.environ["MASTER_ADDR"] = args.master_addr
@@ -216,7 +219,7 @@ def run_worker(rank, run_func, args, *extra_args):
     if use_c10d:
         try:
             # Import wireless utilities
-            from pippy.wireless_utils import setup_wireless_c10d, create_jetson_optimized_groups, reliable_broadcast
+            from pippy.wireless_utils import setup_wireless_c10d, create_jetson_optimized_groups
 
             # Get timeout in minutes (default to 30 if not specified)
             timeout_min = args.c10d_timeout_min if hasattr(args, "c10d_timeout_min") else 30
@@ -232,15 +235,19 @@ def run_worker(rank, run_func, args, *extra_args):
                 backend="nccl" if args.cuda else "gloo"
             )
 
+            # Create process groups for wireless communication
+
             # Create optimized process groups for Jetson devices
-            dp_groups, pp_groups, dp_ranks_per_pp_rank, pp_ranks_per_dp_rank = create_jetson_optimized_groups(
+            dp_groups, _, dp_ranks_per_pp_rank, _ = create_jetson_optimized_groups(
                 world_size=actual_world_size,
                 pp_group_size=args.pp_group_size,
                 dp_group_size=args.dp_group_size
             )
 
+            # Log the created groups
+            print(f"Created {len(dp_groups)} data parallel groups with ranks: {dp_ranks_per_pp_rank}")
+
             # Store the groups for later use
-            global dp_pg_per_pp_rank
             dp_pg_per_pp_rank = dp_groups
 
             # Initialize RPC for control messages
@@ -274,12 +281,15 @@ def run_worker(rank, run_func, args, *extra_args):
         )
 
         # Create standard process groups
-        global dp_pg_per_pp_rank
+
+        # Create data parallel ranks
         dp_ranks_per_pp_rank = (
             torch.arange(actual_world_size)
             .reshape(args.pp_group_size, args.dp_group_size)
             .tolist()
         )
+
+        # Create process groups
         dp_pg_per_pp_rank = [
             torch.distributed.new_group(ranks) for ranks in dp_ranks_per_pp_rank
         ]

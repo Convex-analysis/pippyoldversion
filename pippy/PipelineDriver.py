@@ -5,6 +5,7 @@ import threading
 import time
 import warnings
 import os
+import datetime
 from enum import Enum
 from inspect import Parameter, Signature
 from typing import Any, Callable, Dict, List, Tuple, Optional
@@ -1069,7 +1070,7 @@ class PipeStageExecutor(EventRecorder):
                     if torch.distributed.get_backend() == "gloo":
                         # Gloo P2P does not support work.get_future, so we use send instead
                         if hasattr(self, 'wireless_retry_count') and self.wireless_retry_count > 0:
-                            from pippy.wireless_utils import reliable_broadcast
+                            # reliable_broadcast is already imported above
                             reliable_broadcast(compressed_value, self.stage_id, max_retries=self.wireless_retry_count)
                             reliable_broadcast(scale, self.stage_id, max_retries=self.wireless_retry_count)
                         else:
@@ -1492,6 +1493,9 @@ class PipelineDriverBase(torch.nn.Module):
         _record_mem_dumps=False,
         checkpoint=False,
         use_c10d=False,
+        compress_tensors=False,
+        compression_bits=8,
+        wireless_retry_count=3,
         loss_reducer: LossReducer = sum_reducer,
     ):
         super().__init__()
