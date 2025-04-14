@@ -32,7 +32,8 @@ def main(node_rank, max_memory_mb):
         "--master_port=" + os.environ["MASTER_PORT"],
         "PippyUsage.py",
         "--record_mem_dumps=0",
-        "--checkpoint=0"
+        "--checkpoint=0",
+        "--use_c10d"
         #"--max_memory_mb=" + str(max_memory_mb)
     ]
 
