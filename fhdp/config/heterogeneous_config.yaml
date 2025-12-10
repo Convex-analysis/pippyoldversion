@@ -1,0 +1,335 @@
+# FHDP Heterogeneous Platform Configuration
+# Configuration for Jetson Orin Nano, x86 PCs, and other platforms
+
+platforms:
+  # Jetson Orin Nano configuration
+  jetson_orin_nano:
+    hardware:
+      platform: "jetson_orin"
+      compute_capability: "edge_ai"
+      cpu_cores: 6
+      cpu_freq: 2.2  # GHz
+      memory_total: 8  # GB
+      gpu_memory: 8  # GB
+      storage_speed: "emmc"
+      network_speed: 1000  # Mbps
+      thermal_limit: 85  # °C
+      accelerated_compute: true
+    
+    resources:
+      monitoring:
+        interval: 1.0  # seconds
+        thermal_management: true
+        power_management: true
+        
+      thresholds:
+        cpu_warning: 0.8
+        cpu_critical: 0.95
+        memory_warning: 0.75
+        memory_critical: 0.9
+        temperature_warning: 70
+        temperature_critical: 85
+        power_warning: 25  # watts
+        power_critical: 30  # watts
+    
+    optimization:
+      performance_mode: "high_performance"
+      gpu_acceleration: true
+      tensorrt_optimization: true
+      memory_pool_size: 2048  # MB
+      batch_processing: true
+    
+    communication:
+      protocols: ["tcp", "udp"]
+      compression: "zlib"
+      message_batch_size: 50
+      connection_timeout: 5.0
+      ssl_enabled: false
+    
+    workload_limits:
+      max_concurrent_tasks: 4
+      max_model_size: 2048  # MB
+      max_batch_size: 64
+      preferred_task_types: ["inference", "light_training"]
+
+  # Jetson Xavier configuration
+  jetson_xavier:
+    hardware:
+      platform: "jetson_xavier"
+      compute_capability: "edge_ai"
+      cpu_cores: 8
+      cpu_freq: 2.2  # GHz
+      memory_total: 32  # GB
+      gpu_memory: 16  # GB
+      storage_speed: "ssd"
+      network_speed: 10000  # Mbps
+      thermal_limit: 90  # °C
+      accelerated_compute: true
+    
+    resources:
+      monitoring:
+        interval: 1.0
+        thermal_management: true
+        power_management: true
+        
+      thresholds:
+        cpu_warning: 0.85
+        cpu_critical: 0.95
+        memory_warning: 0.8
+        memory_critical: 0.9
+        temperature_warning: 75
+        temperature_critical: 90
+        power_warning: 35  # watts
+        power_critical: 40  # watts
+    
+    optimization:
+      performance_mode: "high_performance"
+      gpu_acceleration: true
+      tensorrt_optimization: true
+      memory_pool_size: 4096  # MB
+      batch_processing: true
+    
+    communication:
+      protocols: ["tcp", "udp", "rdma"]
+      compression: "zlib"
+      message_batch_size: 100
+      connection_timeout: 3.0
+      ssl_enabled: false
+    
+    workload_limits:
+      max_concurrent_tasks: 8
+      max_model_size: 4096  # MB
+      max_batch_size: 128
+      preferred_task_types: ["training", "inference", "pipeline"]
+
+  # x86 Linux configuration
+  x86_linux:
+    hardware:
+      platform: "x86_linux"
+      compute_capability: "server_class"
+      cpu_cores: 8  # Default, will be detected
+      cpu_freq: 3.0  # GHz, will be detected
+      memory_total: 16  # GB, will be detected
+      gpu_memory: 0  # Will be detected
+      storage_speed: "ssd"  # Will be detected
+      network_speed: 1000  # Mbps, will be detected
+      thermal_limit: 95  # °C
+      accelerated_compute: false  # Will be updated based on GPU detection
+    
+    resources:
+      monitoring:
+        interval: 0.5
+        thermal_management: true
+        power_management: false  # Desktop typically doesn't need power management
+        
+      thresholds:
+        cpu_warning: 0.85
+        cpu_critical: 0.95
+        memory_warning: 0.8
+        memory_critical: 0.9
+        temperature_warning: 75
+        temperature_critical: 90
+        power_warning: 100  # watts
+        power_critical: 150  # watts
+    
+    optimization:
+      performance_mode: "high_performance"
+      gpu_acceleration: auto  # Will detect GPU availability
+      tensorrt_optimization: false
+      memory_pool_size: 4096  # MB
+      batch_processing: true
+    
+    communication:
+      protocols: ["tcp", "udp", "websocket", "grpc"]
+      compression: "zlib"
+      message_batch_size: 100
+      connection_timeout: 3.0
+      ssl_enabled: true
+    
+    workload_limits:
+      max_concurrent_tasks: 12
+      max_model_size: 8192  # MB
+      max_batch_size: 256
+      preferred_task_types: ["training", "aggregation", "heavy_computation"]
+
+  # x86 Windows configuration
+  x86_windows:
+    hardware:
+      platform: "x86_windows"
+      compute_capability: "server_class"
+      cpu_cores: 8  # Default, will be detected
+      cpu_freq: 3.0  # GHz, will be detected
+      memory_total: 16  # GB, will be detected
+      gpu_memory: 0  # Will be detected
+      storage_speed: "ssd"  # Will be detected
+      network_speed: 1000  # Mbps, will be detected
+      thermal_limit: 95  # °C
+      accelerated_compute: false
+    
+    resources:
+      monitoring:
+        interval: 0.5
+        thermal_management: true
+        power_management: false
+        
+      thresholds:
+        cpu_warning: 0.85
+        cpu_critical: 0.95
+        memory_warning: 0.8
+        memory_critical: 0.9
+        temperature_warning: 75
+        temperature_critical: 90
+        power_warning: 120  # watts
+        power_critical: 180  # watts
+    
+    optimization:
+      performance_mode: "high_performance"
+      gpu_acceleration: auto
+      tensorrt_optimization: false
+      memory_pool_size: 4096  # MB
+      batch_processing: true
+    
+    communication:
+      protocols: ["tcp", "udp", "websocket"]
+      compression: "zlib"
+      message_batch_size: 80
+      connection_timeout: 4.0
+      ssl_enabled: true
+    
+    workload_limits:
+      max_concurrent_tasks: 10
+      max_model_size: 6144  # MB
+      max_batch_size: 200
+      preferred_task_types: ["training", "inference", "moderate_computation"]
+
+# Heterogeneous network configuration
+network:
+  auto_discovery:
+    enabled: true
+    broadcast_interval: 30  # seconds
+    timeout: 10  # seconds
+    protocols: ["udp"]
+  
+  protocol_negotiation:
+    enabled: true
+    fallback_to_tcp: true
+    compression_negotiation: true
+  
+  connection_pooling:
+    max_connections_per_node: 5
+    connection_timeout: 10  # seconds
+    keepalive_interval: 30  # seconds
+    cleanup_interval: 300  # seconds
+
+# Load balancing configuration
+load_balancing:
+  strategy: "performance_based"  # options: round_robin, performance_based, resource_aware
+  
+  performance_weights:
+    cpu_efficiency: 0.3
+    memory_efficiency: 0.2
+    gpu_efficiency: 0.3
+    network_efficiency: 0.1
+    thermal_efficiency: 0.1
+  
+  rebalancing:
+    enabled: true
+    interval: 60  # seconds
+    migration_threshold: 0.2
+  
+  health_checks:
+    enabled: true
+    interval: 30  # seconds
+    failure_threshold: 3
+
+# Security configuration
+security:
+  encryption:
+    enabled: true
+    algorithm: "AES-256-GCM"
+    key_rotation_interval: 3600  # seconds
+  
+  authentication:
+    enabled: true
+    method: "certificate"  # options: certificate, token, password
+    cert_file: "/etc/fhdp/certs/server.crt"
+    key_file: "/etc/fhdp/certs/server.key"
+  
+  access_control:
+    enabled: true
+    whitelist_enabled: false
+    blacklist_enabled: true
+
+# Monitoring and logging
+monitoring:
+  metrics:
+    enabled: true
+    collection_interval: 5  # seconds
+    retention_period: 86400  # seconds (24 hours)
+    export_prometheus: true
+    prometheus_port: 9090
+  
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+    format: "json"  # json, text
+    file_path: "/var/log/fhdp/fhdp.log"
+    max_file_size: "100MB"
+    max_files: 10
+
+# Deployment configuration
+deployment:
+  auto_scaling:
+    enabled: true
+    min_nodes: 2
+    max_nodes: 20
+    scale_up_threshold: 0.8
+    scale_down_threshold: 0.3
+    cooldown_period: 300  # seconds
+  
+  fault_tolerance:
+    enabled: true
+    heartbeat_interval: 10  # seconds
+    node_timeout: 30  # seconds
+    retry_attempts: 3
+    retry_delay: 5  # seconds
+  
+  backup:
+    enabled: true
+    interval: 3600  # seconds
+    retention: 7  # days
+    backup_path: "/var/backups/fhdp"
+
+# Platform-specific optimizations
+optimizations:
+  jetson_platforms:
+    power_modes:
+      maxn: "Maximum performance"
+      15w: "15W power limit"
+      10w: "10W power limit"
+      5w: "5W power limit"
+    
+    clock_frequencies:
+      gpu: "Auto"
+      cpu: "Auto"
+      emc: "Auto"
+    
+    memory_optimization:
+      unified_memory: true
+      memory_pool: true
+      zero_copy: true
+  
+  x86_platforms:
+    cpu_optimization:
+      affinity: true
+      hyperthreading: auto
+      numa_awareness: true
+    
+    memory_optimization:
+      huge_pages: true
+      memory_locking: false
+      swap_optimization: true
+    
+    gpu_optimization:
+      cuda_streams: true
+      memory_pools: true
+      multi_gpu: true

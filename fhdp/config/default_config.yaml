@@ -1,0 +1,140 @@
+# FHDP System Default Configuration
+
+# System Configuration
+system:
+  max_vehicles_per_region: 50
+  pipeline_formation_interval: 5.0  # seconds
+  model_broadcast_interval: 10.0     # seconds
+  participation_timeout: 30.0        # seconds
+  aggregation_interval: 2.0         # seconds
+  enable_pipeline_training: true
+  enable_individual_training: true
+  fairness_enabled: true
+  default_protocol: "dsrc"
+
+# Edge Server Configuration
+edge_server:
+  mobility_prediction:
+    prediction_horizon: 10.0  # seconds
+    transition_memory: 5
+    update_interval: 1.0      # seconds
+    position_tolerance: 5.0   # meters
+    
+  template_management:
+    cache_size: 1000
+    lookup_latency_threshold: 0.005  # 5ms
+    generation_interval: 60.0        # seconds
+    recomposition_time: 1.5          # seconds
+    
+  aggregation:
+    min_participants: 3
+    timeout: 10.0          # seconds
+    weight_decay: 0.95
+    
+  resource_classification:
+    high_resource_cpu: 0.8
+    high_resource_memory: 0.8
+    high_resource_battery: 0.7
+    medium_resource_cpu: 0.5
+    medium_resource_memory: 0.5
+    medium_resource_battery: 0.4
+
+# Vehicle Layer Configuration
+vehicle_layer:
+  communication:
+    max_neighbor_distance: 300.0  # meters
+    min_signal_strength: -85.0    # dBm
+    heartbeat_interval: 2.0        # seconds
+    missing_heartbeat_threshold: 3
+    protocols:
+      dsrc:
+        enabled: true
+        port: 20001
+        bandwidth: 27.0    # Mbps
+        latency: 0.01      # seconds
+        range: 300.0       # meters
+      cv2x:
+        enabled: false
+        port: 20002
+        bandwidth: 100.0   # Mbps
+        latency: 0.005     # seconds
+        range: 500.0       # meters
+      wifi_direct:
+        enabled: false
+        port: 20003
+        bandwidth: 250.0   # Mbps
+        latency: 0.002     # seconds
+        range: 200.0       # meters
+        
+  pipeline_formation:
+    max_pipeline_length: 5
+    min_participants: 2
+    timeout: 30.0         # seconds
+    selection_bias_correction: 0.1
+    
+  training_execution:
+    epochs_range: [1, 2]           # short-horizon training
+    communication_bundle_size: 65536  # 64KB
+    memory_usage_limit: 0.8        # 80%
+    min_data_size: 100
+    max_data_size: 10000
+    
+  resource_monitoring:
+    monitoring_interval: 5.0  # seconds
+    cpu_critical: 0.9
+    memory_critical: 0.9
+    battery_critical: 0.15
+    thermal_critical: 0.85
+    storage_critical: 0.1
+
+# Fairness and Error Propagation
+fairness_error:
+  fairness:
+    window_size: 100
+    decay_factor: 0.9
+    min_participation_interval: 5.0
+    max_participation_rate: 0.1  # per second
+    max_priority_weight: 3.0
+    
+  error_propagation:
+    accumulation_threshold: 0.1
+    max_propagation_delay: 5.0  # seconds
+    compression_ratio: 0.7
+    compression_enabled: true
+
+# Performance Requirements
+performance:
+  template_lookup_latency: 0.005    # 5ms
+  pipeline_recomposition_time: 1.5   # seconds
+  max_vehicle_memory_usage: 0.8     # 80%
+  min_pipeline_participants: 2
+  max_pipeline_length: 5
+
+# Security and Reliability
+security:
+  max_connection_attempts: 3
+  connection_timeout: 3.0      # seconds
+  encryption_enabled: false
+  message_authentication: false
+
+# Logging and Monitoring
+logging:
+  level: "INFO"
+  monitoring_interval: 5.0      # seconds
+  metrics_collection_interval: 10.0  # seconds
+  save_metrics: false
+  metrics_file: "fhdp_metrics.log"
+
+# Model Configuration
+model:
+  type: "neural_network"
+  architecture: "simple_cnn"
+  input_size: 784
+  output_size: 10
+  initial_model_path: null
+  
+training:
+  learning_rate: 0.001
+  batch_size: 32
+  optimizer: "sgd"
+  loss_function: "cross_entropy"
