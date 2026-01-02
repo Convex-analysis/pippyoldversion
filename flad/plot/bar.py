@@ -9,7 +9,7 @@ import glob
 # Set consistent plot style
 plt.style.use('seaborn-v0_8-whitegrid')
 BLUE_PALETTE = ['#2978B5', '#64A0D0', '#8FB3D9', '#A3C4DC']
-FIG_SIZE = (4, 5)  # Updated to specified dimensions
+FIG_SIZE = (6, 5)  # Updated to specified dimensions
 SAVE_PLOTS = True
 OUTPUT_DIR = './flad/plot/figures/'
 
@@ -21,11 +21,11 @@ def setup_environment():
     
     # Set consistent font sizes with updated values
     plt.rcParams['font.size'] = 16  # Base font size
-    plt.rcParams['axes.labelsize'] = 25  # Increased for x and y labels
-    plt.rcParams['axes.titlesize'] = 25  # Increased for title
-    plt.rcParams['xtick.labelsize'] = 16
-    plt.rcParams['ytick.labelsize'] = 16
-    plt.rcParams['legend.fontsize'] = 16  # Increased for legend
+    plt.rcParams['axes.labelsize'] = 18  # Increased for x and y labels
+    plt.rcParams['axes.titlesize'] = 14  # Increased for title
+    plt.rcParams['xtick.labelsize'] = 13
+    plt.rcParams['ytick.labelsize'] = 13
+    plt.rcParams['legend.fontsize'] = 15  # Increased for legend
 
 def process_csv_files():
     """Process CSV files and extract execution times"""
@@ -192,7 +192,7 @@ def plot_model_size_comparison():
     plt.xlabel('Model Size (GB)')
     plt.ylabel('Avg Execution Time (s)')
     #plt.title('Execution Time Comparison by Model Size', fontsize=16, pad=20)
-    plt.legend(loc='lower left')
+    plt.legend(loc='upper left')
     ax.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
@@ -222,8 +222,8 @@ def plot_recovery_time():
 
     # Customize plot
     #ax.set_title('Recovery Time Comparison Between Methods', fontsize=16, pad=20)
-    ax.set_xlabel('Recovery Method', fontsize=24, labelpad=10)
-    ax.set_ylabel('Recovery Time (s)', fontsize=24, labelpad=10)
+    ax.set_xlabel('Recovery Method', labelpad=10)
+    ax.set_ylabel('Recovery Time (s)', labelpad=10)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     ax.set_ylim(0, max(Recovery_time.values()) * 1.15)  # Add 15% headroom
     
@@ -259,8 +259,8 @@ def plot_VE_throughout():
     
     # Customize plot
     #ax.set_title('Vision Encoder Throughput Comparison', fontsize=16, pad=20)
-    ax.set_xlabel('Schemes', fontsize=24, labelpad=10)
-    ax.set_ylabel('Throughput (samples/min)', fontsize=24, labelpad=10)
+    ax.set_xlabel('Schemes', labelpad=10)
+    ax.set_ylabel('Throughput (samples/min)', labelpad=10)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
      
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])  # Make room for the note
@@ -302,8 +302,8 @@ def plot_VE_mem():
     
     # Customize plot
     #ax.set_title('Memory Usage Comparison', fontsize=16, pad=20)
-    ax.set_xlabel('Schemes', fontsize=24, labelpad=10)
-    ax.set_ylabel('Avg Memory Usage (GB)', fontsize=24, labelpad=10)
+    ax.set_xlabel('Schemes', labelpad=10)
+    ax.set_ylabel('Avg Memory Usage (GB)', labelpad=10)
     ax.grid(axis='y', linestyle='--', alpha=0.7)
     
     
@@ -595,7 +595,7 @@ def plot_route_completion_score_bar():
     yerr = [lower_errors, upper_errors]
     
     # Create figure
-    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    fig, ax = plt.subplots(figsize=(6,5))
     
     # Create bar colors with the first two using one color (untrained) and the last two using another (trained)
     colors = [BLUE_PALETTE[2], BLUE_PALETTE[2], BLUE_PALETTE[0], BLUE_PALETTE[0]]
@@ -618,13 +618,13 @@ def plot_route_completion_score_bar():
     bars[3].set_hatch('///')
     
     # Set axis labels and title
-    ax.set_xlabel('AD Model Configuration', fontsize=24, labelpad=10)
-    ax.set_ylabel('Route Completion Score', fontsize=24, labelpad=10)
+    ax.set_xlabel('AD Model Configuration', labelpad=10)
+    ax.set_ylabel('Route Completion Score', labelpad=10)
     #ax.set_title('Route Completion Performance by Model Configuration', fontsize=16, pad=20)
     
     # Set x-tick labels
     ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, fontdict={'fontsize': 13})
+    ax.set_xticklabels(labels)
     
     # Add a grid for better readability
     ax.grid(axis='y', linestyle='--', alpha=0.7)
@@ -712,7 +712,7 @@ def plot_infraction_score_bar():
     yerr = [lower_errors, upper_errors]
     
     # Create figure
-    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    fig, ax = plt.subplots(figsize=(6,5))
     
     # Create bar colors - lower is better for infractions, so use green for low values
     colors = [BLUE_PALETTE[3], BLUE_PALETTE[3], BLUE_PALETTE[1], BLUE_PALETTE[0]]
@@ -756,8 +756,8 @@ def plot_infraction_score_bar():
         bars[valid_indices.index(3)].set_hatch('///')
     
     # Set axis labels and title
-    ax.set_xlabel('AD Model Configuration', fontsize=24, labelpad=10)
-    ax.set_ylabel('Infraction Score', fontsize=24, labelpad=10)
+    ax.set_xlabel('AD Model Configuration', labelpad=10)
+    ax.set_ylabel('Infraction Score', labelpad=10)
     #ax.set_title('Infraction Score by Model Configuration', fontsize=16, pad=20)
     
     # Set x-tick labels
@@ -884,7 +884,7 @@ def plot_combined_driving_score_bar():
     yerr = [lower_errors, upper_errors]
     
     # Create figure
-    fig, ax = plt.subplots(figsize=FIG_SIZE)
+    fig, ax = plt.subplots(figsize=(6,5))
     
     # Create bar colors - use a gradient from light to dark blue based on performance
     colors = [BLUE_PALETTE[3], BLUE_PALETTE[3], BLUE_PALETTE[1], BLUE_PALETTE[0]]
@@ -907,13 +907,13 @@ def plot_combined_driving_score_bar():
     bars[3].set_hatch('///')
     
     # Set axis labels and title with updated font sizes
-    ax.set_xlabel('AD Model Configuration', fontdict={'size': 25})
-    ax.set_ylabel('Driving Score', fontdict={'size': 25})
+    ax.set_xlabel('AD Model Configuration')
+    ax.set_ylabel('Driving Score')
     #ax.set_title('Driving Score by AD Model Configuration', fontdict={'size': 25}, pad=20)
     
     # Set x-tick labels
     ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, fontdict={'fontsize': 13})
+    ax.set_xticklabels(labels)
     
     # Add a grid for better readability with updated style
     ax.grid(color='silver', linestyle='--', linewidth=1, alpha=0.3)
@@ -931,7 +931,7 @@ def plot_combined_driving_score_bar():
         Patch(facecolor='gray', hatch='///', edgecolor='black', label='FLAD VE'),
         Patch(facecolor='gray', edgecolor='black', label='Raw VE')
     ]
-    ax.legend(handles=legend_elements, loc='upper left', fontsize=16)
+    ax.legend(handles=legend_elements, loc='upper left')
     
     # Add a horizontal line at y=0
     ax.axhline(y=0, color='black', linewidth=0.5)
@@ -1007,18 +1007,18 @@ def plot_diff_LLM__scores_bar():
     """
     # Data with mean values and min/max bounds
     RC_data = {
-        "Llamma": {"mean": 30.8},
-        "Llava": {"mean": 4},
+        "LLaMA": {"mean": 30.8},
+        "LLaVA": {"mean": 4},
         "Vicuna": {"mean": 11.4}
     }
     IS_data = {
-        "Llamma": {"mean": 0.38},
-        "Llava": {"mean": 20},
+        "LLaMA": {"mean": 0.38},
+        "LLaVA": {"mean": 20},
         "Vicuna": {"mean": 13}
     }
     DS_data = {
-        "Llamma": {"mean": 30},
-        "Llava": {"mean": -16},
+        "LLaMA": {"mean": 30},
+        "LLaVA": {"mean": -16},
         "Vicuna": {"mean": -1.6}
     }
     
@@ -1098,12 +1098,12 @@ def plot_llm_comparison(data, y_label, filename, higher_is_better=True, has_erro
         )
     
     # Set axis labels and title
-    ax.set_xlabel('LLM Model', fontsize=24, labelpad=10)
-    ax.set_ylabel(y_label, fontsize=24, labelpad=10)
+    ax.set_xlabel('LLM Model', labelpad=10)#fontsize=24, 
+    ax.set_ylabel(y_label, labelpad=10)#fontsize=24,
     
     # Set x-tick labels
     ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, fontdict={'fontsize': 16})
+    ax.set_xticklabels(labels)#fontdict={'fontsize': 16}
     
     # Add a grid for better readability
     ax.grid(axis='y', linestyle='--', alpha=0.7)
@@ -1156,16 +1156,16 @@ if __name__ == "__main__":
     plot_recovery_time()
     plot_VE_throughout()
     plot_VE_mem()
-    #plot_model_architecture()
+    plot_model_architecture()
     #plot_traffic_light_training_progress()
     #plot_stop_sign_training_progress()
-    #plot_route_completion_score_bar()
-    #plot_infraction_score_bar()
-    #plot_combined_driving_score_bar()
+    plot_route_completion_score_bar()
+    plot_infraction_score_bar()
+    plot_combined_driving_score_bar()
+    
     file_path = "flad/used.csv"
     #execute_csv_std(file_path)
-    #plot_diff_LLM__scores_bar()
-    #plot_diff_LLM__scores_bar()
+    plot_diff_LLM__scores_bar()
     print(f"{'Plots saved to '+OUTPUT_DIR if SAVE_PLOTS else 'Plots displayed but not saved'}")
 
 
