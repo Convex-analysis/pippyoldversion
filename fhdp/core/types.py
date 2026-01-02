@@ -24,7 +24,7 @@ class TrainingMode(Enum):
 class CommunicationProtocol(Enum):
     """V2V communication protocols"""
     DSRC = "dsrc"
-    C-V2X = "cv2x"
+    CV2X = "cv2x"
     WIFI_DIRECT = "wifi_direct"
 
 class ResourceClass(Enum):

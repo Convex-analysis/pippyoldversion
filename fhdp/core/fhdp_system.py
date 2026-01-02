@@ -7,7 +7,7 @@ asynchronous aggregation, and coordination between edge server and vehicles.
 import time
 import threading
 import asyncio
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple, Any, Set, Callable
 from dataclasses import dataclass
 import numpy as np
 import torch
@@ -20,12 +20,7 @@ from .constants import (
     ASYNC_AGGREGATION_INTERVAL, MIN_AGGREGATION_PARTICIPANTS,
     PIPELINE_TIMEOUT, TRAINING_EPOCHS_SHORT
 )
-from ..edge_server import (
-    MobilityPredictor, TemplateManager, AsynchronousAggregator, ResourceClassifier
-)
-from ..vehicle_layer import (
-    V2VCommunicationManager, PipelineFormation, TrainingExecutor, VehicleMonitor
-)
+# Defer imports to avoid circular dependencies
 
 @dataclass
 class SystemConfiguration:
@@ -38,6 +33,7 @@ class SystemConfiguration:
     enable_pipeline_training: bool = True
     enable_individual_training: bool = True
     fairness_enabled: bool = True
+    default_protocol: str = "dsrc"
 
 class HybridParticipationManager:
     """Manages hybrid participation model (individual + pipeline training)"""
@@ -88,8 +84,8 @@ class HybridParticipationManager:
             del self.decision_timestamps[vehicle_id]
     
     def make_participation_decision(self, vehicle_id: str, 
-                                   resource_classifier: ResourceClassifier,
-                                   template_manager: TemplateManager,
+                                   resource_classifier: Any,  # Defer type annotation
+                                   template_manager: Any,    # Defer type annotation
                                    neighbors: Dict[str, Any] = None) -> TrainingMode:
         """Make participation decision for vehicle"""
         # Check if already in a pipeline
@@ -331,6 +327,11 @@ class FHDPSystem:
     def __init__(self, config: Optional[SystemConfiguration] = None):
         self.config = config or SystemConfiguration()
         
+        # Import edge server components
+        from ..edge_server import (
+            MobilityPredictor, TemplateManager, AsynchronousAggregator, ResourceClassifier
+        )
+        
         # Core components
         self.mobility_predictor = MobilityPredictor()
         self.template_manager = TemplateManager()
@@ -440,6 +441,10 @@ class FHDPSystem:
     
     def _create_vehicle_manager(self, vehicle_info: VehicleInfo):
         """Create management components for vehicle"""
+        from ..vehicle_layer import (
+            V2VCommunicationManager, PipelineFormation, TrainingExecutor, VehicleMonitor
+        )
+        
         # Initialize communication manager
         communication = V2VCommunicationManager(vehicle_info)
         communication.initialize([self.config.default_protocol])

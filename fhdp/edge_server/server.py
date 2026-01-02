@@ -161,9 +161,13 @@ class EdgeServer:
     def _is_vehicle_in_coverage(self, vehicle_info: VehicleInfo) -> bool:
         """Check if vehicle is within server coverage area"""
         x, y = vehicle_info.position
-        max_x, max_y = self.coverage_area
+        width, height = self.coverage_area
         
-        return 0 <= x <= max_x and 0 <= y <= max_y
+        # Coverage area is centered at origin, spanning from -width/2 to width/2
+        min_x, max_x = -width/2, width/2
+        min_y, max_y = -height/2, height/2
+        
+        return min_x <= x <= max_x and min_y <= y <= max_y
     
     def update_vehicle_position(self, vehicle_id: str, position: tuple, velocity: float, direction: float):
         """Update vehicle position and mobility data"""

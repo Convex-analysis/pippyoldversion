@@ -14,7 +14,7 @@ import heapq
 
 from ..core.types import (
     VehicleInfo, Pipeline, PipelineTemplate, ResourceClass,
-    TrainingMode, MobilityPrediction, NeighborInfo
+    TrainingMode, MobilityPrediction
 )
 from ..core.constants import (
     MAX_PIPELINE_LENGTH, MIN_PIPELINE_PARTICIPANTS,
@@ -122,7 +122,7 @@ class GreedySelector:
         return mobility_score
     
     def calculate_communication_score(self, vehicle_info: VehicleInfo,
-                                    neighbor_info: Optional[NeighborInfo] = None) -> float:
+                                    neighbor_info: Optional['NeighborInfo'] = None) -> float:
         """Calculate communication quality score"""
         if neighbor_info:
             # Use actual neighbor communication quality
@@ -219,7 +219,7 @@ class PipelineFormation:
     def initiate_pipeline_formation(self, template: PipelineTemplate, 
                                   candidate_vehicles: List[VehicleInfo],
                                   mobility_predictions: Dict[str, List[MobilityPrediction]] = None,
-                                  neighbor_info: Dict[str, NeighborInfo] = None) -> Optional[str]:
+                                  neighbor_info: Dict[str, 'NeighborInfo'] = None) -> Optional[str]:
         """Initiate pipeline formation process"""
         pipeline_id = f"pipeline_{int(time.time() * 1000)}"
         
@@ -269,7 +269,7 @@ class PipelineFormation:
     def _create_candidates(self, candidate_vehicles: List[VehicleInfo], 
                           template: PipelineTemplate,
                           mobility_predictions: Dict[str, List[MobilityPrediction]] = None,
-                          neighbor_info: Dict[str, NeighborInfo] = None) -> List[PipelineCandidate]:
+                          neighbor_info: Dict[str, 'NeighborInfo'] = None) -> List[PipelineCandidate]:
         """Create candidate pool with scores"""
         candidates = []
         
@@ -370,7 +370,7 @@ class PipelineFormation:
     
     def reorganize_pipeline(self, pipeline_id: str, available_vehicles: List[VehicleInfo],
                           mobility_predictions: Dict[str, List[MobilityPrediction]] = None,
-                          neighbor_info: Dict[str, NeighborInfo] = None) -> Optional[str]:
+                          neighbor_info: Dict[str, 'NeighborInfo'] = None) -> Optional[str]:
         """Reorganize pipeline with new vehicles if needed"""
         if pipeline_id not in self.active_pipelines:
             return None

@@ -13,10 +13,10 @@ import threading
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import FHDPSystem, SystemConfiguration
-from edge_server import EdgeServer
-from vehicle_layer import Vehicle
-from core.types import VehicleInfo, ResourceClass
+from fhdp.core import FHDPSystem, SystemConfiguration
+from fhdp.edge_server import EdgeServer
+from fhdp.vehicle_layer import Vehicle
+from fhdp.core.types import VehicleInfo, ResourceClass
 
 def create_test_vehicles(num_vehicles: int) -> list:
     """Create test vehicles with random configurations"""

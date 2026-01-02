@@ -121,6 +121,10 @@ def run_simulation(args):
     
     # Create edge server
     edge_server = EdgeServer()
+    
+    # Set coverage area (1000x1000 meters centered at origin)
+    # This allows vehicles with positions from -500 to 500 in both x and y
+    edge_server.set_coverage_area(1000, 1000)
     edge_server.start_server()
     
     # Create vehicles

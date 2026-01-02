@@ -10,7 +10,7 @@ import socket
 import struct
 import json
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Callable, Set
+from typing import Dict, List, Tuple, Optional, Callable, Set, Any
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 import queue
@@ -75,11 +75,30 @@ class ProtocolManager:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.settimeout(1.0)
             
+            # Enable broadcast (if available)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            except:
+                pass  # Broadcast may not be available on all systems
+            
             # Bind to port
             if port == 0:
                 port = self._get_default_port(protocol)
             
-            sock.bind(('', port))
+            # Try to bind to local address first
+            bind_addresses = ['127.0.0.1', '0.0.0.0']
+            bound = False
+            
+            for addr in bind_addresses:
+                try:
+                    sock.bind((addr, port))
+                    bound = True
+                    break
+                except:
+                    continue
+            
+            if not bound:
+                raise Exception(f"Could not bind to port {port} on any address")
             
             self.protocol_sockets[protocol] = sock
             self.active_protocols[protocol] = True
@@ -118,8 +137,17 @@ class ProtocolManager:
                     
             except socket.timeout:
                 continue
+            except OSError as e:
+                # Handle socket closure gracefully
+                if e.errno == 9:  # Bad file descriptor
+                    break  # Socket closed, exit loop
+                elif e.errno == 10038:  # Windows equivalent
+                    break
+                else:
+                    print(f"Socket error listening on {protocol}: {e}")
             except Exception as e:
-                print(f"Error listening on {protocol}: {e}")
+                if self.active_protocols.get(protocol, False):  # Only print if still active
+                    print(f"Error listening on {protocol}: {e}")
     
     def _get_vehicle_id(self) -> str:
         """Get current vehicle ID (placeholder)"""
@@ -163,8 +191,27 @@ class ProtocolManager:
                 # Send to specific address
                 sock.sendto(message_data, target_address)
             else:
-                # Broadcast (simplified - would need proper broadcast mechanism)
-                sock.sendto(message_data, ('<broadcast>', self._get_default_port(message.protocol)))
+                # Broadcast to local network (using broadcast address)
+                port = self._get_default_port(message.protocol)
+                # Try different broadcast addresses
+                broadcast_addresses = [
+                    ('255.255.255.255', port),  # Global broadcast
+                    ('127.255.255.255', port),  # Local network
+                    ('localhost', port),           # Local fallback
+                ]
+                
+                sent = False
+                for addr in broadcast_addresses:
+                    try:
+                        sock.sendto(message_data, addr)
+                        sent = True
+                        break
+                    except:
+                        continue
+                
+                if not sent:
+                    print(f"Warning: Could not broadcast message, skipping")
+                    return False
             
             return True
             
@@ -189,12 +236,20 @@ class ProtocolManager:
         """Disable a communication protocol"""
         self.active_protocols[protocol] = False
         
+        # Close socket first to unblock the listener thread
         if protocol in self.protocol_sockets:
-            self.protocol_sockets[protocol].close()
+            try:
+                self.protocol_sockets[protocol].close()
+            except:
+                pass  # Socket may already be closed
             del self.protocol_sockets[protocol]
         
+        # Wait for listener thread to finish
         if protocol in self.protocol_listeners:
-            self.protocol_listeners[protocol].join(timeout=2.0)
+            try:
+                self.protocol_listeners[protocol].join(timeout=2.0)
+            except:
+                pass
             del self.protocol_listeners[protocol]
 
 class NeighborDiscovery:
@@ -445,7 +500,7 @@ class MessageRouter:
         else:
             # Choose best protocol
             protocol = CommunicationProtocol.DSRC  # Default
-            address = "<broadcast>"
+            address = "255.255.255.255"  # Broadcast address
         
         # Create bundle message
         bundle_message = V2VMessage(
@@ -463,7 +518,7 @@ class MessageRouter:
         
         self.message_stats['bundled'] += 1
         return self._route_message(bundle_message, 
-                                  (address, self.protocol_manager._get_default_port(protocol)) if address != "<broadcast>" else None)
+                                  (address, self.protocol_manager._get_default_port(protocol)) if address != "255.255.255.255" else None)
     
     def register_handler(self, message_type: str, handler: Callable):
         """Register message handler"""
