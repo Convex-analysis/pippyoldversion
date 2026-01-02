@@ -15,8 +15,9 @@ import statistics
 
 from ..core.types import (
     VehicleInfo, VehicleState, TrainingMode, ResourceMetrics,
-    FairnessMetrics, ParticipationRecord
+    FairnessMetrics
 )
+from ..core.fairness_error import ParticipationRecord
 from ..core.constants import (
     MONITORING_INTERVAL, MAX_VEHICLE_MEMORY_USAGE,
     FAIRNESS_WINDOW_SIZE, FAIRNESS_DECAY_FACTOR,

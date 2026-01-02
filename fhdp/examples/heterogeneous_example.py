@@ -13,11 +13,11 @@ from pathlib import Path
 # Add FHDP to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from core.hardware_adapter import (
+from fhdp.core.hardware_adapter import (
     HardwareDetector, HardwarePlatform, ResourceAdapter,
     HardwareCapabilities
 )
-from core.heterogeneous_resource import (
+from fhdp.core.heterogeneous_resource import (
     AdaptiveResourceMonitor, HeterogeneousScheduler, ComputeWorkload, TaskComplexity
 )
 from core.cross_platform_comm import PlatformBridge, NetworkEndpoint, TransportProtocol

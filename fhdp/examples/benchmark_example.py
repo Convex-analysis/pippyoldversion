@@ -12,10 +12,10 @@ import statistics
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core import FHDPSystem, SystemConfiguration
-from edge_server import TemplateManager, MobilityPredictor
-from vehicle_layer import PipelineFormation
-from core.types import VehicleInfo, PipelineTemplate, TrainingConfig
+from fhdp.core import FHDPSystem, SystemConfiguration
+from fhdp.edge_server import TemplateManager, MobilityPredictor
+from fhdp.vehicle_layer import PipelineFormation
+from fhdp.core.types import VehicleInfo, PipelineTemplate, TrainingConfig
 
 def benchmark_template_lookup():
     """Benchmark template lookup performance"""

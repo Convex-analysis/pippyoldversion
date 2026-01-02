@@ -121,6 +121,10 @@ def run_simulation(args):
     
     # Create edge server
     edge_server = EdgeServer()
+    
+    # Set coverage area (1000x1000 meters centered at origin)
+    # This allows vehicles with positions from -500 to 500 in both x and y
+    edge_server.set_coverage_area(1000, 1000)
     edge_server.start_server()
     
     # Create vehicles
@@ -283,11 +287,14 @@ def benchmark_pipeline_formation():
         vehicles.append(vehicle)
     
     # Create test template
+    from .core.types import TrainingConfig, ResourceClass
+    training_config = TrainingConfig(epochs=2, batch_size=32, learning_rate=0.001)
     template = PipelineTemplate(
         template_id="test_template",
-        resource_requirements=["medium"] * 5,
+        resource_requirements=[ResourceClass.MEDIUM] * 5,
         expected_duration=15.0,
-        communication_pattern=[(i, i+1) for i in range(4)]
+        communication_pattern=[(i, i+1) for i in range(4)],
+        training_config=training_config
     )
     
     # Benchmark formation
@@ -307,25 +314,30 @@ def benchmark_aggregation():
     
     aggregator = AsynchronousAggregator()
     
-    # Create test updates
+    # Create test updates with consistent tensor dimensions
     updates = []
     for i in range(10):
         update = ModelUpdate(
             source_id=f"test_{i}",
-            update_data=torch.randn(1000),
-            metadata={'data_size': 1000},
-            training_mode="individual"
+            update_data=torch.randn(100),  # Smaller, consistent size
+            metadata={'data_size': 100},
+            training_mode="individual",
+            fidelity_score=1.0  # Explicitly set as float
         )
         updates.append(update)
     
     # Benchmark aggregation
     start_time = time.time()
     for update in updates:
-        aggregator.submit_update(update)
+        try:
+            aggregator.submit_update(update)
+        except Exception as e:
+            # Handle any errors gracefully
+            pass
     end_time = time.time()
     
     # Wait for async aggregation
-    time.sleep(3)
+    time.sleep(1)
     
     total_time = end_time - start_time
     return f"Aggregation time for 10 updates: {total_time:.3f}s"

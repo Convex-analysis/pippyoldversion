@@ -12,10 +12,12 @@ from .communication import V2VCommunicationManager, ProtocolManager, NeighborDis
 from .pipeline_formation import PipelineFormation, GreedySelector, PipelineCandidate
 from .training_engine import TrainingExecutor, CommunicationOptimizer, LazyErrorPropagation
 from .monitor import VehicleMonitor, ResourceMonitor, ParticipationTracker
+from .vehicle import Vehicle
 
 __all__ = [
     "V2VCommunicationManager",
     "PipelineFormation", 
     "TrainingExecutor",
-    "VehicleMonitor"
+    "VehicleMonitor",
+    "Vehicle"
 ]

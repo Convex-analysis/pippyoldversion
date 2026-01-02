@@ -48,8 +48,8 @@ class WeightCalculator:
         size_factor = data_size / 1000.0  # Normalize to 1KB
         base_weight *= size_factor
         
-        # Fidelity factor
-        fidelity_factor = update.fidelity_score
+        # Fidelity factor - ensure it's a float
+        fidelity_factor = float(update.fidelity_score) if update.fidelity_score is not None else 1.0
         base_weight *= fidelity_factor
         
         # Freshness factor (newer updates get higher weight)
@@ -223,7 +223,17 @@ class AsynchronousAggregator:
             # Perform weighted aggregation
             aggregated_model = self._aggregate_models(updates_to_process, normalized_weights)
             
-            if aggregated_model:
+            # Check if aggregation was successful
+            has_model = False
+            if aggregated_model is not None:
+                if isinstance(aggregated_model, dict):
+                    has_model = len(aggregated_model) > 0
+                elif isinstance(aggregated_model, torch.Tensor):
+                    has_model = aggregated_model.numel() > 0
+                else:
+                    has_model = bool(aggregated_model)
+            
+            if has_model:
                 # Update global model
                 self.global_model = aggregated_model
                 
@@ -307,9 +317,21 @@ class AsynchronousAggregator:
     
     def _should_propagate_errors(self, error_data: ErrorPropagation) -> bool:
         """Determine if errors should be propagated"""
-        # Check accumulation threshold
-        total_error = sum(torch.norm(error).item() for error in error_data.error_signals.values())
-        return total_error >= ERROR_ACCUMULATION_THRESHOLD
+        try:
+            # Check accumulation threshold
+            total_error = 0.0
+            for error in error_data.error_signals.values():
+                if isinstance(error, torch.Tensor):
+                    if error.numel() > 1:
+                        total_error += torch.norm(error).item()
+                    else:
+                        total_error += error.item()
+                else:
+                    total_error += float(error)
+            return total_error >= ERROR_ACCUMULATION_THRESHOLD
+        except Exception as e:
+            # If calculation fails, propagate anyway
+            return True
     
     def _propagate_errors(self, error_data: ErrorPropagation):
         """Propagate accumulated errors"""

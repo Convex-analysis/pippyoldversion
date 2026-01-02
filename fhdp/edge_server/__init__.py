@@ -12,10 +12,12 @@ from .mobility_predictor import MobilityPredictor, DTMCModel, MobilityState
 from .template_manager import TemplateManager, TemplateMatcher, TemplateGenerator, TemplateBasket
 from .aggregation_engine import AsynchronousAggregator, WeightCalculator, AggregationBuffer
 from .resource_classifier import ResourceClassifier, ResourceMonitor, FairnessManager, ResourceProfile
+from .server import EdgeServer
 
 __all__ = [
     "MobilityPredictor",
     "TemplateManager", 
     "AsynchronousAggregator",
-    "ResourceClassifier"
+    "ResourceClassifier",
+    "EdgeServer"
 ]

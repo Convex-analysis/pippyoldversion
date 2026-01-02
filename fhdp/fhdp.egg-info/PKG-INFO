@@ -1,3 +1,55 @@
+Metadata-Version: 2.4
+Name: fhdp
+Version: 1.0.0
+Summary: Federated Highway-based Distributed Pipeline for Vehicular Federated Learning
+Home-page: https://github.com/example/fhdp
+Author: FHDP Development Team
+Author-email: fhdp@example.com
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Topic :: System :: Distributed Computing
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: torch>=1.9.0
+Requires-Dist: numpy>=1.21.0
+Requires-Dist: psutil>=5.8.0
+Requires-Dist: PyYAML>=6.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: black>=22.0.0; extra == "dev"
+Requires-Dist: flake8>=4.0.0; extra == "dev"
+Requires-Dist: mypy>=0.950; extra == "dev"
+Provides-Extra: visualization
+Requires-Dist: matplotlib>=3.5.0; extra == "visualization"
+Requires-Dist: seaborn>=0.11.0; extra == "visualization"
+Requires-Dist: tensorboard>=2.8.0; extra == "visualization"
+Provides-Extra: performance
+Requires-Dist: numba>=0.56.0; extra == "performance"
+Provides-Extra: security
+Requires-Dist: pycryptodome>=3.15.0; extra == "security"
+Provides-Extra: communication
+Requires-Dist: websockets>=10.0; extra == "communication"
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
 # FHDP (Federated Highway-based Distributed Pipeline) System
 
 A comprehensive federated learning system designed for vehicular environments with decentralized two-level decision hierarchy and transient pipeline constructs.
@@ -105,8 +157,6 @@ python -m fhdp simulate --num-vehicles 20 --duration 120
 # Run with custom parameters
 python -m fhdp simulate --num-vehicles 50 --duration 300
 ```
-
-The simulation creates vehicles with random positions within a 1000x1000m coverage area centered at the origin (-500 to 500 in both x and y directions). You should see most vehicles register successfully with the edge server.
 
 ### 4. Run Benchmarks
 
@@ -394,22 +444,8 @@ If you get import errors for specific modules, try:
 # Reinstall the package in development mode
 pip install -e .
 
-# If still not working, create a symlink (common on some systems)
-ln -sf /path/to/fhdp /home/xta/miniconda3/envs/fhdp-imp/lib/python3.10/site-packages/fhdp
-
 # Or use the direct Python path
 PYTHONPATH=/path/to/fhdp python -m fhdp server --port 8080
-```
-
-#### Permission Issues
-If you encounter "Permission denied" errors when running vehicles:
-```bash
-# This is normal for network operations on some systems
-# The system will automatically fall back to alternative addresses
-# You may see "Warning: Could not broadcast message" but the system will continue
-
-# If you want to avoid these warnings entirely:
-sudo python -m fhdp vehicle vehicle_001 --position 100,50 --velocity 20
 ```
 
 #### Performance Issues

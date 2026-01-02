@@ -14,7 +14,7 @@ import heapq
 
 from ..core.types import (
     VehicleInfo, Pipeline, PipelineTemplate, ResourceClass,
-    TrainingMode, MobilityPrediction, NeighborInfo
+    TrainingMode, MobilityPrediction
 )
 from ..core.constants import (
     MAX_PIPELINE_LENGTH, MIN_PIPELINE_PARTICIPANTS,
@@ -122,7 +122,7 @@ class GreedySelector:
         return mobility_score
     
     def calculate_communication_score(self, vehicle_info: VehicleInfo,
-                                    neighbor_info: Optional[NeighborInfo] = None) -> float:
+                                    neighbor_info: Optional['NeighborInfo'] = None) -> float:
         """Calculate communication quality score"""
         if neighbor_info:
             # Use actual neighbor communication quality
@@ -148,7 +148,9 @@ class GreedySelector:
         position_weights = self._get_position_weights(position_index, len(template.resource_requirements))
         
         # Re-score candidates based on position requirements
-        scored_candidates = []
+        best_candidate = None
+        best_score = -1.0
+        
         for candidate in candidates:
             # Adjust scores based on position importance
             adjusted_score = (
@@ -157,27 +159,15 @@ class GreedySelector:
                 candidate.communication_score * position_weights['communication']
             )
             
-            # Create new candidate with adjusted score
-            adjusted_candidate = PipelineCandidate(
-                vehicle_id=candidate.vehicle_id,
-                vehicle_info=candidate.vehicle_info,
-                resource_score=candidate.resource_score,
-                mobility_score=candidate.mobility_score,
-                communication_score=candidate.communication_score,
-                overall_score=adjusted_score,
-                expected_contribution=candidate.expected_contribution,
-                position_in_pipeline=position_index
-            )
-            
-            scored_candidates.append(adjusted_candidate)
+            if adjusted_score > best_score:
+                best_score = adjusted_score
+                best_candidate = candidate
         
-        # Select highest scoring candidate (greedy)
-        best_candidate = max(scored_candidates, key=lambda x: x.overall_score)
-        
-        # Update selection history
-        self.selection_history[best_candidate.vehicle_id].append(1.0)
-        if len(self.selection_history[best_candidate.vehicle_id]) > 100:
-            self.selection_history[best_candidate.vehicle_id].pop(0)
+        if best_candidate:
+            # Update selection history
+            self.selection_history[best_candidate.vehicle_id].append(1.0)
+            if len(self.selection_history[best_candidate.vehicle_id]) > 100:
+                self.selection_history[best_candidate.vehicle_id].pop(0)
         
         return best_candidate
     
@@ -219,7 +209,7 @@ class PipelineFormation:
     def initiate_pipeline_formation(self, template: PipelineTemplate, 
                                   candidate_vehicles: List[VehicleInfo],
                                   mobility_predictions: Dict[str, List[MobilityPrediction]] = None,
-                                  neighbor_info: Dict[str, NeighborInfo] = None) -> Optional[str]:
+                                  neighbor_info: Dict[str, 'NeighborInfo'] = None) -> Optional[str]:
         """Initiate pipeline formation process"""
         pipeline_id = f"pipeline_{int(time.time() * 1000)}"
         
@@ -269,7 +259,7 @@ class PipelineFormation:
     def _create_candidates(self, candidate_vehicles: List[VehicleInfo], 
                           template: PipelineTemplate,
                           mobility_predictions: Dict[str, List[MobilityPrediction]] = None,
-                          neighbor_info: Dict[str, NeighborInfo] = None) -> List[PipelineCandidate]:
+                          neighbor_info: Dict[str, 'NeighborInfo'] = None) -> List[PipelineCandidate]:
         """Create candidate pool with scores"""
         candidates = []
         
@@ -370,7 +360,7 @@ class PipelineFormation:
     
     def reorganize_pipeline(self, pipeline_id: str, available_vehicles: List[VehicleInfo],
                           mobility_predictions: Dict[str, List[MobilityPrediction]] = None,
-                          neighbor_info: Dict[str, NeighborInfo] = None) -> Optional[str]:
+                          neighbor_info: Dict[str, 'NeighborInfo'] = None) -> Optional[str]:
         """Reorganize pipeline with new vehicles if needed"""
         if pipeline_id not in self.active_pipelines:
             return None
