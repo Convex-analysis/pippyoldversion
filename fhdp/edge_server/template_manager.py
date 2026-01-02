@@ -12,11 +12,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import heapq
 
-from ..core.types import (
+from fhdp.core.types import (
     PipelineTemplate, Pipeline, VehicleInfo, ResourceClass, 
     TrainingConfig, MobilityPrediction
 )
-from ..core.constants import (
+from fhdp.core.constants import (
     TEMPLATE_CACHE_SIZE, MAX_PIPELINE_LENGTH, MIN_PIPELINE_PARTICIPANTS,
     TEMPLATE_LOOKUP_LATENCY_THRESHOLD, TEMPLATE_GENERATION_INTERVAL,
     MAX_TEMPLATE_MEMORY

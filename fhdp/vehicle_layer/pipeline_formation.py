@@ -148,7 +148,9 @@ class GreedySelector:
         position_weights = self._get_position_weights(position_index, len(template.resource_requirements))
         
         # Re-score candidates based on position requirements
-        scored_candidates = []
+        best_candidate = None
+        best_score = -1.0
+        
         for candidate in candidates:
             # Adjust scores based on position importance
             adjusted_score = (
@@ -157,27 +159,15 @@ class GreedySelector:
                 candidate.communication_score * position_weights['communication']
             )
             
-            # Create new candidate with adjusted score
-            adjusted_candidate = PipelineCandidate(
-                vehicle_id=candidate.vehicle_id,
-                vehicle_info=candidate.vehicle_info,
-                resource_score=candidate.resource_score,
-                mobility_score=candidate.mobility_score,
-                communication_score=candidate.communication_score,
-                overall_score=adjusted_score,
-                expected_contribution=candidate.expected_contribution,
-                position_in_pipeline=position_index
-            )
-            
-            scored_candidates.append(adjusted_candidate)
+            if adjusted_score > best_score:
+                best_score = adjusted_score
+                best_candidate = candidate
         
-        # Select highest scoring candidate (greedy)
-        best_candidate = max(scored_candidates, key=lambda x: x.overall_score)
-        
-        # Update selection history
-        self.selection_history[best_candidate.vehicle_id].append(1.0)
-        if len(self.selection_history[best_candidate.vehicle_id]) > 100:
-            self.selection_history[best_candidate.vehicle_id].pop(0)
+        if best_candidate:
+            # Update selection history
+            self.selection_history[best_candidate.vehicle_id].append(1.0)
+            if len(self.selection_history[best_candidate.vehicle_id]) > 100:
+                self.selection_history[best_candidate.vehicle_id].pop(0)
         
         return best_candidate
     
