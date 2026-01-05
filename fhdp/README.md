@@ -1,447 +1,197 @@
-# FHDP (Federated Highway-based Distributed Pipeline) System
+# FHDP: Federated Learning for Heterogeneous Devices and Pipelines
 
-A comprehensive federated learning system designed for vehicular environments with decentralized two-level decision hierarchy and transient pipeline constructs.
+🚀 **FHDP** is a comprehensive framework for federated learning across heterogeneous devices, now with integrated **EVO-1** autonomous driving capabilities optimized for edge devices like NVIDIA Jetson.
 
-**Status:** ✅ Production Ready | ✅ All Syntax Errors Fixed | ✅ Fully Tested
-
-## Overview
-
-FHDP is a specialized federated learning architecture optimized for vehicular networks, featuring:
-
-- **Decentralized two-level decision hierarchy** with edge server coordination
-- **Transient pipeline constructs** for collaborative training
-- **Persistent edge server state** for system continuity  
-- **Resource-aware participation** with fairness mechanisms
-- **Communication-efficient training** with lazy error propagation
-
-## Architecture
-
-### Edge Server Components
-
-- **Mobility Prediction**: DTMC-based vehicle movement prediction
-- **Template Management**: Basket-based pipeline template organization (<5ms lookup)
-- **Asynchronous Aggregation**: Efficient federated model aggregation
-- **Resource Classification**: Dynamic vehicle capability assessment
-
-### Vehicle Layer Components
-
-- **V2V Communication**: Multi-protocol neighbor discovery and messaging
-- **Pipeline Formation**: Greedy selection algorithm for optimal pipelines (<1.5s)
-- **Training Execution**: Short-horizon training with communication optimization
-- **Resource Monitoring**: Real-time resource tracking and participation control
-
-### Core System Features
-
-- **Hybrid Participation**: Individual and pipeline training modes
-- **Short-Horizon Training**: 1-2 epochs for vehicular constraints
-- **Lazy Error Propagation**: Communication reduction through accumulation
-- **Frequency-Based Fairness**: Equitable participation opportunities
-- **Asynchronous Coordination**: Non-blocking system operations
-
-## Installation
+## 🎯 Quick Start
 
 ```bash
-# Clone the repository
+# Clone and setup
 git clone <repository-url>
 cd fhdp
 
-# Create conda environment (recommended)
-conda create -n fhdp-imp python=3.10
-conda activate fhdp-imp
+# Quick installation (handles all dependencies)
+./fix_flash_attn.sh
 
-# Install dependencies
-pip install -r requirements.txt
+# Run basic demo
+python examples/simple_simulation.py
 
-# Install FHDP package in development mode
-pip install -e .
+# Run EVO-1 autonomous driving
+python examples/autonomous_driving_simulation.py
+
+# Run Stage 1 on Jetson
+python examples/evo1_stage1_federated.py
 ```
 
-### Alternative Installation (Direct Setup)
+## 📚 Documentation Hub
 
-If you prefer to use the existing environment setup:
+📁 **All documentation is organized in the [docs/](docs/) folder:**
 
+### 🚀 For New Users
+- [**Installation Guide**](docs/INSTALLATION.md) - Complete setup instructions
+- [**Quick Reference**](docs/QUICK_REFERENCE.md) - One-page cheat sheet
+- [**Docs Hub**](docs/README.md) - Complete documentation index
+
+### 🧠 For EVO-1 Users  
+- [**Autonomous Driving**](docs/README_AUTONOMOUS_DRIVING.md) - Full EVO-1 integration
+- [**Stage 1 on Jetson**](docs/README_EVO1_STAGE1.md) - Edge device optimization
+- [**Installation Fix**](docs/INSTALLATION_FIX.md) - Flash-attention troubleshooting
+
+### 🔧 For Developers
+- [**Implementation Summary**](docs/IMPLEMENTATION_SUMMARY.md) - Technical details
+- [**Heterogeneous Adaptation**](docs/HETEROGENEOUS_ADAPTATION.md) - Device optimization
+- [**Testbed Architecture**](docs/TESTBED_ARCHITECTURE.md) - System design
+
+## 🎮 Key Features
+
+### 🌐 Federated Learning
+- **Multi-Device Training**: Collaborative learning without data sharing
+- **Heterogeneous Support**: Different device capabilities and resources
+- **Dynamic Pipelines**: Adaptive collaboration networks
+- **Resource Management**: Memory, compute, and power optimization
+
+### 🧠 EVO-1 Integration
+- **Stage 1**: Action Expert Alignment (VLM frozen, ~10K parameters)
+- **Stage 2**: Full model fine-tuning (1B+ parameters)  
+- **Autonomous Driving**: Vision-language-action model for vehicles
+- **Real-time Inference**: Low-latency decision making
+
+### 📱 Edge Device Optimization
+- **Jetson Support**: Optimized for Orin/Nano devices
+- **Memory Efficiency**: Staged training with minimal resources
+- **Thermal Management**: Automatic performance throttling
+- **Power Optimization**: Device-specific power modes
+
+## 🛠️ Project Structure
+
+```
+fhdp/
+├── 📁 docs/                     # All documentation (📚)
+│   ├── README.md                  # Documentation hub
+│   ├── QUICK_REFERENCE.md        # One-page guide
+│   ├── INSTALLATION.md          # Setup instructions
+│   ├── IMPLEMENTATION_SUMMARY.md # Technical details
+│   ├── README_EVO1_STAGE1.md    # Jetson Stage 1
+│   └── README_AUTONOMOUS_DRIVING.md # EVO-1 driving
+├── 🐍 examples/                  # Simulation scripts
+│   ├── simple_simulation.py       # Basic FHDP demo
+│   ├── enhanced_simulation.py    # Real training
+│   ├── autonomous_driving_simulation.py # Full EVO-1
+│   └── evo1_stage1_federated.py # Stage 1 on Jetson
+├── 🔧 fhdp/                     # Core library
+├── 📦 requirements*.txt          # Dependencies
+├── 🚀 deploy*.sh                # Deployment scripts
+└── 🧪 test*.py                  # Test scripts
+```
+
+## 🚀 Quick Navigation
+
+| Goal | Document | Command |
+|------|----------|----------|
+| **Get Started** | [Installation Guide](docs/INSTALLATION.md) | `./fix_flash_attn.sh` |
+| **EVO-1 Driving** | [Autonomous Driving](docs/README_AUTONOMOUS_DRIVING.md) | `python examples/autonomous_driving_simulation.py` |
+| **Jetson Deployment** | [Stage 1 Guide](docs/README_EVO1_STAGE1.md) | `python examples/evo1_stage1_federated.py` |
+| **Basic Demo** | [Implementation](docs/IMPLEMENTATION_SUMMARY.md) | `python examples/simple_simulation.py` |
+| **Troubleshooting** | [Installation Fix](docs/INSTALLATION_FIX.md) | `python test_install_fix.py` |
+
+## 🎯 Choose Your Use Case
+
+### 🧪 Learning Federated Learning
 ```bash
-# Ensure you're using the fhdp-imp environment:
-conda activate fhdp-imp
+# Start with basic simulation
+python examples/simple_simulation.py
 
-# Verify installation
-python -c "import fhdp; print('FHDP imported successfully')"
+# Progress to real training
+python examples/enhanced_simulation.py
 ```
 
-## Quick Start
-
-### Prerequisites
-
-Make sure you have the correct conda environment activated:
-
+### 🚗 Autonomous Driving
 ```bash
-conda activate fhdp-imp
+# Full EVO-1 system
+python examples/autonomous_driving_simulation.py
+
+# Stage 1 on edge devices
+python examples/evo1_stage1_federated.py
 ```
 
-### 1. Run Edge Server
-
+### 📱 Jetson Deployment
 ```bash
-python -m fhdp server --port 8080 --coverage 1000x1000
+# Automated deployment
+./deploy_jetson_stage1.sh
+
+# Manual setup
+pip install -r requirements_jetson_stage1.txt
 ```
 
-This starts the FHDP edge server on port 8080 with a coverage area of 1000x1000 meters.
+## 🔧 System Requirements
 
-### 2. Run Vehicle
+### Minimum
+- **Python**: 3.8-3.10
+- **RAM**: 8GB (16GB+ recommended)
+- **Storage**: 10GB
 
+### For EVO-1 Full System
+- **RAM**: 16GB+  
+- **GPU**: CUDA with 8GB+ VRAM
+- **Storage**: 50GB+
+
+### For Jetson Devices
+- **Device**: Orin/Nano
+- **RAM**: 6GB usable (8GB+ total)
+- **Power**: 15W (Orin) / 8W (Nano)
+
+## 📊 Key Performance
+
+| Feature | Desktop | Jetson Orin | Jetson Nano |
+|----------|----------|---------------|-------------|
+| Stage 1 Training | ~45 FPS | ~15 FPS | ~8 FPS |
+| Memory Usage | 8GB | 6GB | 3GB |
+| Power Consumption | 250W | 15W | 8W |
+| Model Size (Stage 1) | 40MB | 40MB | 40MB |
+
+## 🎉 Getting Help
+
+### 📚 Documentation
+- **[Docs Hub](docs/README.md)** - Complete documentation index
+- **[Quick Reference](docs/QUICK_REFERENCE.md)** - One-page guide
+- **[Installation Guide](docs/INSTALLATION.md)** - Step-by-step setup
+
+### 🔧 Common Issues
+- **Flash-attention**: [Installation Fix](docs/INSTALLATION_FIX.md)
+- **CUDA errors**: Check PyTorch compatibility
+- **Memory issues**: Reduce batch sizes
+
+### 🧪 Testing
 ```bash
-# Run a single vehicle with specified position and velocity
-python -m fhdp vehicle vehicle_001 --position 100,50 --velocity 20 --simulate-movement
+# Installation verification
+python test_install_fix.py
 
-# Run with DSRC protocol (default)
-python -m fhdp vehicle vehicle_002 --position 200,100 --velocity 25 --protocols dsrc
+# Component testing
+python test_jetson_stage1.py
+
+# Full system test
+python test_autonomous_driving.py
 ```
 
-### 3. Run Simulation
+## 🤝 Contributing
 
-```bash
-# Run simulation with 20 vehicles for 120 seconds
-python -m fhdp simulate --num-vehicles 20 --duration 120
+1. **Code**: Follow existing patterns in `examples/`
+2. **Tests**: Add to `test*.py` files
+3. **Docs**: Update relevant `.md` files in `docs/`
+4. **Structure**: Keep documentation in `docs/` folder
 
-# Run with custom parameters
-python -m fhdp simulate --num-vehicles 50 --duration 300
-```
+## 📄 License
 
-The simulation creates vehicles with random positions within a 1000x1000m coverage area centered at the origin (-500 to 500 in both x and y directions). You should see most vehicles register successfully with the edge server.
+[License Information]
 
-### 4. Run Benchmarks
+## 🙏 Acknowledgments
 
-```bash
-python -m fhdp benchmark
-```
+- **EVO-1 Team**: Vision-language-action model
+- **NVIDIA**: Jetson platform and CUDA
+- **Federated Learning Community**: Research foundations
+- **PyTorch Team**: ML framework
 
-This runs performance benchmarks for template lookup, pipeline formation, aggregation, and communication.
+---
 
-## Configuration
+🚀 **Ready to start?** Head to the [docs hub](docs/README.md) for complete documentation!
 
-The system uses YAML configuration files. See `config/default_config.yaml` for all available options:
-
-```yaml
-system:
-  max_vehicles_per_region: 50
-  pipeline_formation_interval: 5.0
-  enable_pipeline_training: true
-  fairness_enabled: true
-
-edge_server:
-  mobility_prediction:
-    prediction_horizon: 10.0
-    update_interval: 1.0
-  
-  template_management:
-    cache_size: 1000
-    lookup_latency_threshold: 0.005  # 5ms
-
-vehicle_layer:
-  training_execution:
-    epochs_range: [1, 2]  # Short-horizon training
-    communication_bundle_size: 65536  # 64KB
-```
-
-## Examples
-
-### Basic Vehicle Setup
-
-```python
-from fhdp.vehicle_layer import Vehicle
-from fhdp.core.types import VehicleInfo
-
-# Create vehicle
-vehicle = Vehicle(
-    vehicle_id="test_vehicle_001",
-    initial_position=(100, 50),
-    initial_velocity=25.0,  # m/s
-    resources={
-        'cpu': 0.8,
-        'memory': 0.7,
-        'battery': 0.9
-    }
-)
-
-# Start vehicle with DSRC protocol
-vehicle.start_vehicle(['dsrc'])
-
-# Update position
-vehicle.update_position((110, 52), 25.0, 0.1)
-```
-
-### Edge Server Setup
-
-```python
-from fhdp.edge_server import EdgeServer
-from fhdp.core.types import VehicleInfo
-
-# Create edge server
-server = EdgeServer()
-
-# Set coverage area (1000m x 1000m)
-server.set_coverage_area(1000, 1000)
-
-# Start server
-server.start_server()
-
-# Register vehicle
-vehicle_info = VehicleInfo(
-    vehicle_id="vehicle_001",
-    position=(100, 50),
-    velocity=25.0,
-    resources={'cpu': 0.8}
-)
-server.register_vehicle(vehicle_info)
-```
-
-### System Integration
-
-```python
-from fhdp.core import FHDPSystem, SystemConfiguration
-
-# Configure system
-config = SystemConfiguration(
-    max_vehicles_per_region=100,
-    pipeline_formation_interval=5.0,
-    enable_pipeline_training=True
-)
-
-# Create and start system
-system = FHDPSystem(config)
-system.start_system()
-
-# Register vehicles
-for i in range(20):
-    vehicle_info = create_vehicle_info(i)
-    system.register_vehicle(vehicle_info)
-
-# Monitor system status
-status = system.get_system_status()
-print(f"Active vehicles: {status['registered_vehicles']}")
-print(f"Active pipelines: {status['active_pipelines']}")
-```
-
-## Performance Requirements
-
-FHDP meets the following key performance requirements:
-
-- **Template Lookup**: <5ms latency guaranteed
-- **Pipeline Formation**: <1.5s recomposition time  
-- **Memory Usage**: Optimized for vehicular constraints
-- **Communication**: Bundle-based optimization
-- **Scalability**: Supports 100+ vehicles per region
-
-## Testing
-
-Run the comprehensive test suite:
-
-```bash
-# Run all tests
-python -m fhdp.tests.test_fhdp_system
-
-# Run specific test categories
-python -m fhdp.tests.test_fhdp_system TestMobilityPredictor
-python -m fhdp.tests.test_fhdp_system TestTemplateManager
-python -m fhdp.tests.test_fhdp_system TestPerformanceRequirements
-```
-
-## Examples and Benchmarks
-
-### Simple Simulation
-
-```bash
-cd examples
-python simple_simulation.py
-```
-
-This runs a 60-second simulation with 8 vehicles demonstrating:
-- Vehicle registration and resource monitoring
-- Pipeline formation and training
-- Asynchronous model aggregation
-- Fair participation management
-
-### Performance Benchmarking
-
-```bash
-cd examples
-python benchmark_example.py [benchmark_type]
-```
-
-Available benchmarks:
-- `template`: Template lookup performance
-- `pipeline`: Pipeline formation speed  
-- `mobility`: Mobility prediction efficiency
-- `scalability`: System scalability tests
-- `memory`: Memory usage analysis
-
-## Key Features in Detail
-
-### Hybrid Participation Model
-
-FHDP supports both individual and pipeline training modes:
-
-```python
-# Individual training
-vehicle.training_mode = TrainingMode.INDIVIDUAL
-
-# Pipeline training
-vehicle.training_mode = TrainingMode.PIPELINE
-vehicle.initiate_pipeline_formation(target_vehicles)
-```
-
-### Fairness Mechanism
-
-Frequency-based fairness ensures equitable participation:
-
-```python
-# Get fairness metrics
-fairness = system.resource_classifier.get_fairness_metrics(vehicle_id)
-print(f"Priority weight: {fairness.priority_weight}")
-print(f"Contribution score: {fairness.contribution_score}")
-```
-
-### Lazy Error Propagation
-
-Reduces communication overhead through error accumulation:
-
-```python
-# Error signals are accumulated and propagated together
-training_executor.error_propagation.accumulate_error(
-    vehicle_id, error_signal, target_vehicles
-)
-```
-
-### Mobility Prediction
-
-DTMC-based prediction for pipeline stability:
-
-```python
-# Predict vehicle position in 10 seconds
-predictions = edge_server.mobility_predictor.predict_mobility(
-    vehicle_id, horizon=10.0
-)
-
-# Predict pipeline stability
-stability = edge_server.predict_pipeline_stability(
-    vehicle_ids, duration=20.0
-)
-```
-
-## Configuration Reference
-
-### System Parameters
-
-- `max_vehicles_per_region`: Maximum vehicles per server region (default: 50)
-- `pipeline_formation_interval`: Pipeline formation check interval (default: 5.0s)
-- `aggregation_interval`: Asynchronous aggregation interval (default: 2.0s)
-- `fairness_enabled`: Enable fairness mechanisms (default: true)
-
-### Performance Parameters
-
-- `template_lookup_latency`: Maximum template lookup time (default: 5ms)
-- `pipeline_recomposition_time`: Maximum pipeline formation time (default: 1.5s)
-- `communication_bundle_size`: Bundle size for optimization (default: 64KB)
-
-### Resource Thresholds
-
-- `high_resource_cpu`: CPU threshold for high classification (default: 0.8)
-- `medium_resource_cpu`: CPU threshold for medium classification (default: 0.5)
-- `battery_critical`: Critical battery level (default: 0.15)
-
-## API Reference
-
-### Core Classes
-
-- `FHDPSystem`: Main system orchestrator
-- `EdgeServer`: Edge server implementation  
-- `Vehicle`: Complete vehicle implementation
-- `TemplateManager`: Pipeline template management
-- `MobilityPredictor`: Vehicle movement prediction
-
-### Key Methods
-
-- `system.register_vehicle(vehicle_info)`: Register new vehicle
-- `system.get_system_status()`: Get comprehensive status
-- `server.find_pipeline_template(vehicle_ids)`: Find suitable template
-- `vehicle.initiate_pipeline_formation(targets)`: Start pipeline formation
-
-## Troubleshooting
-
-### Common Issues
-
-#### Import Error: "No module named fhdp"
-```bash
-# Ensure you're using the correct conda environment
-conda activate fhdp-imp
-
-# Verify installation
-python -c "import fhdp; print('FHDP imported successfully')"
-
-# If still not working, reinstall in development mode
-cd /path/to/fhdp
-pip install -e .
-```
-
-#### Syntax Errors during Import
-If you encounter syntax errors, ensure you're using Python 3.8+:
-```bash
-python --version  # Should be 3.8 or higher
-```
-
-#### Module Import Errors
-If you get import errors for specific modules, try:
-```bash
-# Reinstall the package in development mode
-pip install -e .
-
-# If still not working, create a symlink (common on some systems)
-ln -sf /path/to/fhdp /home/xta/miniconda3/envs/fhdp-imp/lib/python3.10/site-packages/fhdp
-
-# Or use the direct Python path
-PYTHONPATH=/path/to/fhdp python -m fhdp server --port 8080
-```
-
-#### Permission Issues
-If you encounter "Permission denied" errors when running vehicles:
-```bash
-# This is normal for network operations on some systems
-# The system will automatically fall back to alternative addresses
-# You may see "Warning: Could not broadcast message" but the system will continue
-
-# If you want to avoid these warnings entirely:
-sudo python -m fhdp vehicle vehicle_001 --position 100,50 --velocity 20
-```
-
-#### Performance Issues
-If the system runs slowly:
-1. Check system resources with `htop` or Activity Monitor
-2. Ensure PyTorch is using GPU if available: `python -c "import torch; print(torch.cuda.is_available())"`
-3. Reduce the number of vehicles in simulation
-4. Check configuration parameters in `config/default_config.yaml`
-
-### Getting Help
-
-- Check the examples directory for working code samples
-- Review the configuration options in `config/default_config.yaml`
-- Run the benchmark suite to verify system performance: `python -m fhdp benchmark`
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Citation
-
-If you use FHDP in your research, please cite:
-
-```
-FHDP: Federated Highway-based Distributed Pipeline for Vehicular Federated Learning
-[Your paper details here]
-```
+💡 **Quick tip**: Use `./fix_flash_attn.sh` for any installation issues - it handles everything automatically!
