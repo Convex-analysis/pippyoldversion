@@ -1,0 +1,88 @@
+# Multi-vehicle federated learning configuration for EVO-1 Autonomous Driving
+
+# Model Configuration (full power for multi-vehicle setup)
+model:
+  vision_model_name: "OpenGVLab/InternVL3-1B"
+  vision_layers: 14
+  image_size: 448
+  num_views: 3
+  action_dim: 8
+  action_hidden_dim: 512
+  action_num_layers: 6
+  flow_matching_steps: 50
+  max_waypoints: 25  # More waypoints for complex scenarios
+  trajectory_horizon: 4.0  # Longer horizon for coordination
+  control_frequency: 10.0
+
+# Data Configuration (multi-vehicle scenarios)
+data:
+  data_root: "/data/nuscenes"
+  version: "v1.0-trainval"
+  split: "train"
+  image_size: [448, 448]
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+  sequence_length: 15  # Longer sequences for multi-vehicle
+  sequence_stride: 3
+  max_speed: 35.0  # Higher speed for highway scenarios
+  min_speed: 0.0
+  max_steering: 0.7  # More aggressive steering
+  max_acceleration: 4.0  # Higher acceleration
+
+# Training Configuration (optimized for multi-vehicle)
+training:
+  federated_learning: true
+  num_clients: 20  # More clients for multi-vehicle scenarios
+  local_epochs: 3  # More local training per round
+  aggregation_rounds: 150  # More rounds for convergence
+  client_fraction: 0.4  # Moderate participation
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  batch_size: 16  # Larger batch size for multi-GPU
+  gradient_accumulation_steps: 2  # Less accumulation
+  max_grad_norm: 1.0
+  lr_scheduler: "cosine"
+  warmup_steps: 2000  # Longer warmup
+  min_lr: 0.000001
+  mixed_precision: true
+  gradient_checkpointing: true
+  use_flash_attention: true
+
+# FHDP Integration Configuration (multi-vehicle optimized)
+fhdp:
+  use_pipeline_parallel: true
+  num_pipeline_stages: 8  # More stages for multi-vehicle
+  pipeline_chunks: 64  # More chunks
+  communication_protocol: "cv2x"  # Vehicle-to-vehicle communication
+  aggregation_protocol: "federated_avg"
+  compression_enabled: true
+  max_memory_gb: 16.0  # More memory for multi-vehicle
+  max_latency_ms: 150.0  # More tolerance for coordination
+  target_fps: 10.0
+  fairness_enabled: true
+  min_participation_interval: 5.0
+
+# Evaluation Configuration (multi-vehicle focused)
+evaluation:
+  evaluate_l2_error: true
+  evaluate_collision_rate: true
+  evaluate_offroad_rate: true
+  evaluate_traffic_violations: true
+  evaluate_ade: true
+  evaluate_fde: true
+  evaluate_miss_rate: true
+  safety_margin_m: 2.5  # Moderate safety margin
+  time_horizon_s: 4.0  # Longer evaluation horizon
+  eval_frequency: 10
+  num_eval_episodes: 200  # More episodes for multi-vehicle
+  save_predictions: true
+
+# General Settings
+experiment_name: "evo1_multi_vehicle_federated"
+output_dir: "./outputs_multi_vehicle"
+seed: 42
+device: "cuda"
+log_level: "INFO"
+save_frequency: 50
+resume_from_checkpoint: null
+max_checkpoints_to_keep: 10  # More checkpoints for multi-vehicle

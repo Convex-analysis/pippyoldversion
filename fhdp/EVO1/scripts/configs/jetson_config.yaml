@@ -1,0 +1,88 @@
+# Jetson-optimized configuration for real-time EVO-1 Autonomous Driving
+
+# Model Configuration (lightweight for Jetson)
+model:
+  vision_model_name: "OpenGVLab/InternVL3-1B"
+  vision_layers: 8  # Reduced for efficiency
+  image_size: 224  # Smaller image size
+  num_views: 3
+  action_dim: 8
+  action_hidden_dim: 256  # Reduced
+  action_num_layers: 4  # Reduced
+  flow_matching_steps: 25  # Reduced
+  max_waypoints: 15  # Reduced
+  trajectory_horizon: 2.0  # Shorter horizon
+  control_frequency: 20.0  # Higher frequency for real-time
+
+# Data Configuration (optimized for real-time)
+data:
+  data_root: "/data/nuscenes"
+  version: "v1.0-trainval"
+  split: "train"
+  image_size: [224, 224]  # Smaller for faster processing
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+  sequence_length: 5  # Shorter sequences
+  sequence_stride: 2
+  max_speed: 20.0  # Lower max speed for safety
+  min_speed: 0.0
+  max_steering: 0.5  # More conservative steering
+  max_acceleration: 2.0  # More conservative acceleration
+
+# Training Configuration (optimized for Jetson)
+training:
+  federated_learning: true
+  num_clients: 5  # Fewer clients for Jetson
+  local_epochs: 1  # Faster local training
+  aggregation_rounds: 50  # Fewer rounds
+  client_fraction: 0.5  # Higher participation
+  learning_rate: 0.0002  # Higher learning rate
+  weight_decay: 0.0002
+  batch_size: 2  # Smaller batch size
+  gradient_accumulation_steps: 8  # Compensate with accumulation
+  max_grad_norm: 0.5  # Smaller clipping
+  lr_scheduler: "cosine"
+  warmup_steps: 500
+  min_lr: 0.00001
+  mixed_precision: true  # Essential for Jetson
+  gradient_checkpointing: true  # Essential for Jetson
+  use_flash_attention: true  # Essential for Jetson
+
+# FHDP Integration Configuration (real-time optimized)
+fhdp:
+  use_pipeline_parallel: true
+  num_pipeline_stages: 2  # Fewer stages for Jetson
+  pipeline_chunks: 16  # Fewer chunks
+  communication_protocol: "websocket"
+  aggregation_protocol: "federated_avg"
+  compression_enabled: true  # Essential for Jetson
+  max_memory_gb: 4.0  # Jetson Xavier 8GB, leave margin
+  max_latency_ms: 50.0  # Stricter latency for real-time
+  target_fps: 20.0  # Higher target FPS
+  fairness_enabled: true
+  min_participation_interval: 3.0  # More frequent participation
+
+# Evaluation Configuration (real-time focused)
+evaluation:
+  evaluate_l2_error: true
+  evaluate_collision_rate: true
+  evaluate_offroad_rate: true
+  evaluate_traffic_violations: true
+  evaluate_ade: true
+  evaluate_fde: true
+  evaluate_miss_rate: true
+  safety_margin_m: 3.0  # Larger safety margin for real-time
+  time_horizon_s: 2.0  # Shorter evaluation horizon
+  eval_frequency: 5  # More frequent evaluation
+  num_eval_episodes: 50  # Fewer episodes for faster evaluation
+  save_predictions: false  # Save space
+
+# General Settings
+experiment_name: "evo1_jetson_realtime"
+output_dir: "./outputs_jetson"
+seed: 42
+device: "cuda"
+log_level: "INFO"
+save_frequency: 25  # More frequent saves for Jetson
+resume_from_checkpoint: null
+max_checkpoints_to_keep: 3  # Save space on Jetson

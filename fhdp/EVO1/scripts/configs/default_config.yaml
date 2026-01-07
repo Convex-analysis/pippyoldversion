@@ -1,0 +1,88 @@
+# Default configuration for EVO-1 Federated Autonomous Driving Training
+
+# Model Configuration
+model:
+  vision_model_name: "OpenGVLab/InternVL3-1B"
+  vision_layers: 14
+  image_size: 448
+  num_views: 3
+  action_dim: 8
+  action_hidden_dim: 512
+  action_num_layers: 6
+  flow_matching_steps: 50
+  max_waypoints: 20
+  trajectory_horizon: 3.0
+  control_frequency: 10.0
+
+# Data Configuration  
+data:
+  data_root: "/data/nuscenes"
+  version: "v1.0-trainval"
+  split: "train"
+  image_size: [448, 448]
+  normalize_mean: [0.485, 0.456, 0.406]
+  normalize_std: [0.229, 0.224, 0.225]
+  sequence_length: 10
+  sequence_stride: 5
+  max_speed: 30.0
+  min_speed: 0.0
+  max_steering: 0.6
+  max_acceleration: 3.0
+
+# Training Configuration
+training:
+  federated_learning: true
+  num_clients: 10
+  local_epochs: 2
+  aggregation_rounds: 100
+  client_fraction: 0.3
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  batch_size: 8
+  gradient_accumulation_steps: 4
+  max_grad_norm: 1.0
+  lr_scheduler: "cosine"
+  warmup_steps: 1000
+  min_lr: 0.000001
+  mixed_precision: true
+  gradient_checkpointing: true
+  use_flash_attention: true
+
+# FHDP Integration Configuration
+fhdp:
+  use_pipeline_parallel: false
+  num_pipeline_stages: 4
+  pipeline_chunks: 32
+  communication_protocol: "websocket"
+  aggregation_protocol: "federated_avg"
+  compression_enabled: true
+  max_memory_gb: 8.0
+  max_latency_ms: 100.0
+  target_fps: 10.0
+  fairness_enabled: true
+  min_participation_interval: 5.0
+
+# Evaluation Configuration
+evaluation:
+  evaluate_l2_error: true
+  evaluate_collision_rate: true
+  evaluate_offroad_rate: true
+  evaluate_traffic_violations: true
+  evaluate_ade: true
+  evaluate_fde: true
+  evaluate_miss_rate: true
+  safety_margin_m: 2.0
+  time_horizon_s: 3.0
+  eval_frequency: 10
+  num_eval_episodes: 100
+  save_predictions: true
+
+# General Settings
+experiment_name: "evo1_driving_federated"
+output_dir: "./outputs"
+seed: 42
+device: "cuda"
+log_level: "INFO"
+save_frequency: 1000
+resume_from_checkpoint: null
+max_checkpoints_to_keep: 5
