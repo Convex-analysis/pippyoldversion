@@ -7,6 +7,7 @@ asynchronous aggregation, and coordination between edge server and vehicles.
 import time
 import threading
 import asyncio
+import logging
 from typing import Dict, List, Optional, Tuple, Any, Set, Callable
 from dataclasses import dataclass
 import numpy as np
@@ -20,7 +21,12 @@ from .constants import (
     ASYNC_AGGREGATION_INTERVAL, MIN_AGGREGATION_PARTICIPANTS,
     PIPELINE_TIMEOUT, TRAINING_EPOCHS_SHORT
 )
+from .logging_config import get_logger
+
 # Defer imports to avoid circular dependencies
+
+# Setup logger
+logger = get_logger(__name__)
 
 @dataclass
 class SystemConfiguration:
@@ -247,7 +253,7 @@ class AsynchronousCoordinationManager:
                 time.sleep(1.0)  # Check every second
                 
             except Exception as e:
-                print(f"Coordination error: {e}")
+                logger.error(f"Coordination error: {e}")
                 time.sleep(1.0)
     
     def submit_update(self, update: ModelUpdate):
@@ -279,25 +285,42 @@ class AsynchronousCoordinationManager:
             try:
                 callback(result)
             except Exception as e:
-                print(f"Aggregation callback error: {e}")
+                logger.error(f"Aggregation callback error: {e}")
         
         self.last_aggregation = time.time()
     
-    def _mock_aggregate_updates(self, updates: List[ModelUpdate]) -> torch.Tensor:
+    def _mock_aggregate_updates(self, updates: List[ModelUpdate]) -> Dict[str, torch.Tensor]:
         """Mock aggregation (in real implementation would use actual aggregation logic)"""
         if not updates:
-            return torch.zeros(100)  # Mock tensor
+            return {"mock_param": torch.zeros(100)}  # Return a dictionary instead of tensor
         
         # Simple averaging
         first_update = updates[0].update_data
         if isinstance(first_update, torch.Tensor):
-            aggregated = torch.zeros_like(first_update)
-            for update in updates:
-                if isinstance(update.update_data, torch.Tensor):
-                    aggregated += update.update_data
-            return aggregated / len(updates)
+            # Mock model with multiple parameters
+            aggregated = {}
+            # Simulate aggregation of multiple model parameters
+            aggregated["layer1_weight"] = torch.zeros_like(first_update)
+            aggregated["layer1_bias"] = torch.zeros(10)
+            aggregated["layer2_weight"] = torch.zeros_like(first_update)
+            aggregated["layer2_bias"] = torch.zeros(10)
+            return aggregated
+        elif isinstance(first_update, dict):
+            # If first update is already a dictionary, average each parameter
+            aggregated = {}
+            for key in first_update.keys():
+                # Collect all values for this key from all updates
+                param_values = []
+                for update in updates:
+                    if isinstance(update.update_data, dict) and key in update.update_data:
+                        param_values.append(update.update_data[key])
+                
+                if param_values:
+                    # Average the parameter values
+                    aggregated[key] = sum(param_values) / len(param_values)
+            return aggregated
         else:
-            return torch.zeros(100)  # Mock tensor
+            return {"mock_param": torch.zeros(100)}  # Fallback to mock dictionary
     
     def _trigger_model_broadcast(self):
         """Trigger global model broadcast"""
@@ -311,7 +334,7 @@ class AsynchronousCoordinationManager:
             try:
                 callback("formation_request", candidates)
             except Exception as e:
-                print(f"Pipeline callback error: {e}")
+                logger.error(f"Pipeline callback error: {e}")
     
     def add_aggregation_callback(self, callback: Callable[[AggregationResult], None]):
         """Add aggregation callback"""
@@ -376,7 +399,7 @@ class FHDPSystem:
         self.system_active = True
         self.start_time = time.time()
         
-        print("FHDP system started")
+        logger.info("FHDP system started")
     
     def stop_system(self):
         """Stop FHDP system"""
@@ -397,7 +420,7 @@ class FHDPSystem:
         self.system_active = False
         self.system_stats['system_uptime'] = time.time() - self.start_time
         
-        print("FHDP system stopped")
+        logger.info("FHDP system stopped")
     
     def register_vehicle(self, vehicle_info: VehicleInfo) -> bool:
         """Register vehicle with FHDP system"""

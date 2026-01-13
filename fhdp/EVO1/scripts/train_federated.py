@@ -13,10 +13,12 @@ import logging
 import json
 import time
 from pathlib import Path
+from dataclasses import asdict
 
 # Add project root to path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
+sys.path.append(str(project_root.parent))
 
 import torch
 import torch.distributed as dist
@@ -281,22 +283,23 @@ def setup_reproducibility(seed: int):
 def setup_wandb(config: EVO1DrivingConfig, enable: bool):
     """Setup Weights & Biases logging"""
     if not enable:
-        wandb.init = lambda *args, **kwargs: None
-        wandb.log = lambda *args, **kwargs: None
+        logging.info("Wandb logging disabled by user")
         return
     
     if os.getenv('WANDB_API_KEY') is None:
         logging.warning("WANDB_API_KEY not found. Wandb logging disabled.")
-        wandb.init = lambda *args, **kwargs: None
-        wandb.log = lambda *args, **kwargs: None
         return
     
-    wandb.init(
-        project="evo1-federated-driving",
-        name=config.experiment_name,
-        config=config.__dict__
-    )
-    logging.info("Wandb logging initialized")
+    try:
+        wandb.init(
+            project="evo1-federated-driving",
+            name=config.experiment_name,
+            config=asdict(config)  # Use asdict from dataclasses module
+        )
+        logging.info("Wandb logging initialized")
+    except Exception as e:
+        logging.error(f"Failed to initialize wandb: {e}")
+        logging.warning("Continuing without wandb logging")
 
 
 def save_experiment_summary(config: EVO1DrivingConfig, start_time: float, end_time: float):

@@ -170,6 +170,11 @@ class NuScenesDrivingLoader(Dataset):
         self.throttle_range = (0.0, 1.0)
         self.brake_range = (0.0, 1.0)
         self.speed_range = (self.config.min_speed, self.config.max_speed)
+        
+        # Initialize instance variables for state tracking
+        self._prev_ego_pose = None
+        self._prev_velocity = None
+        self._prev_timestamp = None
     
     def _normalize_control(self, value: float, min_val: float, max_val: float) -> float:
         """Normalize control values to [-1, 1]"""
@@ -208,18 +213,19 @@ class NuScenesDrivingLoader(Dataset):
         ])
         
         # Calculate velocity and acceleration (approximation)
-        if hasattr(self, '_prev_ego_pose'):
-            dt = ego_pose_data['timestamp'] - self._prev_timestamp
-            if dt > 0:
-                velocity = (ego_pose[:2] - self._prev_ego_pose[:2]) / dt
-                acceleration = (velocity - self._prev_velocity) / dt if dt > 0 else np.zeros(3)
-            else:
-                velocity = np.zeros(3)
-                acceleration = np.zeros(3)
-        else:
-            velocity = np.zeros(3)
-            acceleration = np.zeros(3)
+        velocity = np.zeros(3)
+        acceleration = np.zeros(3)
         
+        if self._prev_ego_pose is not None:
+            # Convert timestamp from microseconds to seconds
+            dt = (ego_pose_data['timestamp'] - self._prev_timestamp) / 1e6
+            if dt > 0:
+                # Calculate velocity for all 3 axes
+                velocity = (ego_pose[:3] - self._prev_ego_pose[:3]) / dt
+                # Calculate acceleration for all 3 axes
+                acceleration = (velocity - self._prev_velocity) / dt if self._prev_velocity is not None else np.zeros(3)
+        
+        # Update previous state
         self._prev_ego_pose = ego_pose.copy()
         self._prev_velocity = velocity.copy()
         self._prev_timestamp = ego_pose_data['timestamp']

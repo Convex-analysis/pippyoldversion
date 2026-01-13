@@ -79,6 +79,9 @@ class TrainingConfig:
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
     use_flash_attention: bool = True
+    
+    # Resource constraints
+    max_memory_gb: float = 8.0
 
 
 @dataclass

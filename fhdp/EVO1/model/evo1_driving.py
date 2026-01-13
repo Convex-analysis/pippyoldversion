@@ -64,7 +64,7 @@ except ImportError:
             self.config = config
             
             # Simplified transformer architecture
-            self.input_projection = nn.Linear(2048 + 12, 512)  # vision + state
+            self.input_projection = nn.Linear(2048 + 256, 512)  # vision + state
             self.transformer = nn.TransformerEncoder(
                 nn.TransformerEncoderLayer(
                     d_model=512,
@@ -76,14 +76,14 @@ except ImportError:
             )
             self.action_projection = nn.Linear(512, config.max_waypoints * 3)  # waypoints
             
-        def forward(self, vision_features, text_features, state, future_actions=None):
-            B, N, D = vision_features.shape
+        def forward(self, fused_tokens, state, actions_gt=None):
+            B, N, D = fused_tokens.shape
             
             # Combine vision features (average across views)
-            vision_avg = vision_features.mean(dim=1)  # [B, 2048]
+            vision_avg = fused_tokens.mean(dim=1)  # [B, 2048]
             
             # Combine with state
-            combined = torch.cat([vision_avg, state], dim=-1)  # [B, 2060]
+            combined = torch.cat([vision_avg, state], dim=-1)  # [B, 2048 + state_dim]
             
             # Project to transformer dimension
             x = self.input_projection(combined)  # [B, 512]
@@ -313,6 +313,7 @@ class EVO1Driving(nn.Module):
         batch_size = images.shape[0]
         
         # Extract vision and language features
+        text_features = None
         if hasattr(self.vl_embedder, 'get_fused_image_text_embedding_from_tensor_images'):
             # Original EVO-1 method
             vision_features = self.vl_embedder.get_fused_image_text_embedding_from_tensor_images(
@@ -357,7 +358,7 @@ class EVO1Driving(nn.Module):
             confidence=confidence,
             intermediate_representations={
                 'encoded_state': encoded_state,
-                'text_features': text_features if 'text_features' in locals() else None
+                'text_features': text_features if text_features is not None else None
             }
         )
     
@@ -398,28 +399,41 @@ class EVO1Driving(nn.Module):
         
         waypoints = torch.zeros(B, T, 3, device=controls.device)
         
+        # Initialize state variables
+        current_pos = torch.zeros(B, 2, device=controls.device)
+        current_heading = torch.zeros(B, device=controls.device)
+        current_speed = torch.zeros(B, device=controls.device)
+        
+        dt = 0.1  # 100ms timestep
+        
         for t in range(T):
-            if t == 0:
-                waypoints[:, t, :2] = 0.0  # Start at origin
-                waypoints[:, t, 2] = 0.0  # z = 0
-            else:
-                # Simple integration (this is a very simplified model)
-                dt = 0.1  # 100ms timestep
-                steering = controls[:, t-1, 0]  # Steering
-                throttle = torch.relu(controls[:, t-1, 1])  # Throttle (positive only)
-                brake = torch.relu(controls[:, t-1, 2])  # Brake (positive only)
+            # Save current position as waypoint
+            waypoints[:, t, :2] = current_pos
+            waypoints[:, t, 2] = 0.0  # z = 0
+            
+            if t < T - 1:  # Update for next timestep
+                # Get control inputs
+                steering = controls[:, t, 0]  # Normalized steering angle
+                throttle = torch.relu(controls[:, t, 1])  # Normalized throttle
+                brake = torch.relu(controls[:, t, 2])  # Normalized brake
                 
-                # Calculate speed
-                speed = throttle * 10.0 - brake * 5.0  # Simplified speed model
-                speed = torch.clamp(speed, 0.0, 30.0)  # Clamp to reasonable speeds
+                # Convert normalized controls to physical values
+                steering_angle = steering * self.config.max_steering  # Convert to radians
+                throttle_force = throttle * 10.0  # Simplified throttle force
+                brake_force = brake * 5.0  # Simplified brake force
                 
-                # Update position (simplified - assumes straight line for now)
-                dx = speed * dt * torch.cos(steering)
-                dy = speed * dt * torch.sin(steering)
+                # Update speed
+                acceleration = throttle_force - brake_force - 0.1 * current_speed  # Add drag
+                current_speed = torch.clamp(current_speed + acceleration * dt, 0.0, self.config.max_speed)
                 
-                waypoints[:, t, 0] = waypoints[:, t-1, 0] + dx
-                waypoints[:, t, 1] = waypoints[:, t-1, 1] + dy
-                waypoints[:, t, 2] = 0.0  # z = 0
+                # Update heading
+                turning_rate = steering_angle * 2.0  # Simplified turning model
+                current_heading = (current_heading + turning_rate * dt) % (2 * torch.pi)
+                
+                # Update position
+                dx = current_speed * dt * torch.cos(current_heading)
+                dy = current_speed * dt * torch.sin(current_heading)
+                current_pos += torch.stack([dx, dy], dim=1)
         
         return waypoints
     

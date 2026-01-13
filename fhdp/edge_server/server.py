@@ -125,13 +125,18 @@ class EdgeServer:
                 print(f"Monitoring worker error: {e}")
                 time.sleep(5.0)
     
-    def register_vehicle(self, vehicle_info: VehicleInfo) -> bool:
-        """Register vehicle with edge server"""
+    def register_vehicle(self, vehicle_info: VehicleInfo) -> Tuple[bool, str]:
+        """Register vehicle with edge server
+        
+        Returns:
+            Tuple[bool, str]: (success, message) - success status and detailed message
+        """
         try:
             # Validate vehicle position within coverage area
             if not self._is_vehicle_in_coverage(vehicle_info):
-                print(f"Vehicle {vehicle_info.vehicle_id} outside coverage area")
-                return False
+                msg = f"Vehicle {vehicle_info.vehicle_id} outside coverage area ({vehicle_info.position})"
+                print(msg)
+                return False, msg
             
             # Register vehicle
             self.registered_vehicles[vehicle_info.vehicle_id] = vehicle_info
@@ -145,12 +150,14 @@ class EdgeServer:
             # Update statistics
             self.server_stats['vehicles_served'] += 1
             
-            print(f"Vehicle {vehicle_info.vehicle_id} registered successfully")
-            return True
+            msg = f"Vehicle {vehicle_info.vehicle_id} registered successfully with resources: {vehicle_info.resources}"
+            print(msg)
+            return True, msg
             
         except Exception as e:
-            print(f"Failed to register vehicle {vehicle_info.vehicle_id}: {e}")
-            return False
+            msg = f"Failed to register vehicle {vehicle_info.vehicle_id}: {str(e)}"
+            print(msg)
+            return False, msg
     
     def unregister_vehicle(self, vehicle_id: str):
         """Unregister vehicle from edge server"""

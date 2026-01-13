@@ -192,18 +192,8 @@ class Vehicle:
         """Update vehicle resources"""
         self.vehicle_info.resources.update(resources)
         
-        # Update vehicle monitor resources
-        resource_metrics = ResourceMetrics(
-            cpu_usage=1.0 - resources.get('cpu', 0.7),
-            memory_usage=1.0 - resources.get('memory', 0.6),
-            battery_level=resources.get('battery', 0.8),
-            network_quality=resources.get('network_quality', 0.8),
-            thermal_state=resources.get('thermal_state', 0.3)
-        )
-        
-        self.vehicle_monitor.record_training_participation(
-            TrainingMode.INDIVIDUAL, "", None, 0.0, True, 1.0
-        )  # Update participation tracking
+        # Vehicle monitor resources are updated automatically by the monitoring thread
+        # No need to manually record participation here
     
     def _handle_neighbor_update(self, neighbor_id: str, neighbor_info):
         """Handle neighbor update events"""

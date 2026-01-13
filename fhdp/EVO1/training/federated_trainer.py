@@ -11,6 +11,7 @@ import json
 import logging
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
@@ -112,11 +113,18 @@ class ClientTrainer:
     
     def setup_data_loader(self):
         """Setup data loader for this client"""
+        # Extract client number safely
+        try:
+            client_num = int(self.client_id.split('_')[1])
+        except (IndexError, ValueError):
+            client_num = 0  # Default to 0 if extraction fails
+            logging.warning(f"Failed to extract client number from {self.client_id}, using default 0")
+        
         self.train_loader = create_dataloader(
             config=self.config.data,
             model_config=self.config.model,
             split="train",
-            client_id=int(self.client_id.split('_')[1]),  # Extract client number
+            client_id=client_num,
             num_clients=self.config.training.num_clients,
             batch_size=self.config.training.batch_size,
             shuffle=True,
@@ -127,7 +135,7 @@ class ClientTrainer:
             config=self.config.data,
             model_config=self.config.model,
             split="val",
-            client_id=int(self.client_id.split('_')[1]),
+            client_id=client_num,
             num_clients=self.config.training.num_clients,
             batch_size=self.config.training.batch_size,
             shuffle=False,
