@@ -1,0 +1,85 @@
+data:
+  data_root: /home/xta/fhdp/EVO1/data/nuscenes
+  image_size:
+  - 448
+  - 448
+  max_acceleration: 3.0
+  max_speed: 30.0
+  max_steering: 0.6
+  min_speed: 0.0
+  normalize_mean:
+  - 0.485
+  - 0.456
+  - 0.406
+  normalize_std:
+  - 0.229
+  - 0.224
+  - 0.225
+  sequence_length: 10
+  sequence_stride: 5
+  split: train
+  version: v1.0-mini
+device: cuda
+evaluation:
+  eval_frequency: 10
+  evaluate_ade: true
+  evaluate_collision_rate: true
+  evaluate_fde: true
+  evaluate_l2_error: true
+  evaluate_miss_rate: true
+  evaluate_offroad_rate: true
+  evaluate_traffic_violations: true
+  num_eval_episodes: 100
+  safety_margin_m: 2.0
+  save_predictions: true
+  time_horizon_s: 3.0
+experiment_name: my_evo1_experiment
+fhdp:
+  aggregation_protocol: federated_avg
+  communication_protocol: websocket
+  compression_enabled: true
+  fairness_enabled: true
+  max_latency_ms: 100.0
+  max_memory_gb: 8.0
+  min_participation_interval: 5.0
+  num_pipeline_stages: 4
+  pipeline_chunks: 32
+  target_fps: 10.0
+  use_pipeline_parallel: false
+log_level: INFO
+max_checkpoints_to_keep: 5
+model:
+  action_dim: 8
+  action_hidden_dim: 512
+  action_num_layers: 6
+  control_frequency: 10.0
+  flow_matching_steps: 50
+  image_size: 448
+  max_speed: 30.0
+  max_steering: 0.6
+  max_waypoints: 20
+  num_views: 3
+  trajectory_horizon: 3.0
+  vision_layers: 14
+  vision_model_name: OpenGVLab/InternVL3-1B
+output_dir: ./outputs
+save_frequency: 1000
+seed: 42
+training:
+  aggregation_rounds: 100
+  batch_size: 2
+  client_fraction: 0.3
+  federated_learning: true
+  gradient_accumulation_steps: 4
+  gradient_checkpointing: false
+  learning_rate: 0.0001
+  local_epochs: 2
+  lr_scheduler: cosine
+  max_grad_norm: 1.0
+  max_memory_gb: 8.0
+  min_lr: 1.0e-06
+  mixed_precision: false
+  num_clients: 1
+  use_flash_attention: false
+  warmup_steps: 1000
+  weight_decay: 0.0001

@@ -30,11 +30,11 @@ try:
 except ImportError:
     logging.warning("FHDP core components not found. Running in standalone mode.")
 
-from ..model.evo1_driving import FederatedEVO1Driving, EVO1DrivingOutput
-from ..data.nuscenes_loader import create_dataloader
-from ..data.augmentation import DrivingAugmentation, create_comprehensive_augmentation
-from ..utils.config import EVO1DrivingConfig, TrainingConfig, FHDPConfig
-from .utils import TrainingMetrics, CheckpointManager, LearningRateScheduler
+from EVO1.model.evo1_driving import FederatedEVO1Driving, EVO1DrivingOutput
+from EVO1.data.nuscenes_loader import create_dataloader
+from EVO1.data.augmentation import DrivingAugmentation, create_comprehensive_augmentation
+from EVO1.utils.config import EVO1DrivingConfig, TrainingConfig, FHDPConfig
+from EVO1.training.utils import TrainingMetrics, CheckpointManager, LearningRateScheduler
 
 
 @dataclass
@@ -65,18 +65,24 @@ class ClientTrainer:
         self,
         client_id: str,
         config: EVO1DrivingConfig,
-        device: str = "cuda"
+        device: str = "cuda",
+        shared_model: Optional[Any] = None
     ):
         self.client_id = client_id
         self.config = config
         self.device = device
         
-        # Setup model
-        self.model = FederatedEVO1Driving(
-            config=config.model,
-            training_config=config.training,
-            device=device
-        ).to(device)
+        # Setup model (use shared model if provided)
+        if shared_model is not None:
+            self.model = shared_model
+            print(f"[CLIENT_TRAINER] Using shared model for client {client_id}")
+        else:
+            self.model = FederatedEVO1Driving(
+                config=config.model,
+                training_config=config.training,
+                device=device
+            ).to(device)
+            print(f"[CLIENT_TRAINER] Created new model for client {client_id}")
         
         self.model.set_client_id(client_id)
         
@@ -100,7 +106,9 @@ class ClientTrainer:
         self.augmentation = create_comprehensive_augmentation()
         
         # Setup data loader
+        print(f"[TRAINER] About to setup data loader...")
         self.setup_data_loader()
+        print(f"[TRAINER] Data loader setup complete")
         
         # Setup metrics tracking
         self.metrics = TrainingMetrics()
@@ -128,7 +136,7 @@ class ClientTrainer:
             num_clients=self.config.training.num_clients,
             batch_size=self.config.training.batch_size,
             shuffle=True,
-            num_workers=4
+            num_workers=0  # Disable multiprocessing to avoid deadlocks
         )
         
         self.val_loader = create_dataloader(
@@ -139,7 +147,7 @@ class ClientTrainer:
             num_clients=self.config.training.num_clients,
             batch_size=self.config.training.batch_size,
             shuffle=False,
-            num_workers=2
+            num_workers=0
         )
     
     def train_epoch(self, global_round: int) -> Dict[str, float]:
@@ -333,9 +341,12 @@ class FederatedEVO1Trainer:
         fhdp_system: Optional[Any] = None,
         device: str = "cuda"
     ):
+        print(f"[TRAINER] Initializing FederatedEVO1Trainer...")
+        print(f"[TRAINER] Config loaded, device: {device}")
         self.config = config
         self.fhdp_system = fhdp_system
         self.device = device
+        print(f"[TRAINER] Basic initialization done")
         
         # Initialize training state
         self.training_state = FederatedTrainingState(
@@ -371,17 +382,25 @@ class FederatedEVO1Trainer:
         """Setup client trainers"""
         num_clients = self.config.training.num_clients
         
+        logging.info(f"Setting up {num_clients} client trainers (model sharing enabled)...")
+        
         for client_id in range(num_clients):
             client_name = f"client_{client_id}"
+            
+            # Create trainer with shared global model (don't create separate model copies)
             self.client_trainers[client_name] = ClientTrainer(
                 client_id=client_name,
                 config=self.config,
-                device=self.device
+                device=self.device,
+                shared_model=self.global_model  # Pass the global model to avoid duplication
             )
         
-        logging.info(f"Initialized {num_clients} client trainers")
+        print(f"[TRAINER] About to log client trainer initialization...")
+        logging.info(f"Initialized {num_clients} client trainers with shared model")
+        print(f"[TRAINER] Client trainer initialization logged")
     
     def setup_output_dirs(self):
+        print(f"[TRAINER] Setting up output directories...")
         """Setup output directories"""
         os.makedirs(self.config.output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.config.output_dir, "checkpoints"), exist_ok=True)
@@ -601,14 +620,17 @@ class FederatedEVO1Trainer:
     
     def train(self):
         """Main training loop"""
+        print("[TRAIN] Starting federated training...")
         logging.info("Starting federated training")
-        logging.info(f"Configuration: {asdict(self.config)}")
         
         start_time = time.time()
+        logging.info(f"Starting federated training for {self.config.training.aggregation_rounds} rounds with {self.config.training.num_clients} clients")
         
         try:
             for round_idx in range(self.training_state.current_round, self.config.training.aggregation_rounds):
+                logging.info(f"Starting federated round {round_idx + 1}/{self.config.training.aggregation_rounds}")
                 round_metrics = self.federated_round(round_idx)
+                logging.info(f"Round {round_idx + 1} completed: avg_loss={round_metrics.get('avg_train_loss', 0):.4f}")
                 
                 # Early stopping if loss is low enough
                 if round_metrics.get('avg_val_loss', float('inf')) < 0.01:
@@ -685,108 +707,3 @@ class FederatedEVO1Trainer:
         }
         
         return metrics
-
-
-# Utility classes for training
-class TrainingMetrics:
-    """Metrics tracking for training"""
-    
-    def __init__(self):
-        self.metrics = {}
-        self.step = 0
-    
-    def update(self, metrics_dict: Dict[str, float]):
-        """Update metrics"""
-        for key, value in metrics_dict.items():
-            if key not in self.metrics:
-                self.metrics[key] = []
-            self.metrics[key].append(value)
-        
-        self.step += 1
-    
-    def get_average(self, metric_name: str, last_n: Optional[int] = None) -> float:
-        """Get average of specified metric"""
-        if metric_name not in self.metrics:
-            return 0.0
-        
-        values = self.metrics[metric_name]
-        if last_n is not None:
-            values = values[-last_n:]
-        
-        return np.mean(values) if values else 0.0
-
-
-class CheckpointManager:
-    """Manage model checkpoints"""
-    
-    def __init__(self, output_dir: str, max_checkpoints: int = 5):
-        self.output_dir = output_dir
-        self.max_checkpoints = max_checkpoints
-        os.makedirs(output_dir, exist_ok=True)
-    
-    def save_checkpoint(self, model, optimizer, epoch: int, metrics: Dict[str, float]) -> str:
-        """Save model checkpoint"""
-        checkpoint_path = os.path.join(
-            self.output_dir, 
-            f"checkpoint_epoch_{epoch:04d}.pt"
-        )
-        
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'metrics': metrics
-        }
-        
-        torch.save(checkpoint, checkpoint_path)
-        
-        # Clean old checkpoints
-        self._cleanup_checkpoints()
-        
-        return checkpoint_path
-    
-    def _cleanup_checkpoints(self):
-        """Remove old checkpoints to maintain max_checkpoints"""
-        checkpoints = sorted([
-            f for f in os.listdir(self.output_dir) 
-            if f.startswith('checkpoint_epoch_') and f.endswith('.pt')
-        ])
-        
-        if len(checkpoints) > self.max_checkpoints:
-            for checkpoint in checkpoints[:-self.max_checkpoints]:
-                os.remove(os.path.join(self.output_dir, checkpoint))
-
-
-class LearningRateScheduler:
-    """Learning rate scheduler for federated training"""
-    
-    def __init__(self, optimizer: optim.Optimizer, config: TrainingConfig):
-        self.optimizer = optimizer
-        self.config = config
-        self.step_count = 0
-        
-        # Setup scheduler
-        if config.lr_scheduler == "cosine":
-            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=config.aggregation_rounds * config.local_epochs,
-                eta_min=config.min_lr
-            )
-        elif config.lr_scheduler == "step":
-            self.scheduler = optim.lr_scheduler.StepLR(
-                optimizer,
-                step_size=config.aggregation_rounds // 3,
-                gamma=0.5
-            )
-        else:
-            self.scheduler = None
-    
-    def step(self):
-        """Step the scheduler"""
-        if self.scheduler:
-            self.scheduler.step()
-        self.step_count += 1
-    
-    def get_current_lr(self) -> float:
-        """Get current learning rate"""
-        return self.optimizer.param_groups[0]['lr']

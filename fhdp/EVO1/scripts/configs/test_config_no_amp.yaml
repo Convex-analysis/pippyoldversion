@@ -1,4 +1,4 @@
-# Default configuration for EVO-1 Federated Autonomous Driving Training
+# Test configuration without mixed precision
 
 # Model Configuration
 model:
@@ -38,15 +38,15 @@ training:
   client_fraction: 0.3
   learning_rate: 0.0001
   weight_decay: 0.0001
-  batch_size: 2
+  batch_size: 8
   gradient_accumulation_steps: 4
   max_grad_norm: 1.0
   lr_scheduler: "cosine"
   warmup_steps: 1000
   min_lr: 0.000001
-  mixed_precision: false  # Disable to avoid AMP issues
-  gradient_checkpointing: false  # Disable to simplify
-  use_flash_attention: false
+  mixed_precision: false  # Disable mixed precision for testing
+  gradient_checkpointing: true
+  use_flash_attention: true
 
 # FHDP Integration Configuration
 fhdp:

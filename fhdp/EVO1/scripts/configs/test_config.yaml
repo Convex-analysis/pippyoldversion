@@ -1,4 +1,4 @@
-# Default configuration for EVO-1 Federated Autonomous Driving Training
+# Test configuration for EVO-1 Federated Autonomous Driving Training
 
 # Model Configuration
 model:
@@ -16,8 +16,8 @@ model:
 
 # Data Configuration  
 data:
-  data_root: "/home/xta/fhdp/EVO1/data/nuscenes"
-  version: "v1.0-mini"
+  data_root: "/tmp/test_nuscenes"
+  version: "v1.0-trainval"
   split: "train"
   image_size: [448, 448]
   normalize_mean: [0.485, 0.456, 0.406]
@@ -38,15 +38,15 @@ training:
   client_fraction: 0.3
   learning_rate: 0.0001
   weight_decay: 0.0001
-  batch_size: 2
+  batch_size: 8
   gradient_accumulation_steps: 4
   max_grad_norm: 1.0
   lr_scheduler: "cosine"
   warmup_steps: 1000
   min_lr: 0.000001
-  mixed_precision: false  # Disable to avoid AMP issues
-  gradient_checkpointing: false  # Disable to simplify
-  use_flash_attention: false
+  mixed_precision: true
+  gradient_checkpointing: true
+  use_flash_attention: true
 
 # FHDP Integration Configuration
 fhdp:

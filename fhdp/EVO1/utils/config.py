@@ -28,6 +28,8 @@ class ModelConfig:
     max_waypoints: int = 20
     trajectory_horizon: float = 3.0  # seconds
     control_frequency: float = 10.0  # Hz
+    max_speed: float = 30.0  # m/s
+    max_steering: float = 0.6 # radians
 
 
 @dataclass  

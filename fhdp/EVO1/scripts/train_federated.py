@@ -156,6 +156,10 @@ def parse_arguments():
         '--enable_wandb', action='store_true',
         help='Enable Weights & Biases logging'
     )
+    parser.add_argument(
+        '--dry_run', action='store_true',
+        help='Skip data validation for testing without real dataset'
+    )
     
     return parser.parse_args()
 
@@ -224,13 +228,15 @@ def create_config_from_args(args) -> EVO1DrivingConfig:
     return config
 
 
-def validate_configuration(config: EVO1DrivingConfig):
+def validate_configuration(config: EVO1DrivingConfig, dry_run: bool = False):
     """Validate configuration parameters"""
     errors = []
     
-    # Data validation
-    if not os.path.exists(config.data.data_root):
+    # Data validation (skip in dry run mode)
+    if not dry_run and not os.path.exists(config.data.data_root):
         errors.append(f"Data root does not exist: {config.data.data_root}")
+    elif dry_run:
+        logging.warning(f"DRY RUN: Skipping data validation for {config.data.data_root}")
     
     # Model validation
     if config.model.action_dim < 1:
@@ -333,13 +339,19 @@ def main():
     setup_logging(config.log_level, log_dir)
     
     # Validate configuration
-    validate_configuration(config)
+    logging.info("Validating configuration...")
+    validate_configuration(config, args.dry_run)
+    logging.info("Configuration validated")
     
     # Setup reproducibility
+    logging.info("Setting up reproducibility...")
     setup_reproducibility(config.seed)
+    logging.info("Reproducibility setup done")
     
     # Setup wandb
+    logging.info("Setting up wandb...")
     setup_wandb(config, args.enable_wandb)
+    logging.info("Wandb setup done")
     
     # Log experiment info
     logging.info("Starting Federated EVO-1 Autonomous Driving Training")
@@ -362,7 +374,8 @@ def main():
     
     # Setup FHDP system if enabled
     fhdp_system = None
-    if args.use_fhdp:
+    logging.info(f"FHDP setup: use_fhdp={args.use_fhdp}, dry_run={args.dry_run}")
+    if args.use_fhdp and not args.dry_run:
         try:
             # Import FHDP components
             sys.path.append(os.path.join(project_root, 'core'))
@@ -384,39 +397,59 @@ def main():
     start_time = time.time()
     
     try:
-        # Initialize federated trainer
-        trainer = FederatedEVO1Trainer(
-            config=config,
-            fhdp_system=fhdp_system,
-            device=config.device
-        )
-        
-        # Start training
-        trainer.train()
-        
-        # Final evaluation
-        logging.info("Starting final evaluation...")
-        test_loader = create_dataloader(
-            config=config.data,
-            model_config=config.model,
-            split='test',
-            batch_size=config.training.batch_size,
-            shuffle=False,
-            num_workers=4
-        )
-        
-        if test_loader:
-            final_metrics = trainer.evaluate_global_model(test_loader)
-            logging.info("Final evaluation metrics:")
-            for metric, value in final_metrics.items():
-                logging.info(f"  {metric}: {value:.4f}")
+        if args.dry_run:
+            logging.info("DRY RUN: Skipping actual training and evaluation")
+            logging.info(f"Configuration loaded successfully:")
+            logging.info(f"  - Model: {config.model.vision_model_name}")
+            logging.info(f"  - Clients: {config.training.num_clients}")
+            logging.info(f"  - Rounds: {config.training.aggregation_rounds}")
+            logging.info(f"  - Output dir: {config.output_dir}")
             
-            # Save final metrics
-            metrics_path = os.path.join(config.output_dir, 'final_metrics.json')
-            with open(metrics_path, 'w') as f:
-                json.dump(final_metrics, f, indent=4)
-        
-        logging.info("Training completed successfully!")
+            # Create output directory
+            os.makedirs(config.output_dir, exist_ok=True)
+            
+        else:
+            # Initialize federated trainer
+            trainer = FederatedEVO1Trainer(
+                config=config,
+                fhdp_system=fhdp_system,
+                device=config.device
+            )
+            
+            # Start training
+            print(f"[MAIN] About to start training with trainer...")
+            trainer.train()
+            print(f"[MAIN] Training completed!")
+            
+            # Final evaluation
+            logging.info("Starting final evaluation...")
+            test_loader = create_dataloader(
+                config=config.data,
+                model_config=config.model,
+                split='test',
+                batch_size=config.training.batch_size,
+                shuffle=False,
+                num_workers=0
+            )
+            
+            if test_loader:
+                final_metrics = trainer.evaluate_global_model(test_loader)
+                logging.info("Final evaluation metrics:")
+                for metric, value in final_metrics.items():
+                    logging.info(f"  {metric}: {value:.4f}")
+                
+                # Save final metrics
+                # Convert PyTorch tensors to native Python types
+                def convert_tensor_to_native(obj):
+                    if hasattr(obj, 'tolist'):
+                        return obj.tolist()
+                    return obj
+                
+                metrics_path = os.path.join(config.output_dir, 'final_metrics.json')
+                with open(metrics_path, 'w') as f:
+                    json.dump(final_metrics, f, indent=4, default=convert_tensor_to_native)
+            
+            logging.info("Training completed successfully!")
         
     except KeyboardInterrupt:
         logging.info("Training interrupted by user")

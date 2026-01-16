@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional, Any
 import numpy as np
 from dataclasses import dataclass
+import logging
 
 # Import original EVO-1 components (adapted path)
 import sys
@@ -26,7 +27,7 @@ except ImportError:
     
     class InternVL3Embedder(nn.Module):
         """Fallback vision-language embedder"""
-        def __init__(self, model_name="OpenGVLab/InternVL3-1B", **kwargs):
+        def __init__(self, model_name="OpenGVLab/InternVL3-1B", device="cuda", **kwargs):
             super().__init__()
             self.vision_encoder = nn.Sequential(
                 nn.Conv2d(3, 64, 7, stride=2, padding=3),
@@ -35,8 +36,9 @@ except ImportError:
                 nn.AdaptiveAvgPool2d((1, 1)),
                 nn.Flatten(),
                 nn.Linear(64, 2048)
-            )
-            self.text_projection = nn.Linear(512, 2048)
+            ).to(device)
+            self.text_projection = nn.Linear(512, 2048).to(device)
+            self.device = device
         
         def forward(self, images, prompts=None):
             batch_size = images.shape[0]
@@ -100,7 +102,25 @@ except ImportError:
             return waypoints
 
 
-from ..utils.config import ModelConfig, TrainingConfig
+# from ..utils.config import ModelConfig, TrainingConfig
+# Config classes defined inline for standalone operation
+
+@dataclass
+class ModelConfig:
+    vision_encoder: str = "OpenGVLab/InternVL3-1B"
+    language_model: str = "Qwen/Qwen2.5-0.5B"
+    sequence_length: int = 32
+    hidden_dim: int = 4096
+    vision_model_name: str = "OpenGVLab/InternVL3-1B"
+    image_size: int = 224
+    max_waypoints: int = 20
+
+@dataclass  
+class TrainingConfig:
+    learning_rate: float = 1e-4
+    batch_size: int = 8
+    num_epochs: int = 20
+    gradient_checkpointing: bool = False
 
 
 @dataclass
@@ -246,19 +266,19 @@ class EVO1Driving(nn.Module):
         
         # Vision-Language Encoder
         self.vl_embedder = InternVL3Embedder(
-            model_name=config.vision_model_name,
-            image_size=config.image_size,
+            model_name=getattr(config, 'vision_encoder', 'OpenGVLab/InternVL3-1B'),
+            image_size=getattr(config, 'image_size', 224),
             device=device
         )
         
         # State Encoder
-        self.state_encoder = StateEncoder(state_dim=12, hidden_dim=256)
+        self.state_encoder = StateEncoder(state_dim=12, hidden_dim=256).to(device)
         
         # Action Head (Waypoint Prediction)
-        self.action_head = FlowmatchingActionHead(config)
+        self.action_head = FlowmatchingActionHead(config).to(device)
         
         # Control Head
-        self.control_head = ControlHead()
+        self.control_head = ControlHead().to(device)
         
         # Confidence Estimator
         self.confidence_estimator = nn.Sequential(
@@ -268,7 +288,7 @@ class EVO1Driving(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(128, 1),
             nn.Sigmoid()
-        )
+        ).to(device)
         
         # Initialize weights
         self._initialize_weights()
