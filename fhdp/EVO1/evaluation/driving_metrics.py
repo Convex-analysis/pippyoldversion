@@ -152,7 +152,7 @@ class DrivingMetricsEvaluator:
         # Trajectory length error
         pred_lengths = self._compute_trajectory_lengths(predicted_trajectories)
         gt_lengths = self._compute_trajectory_lengths(ground_truth_trajectories)
-        trajectory_length_error = np.mean(np.abs(pred_lengths - gt_lengths))
+        trajectory_length_error = np.mean(np.abs(pred_lengths.cpu().numpy() - gt_lengths.cpu().numpy()))
         
         # Heading error
         if predicted_controls is not None:
@@ -488,7 +488,7 @@ class DrivingMetricsEvaluator:
         # Trajectory accuracy (weight: 0.3)
         if 'trajectory' in evaluations:
             traj_eval = evaluations['trajectory']
-            traj_score = 100.0 - traj_eval.ade * 10 - traj_eval.ade_threshold * 5
+            traj_score = 100.0 - traj_eval.ade * 10 - self.ade_threshold * 5
             traj_score = max(0.0, min(100.0, traj_score))
             score += traj_score * 0.3
             total_weight += 0.3

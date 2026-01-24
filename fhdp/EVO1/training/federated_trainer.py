@@ -411,14 +411,23 @@ class FederatedEVO1Trainer:
         """Setup logging configuration"""
         log_file = os.path.join(self.config.output_dir, "logs", "federated_training.log")
         
-        logging.basicConfig(
-            level=getattr(logging, self.config.log_level.upper()),
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler()
-            ]
-        )
+        # Get root logger
+        logger = logging.getLogger()
+        logger.setLevel(getattr(logging, self.config.log_level.upper()))
+        
+        # Clear existing handlers to avoid duplication
+        if not logger.handlers:
+            # Create file handler
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            
+            # Create stream handler for console output
+            stream_handler = logging.StreamHandler()
+            stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            
+            # Add handlers
+            logger.addHandler(file_handler)
+            logger.addHandler(stream_handler)
     
     def setup_wandb(self):
         """Setup Weights & Biases logging"""
@@ -503,11 +512,14 @@ class FederatedEVO1Trainer:
         
         # Aggregate client metrics
         if client_metrics:
+            # Extract the latest epoch's metrics (last epoch has highest number)
             avg_train_loss = np.mean([
-                metrics.get('train_loss', 0) for metrics in client_metrics.values()
+                max([v for k, v in metrics.items() if 'train_loss' in k], default=0)
+                for metrics in client_metrics.values()
             ])
             avg_val_loss = np.mean([
-                metrics.get('val_loss', 0) for metrics in client_metrics.values()
+                max([v for k, v in metrics.items() if 'val_loss' in k], default=0)
+                for metrics in client_metrics.values()
             ])
             
             round_metrics['avg_train_loss'] = avg_train_loss
@@ -633,7 +645,7 @@ class FederatedEVO1Trainer:
                 logging.info(f"Round {round_idx + 1} completed: avg_loss={round_metrics.get('avg_train_loss', 0):.4f}")
                 
                 # Early stopping if loss is low enough
-                if round_metrics.get('avg_val_loss', float('inf')) < 0.01:
+                if round_metrics.get('avg_val_loss', float('inf')) < 0.1:
                     logging.info("Early stopping: validation loss below threshold")
                     break
             

@@ -124,7 +124,7 @@ class DrivingInferencePipeline:
             )
         
         # Load checkpoint
-        checkpoint = torch.load(self.config.model_path, map_location=self.device)
+        checkpoint = torch.load(self.config.model_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model.to(self.device)
         self.model.eval()
@@ -233,7 +233,7 @@ class DrivingInferencePipeline:
             processed_images.append(img_tensor)
         
         # Stack images [N, C, H, W]
-        return torch.stack(processed_images)
+        return torch.stack(processed_images).to(self.device)
     
     def preprocess_state(self, state: np.ndarray) -> torch.Tensor:
         """Preprocess vehicle state"""
@@ -317,7 +317,7 @@ class DrivingInferencePipeline:
         return {
             'waypoints': waypoints.cpu(),
             'controls': torch.from_numpy(denormalized_controls),
-            'confidence': confidence.cpu(),
+            'confidence': confidence.cpu().item(),
             'inference_time': inference_time,
             'raw_controls': controls.cpu(),
             'vision_features': output.vision_features.cpu()
