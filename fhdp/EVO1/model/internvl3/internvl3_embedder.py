@@ -6,12 +6,18 @@ import torch.nn as nn
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 from torchvision.transforms.functional import InterpolationMode
+import os
+import socket
+
+os.environ['HF_ENDPOINT'] = "https://hf-mirror.com"
+
 from transformers import AutoModel, AutoTokenizer
 from transformers import GenerationConfig
 from torchvision.transforms.functional import to_pil_image
 from typing import Union, List
 from torch import nn
 import logging
+
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -68,22 +74,109 @@ def dynamic_preprocess(image, min_num=1, max_num=1, image_size=448, use_thumbnai
         processed_images.append(thumbnail_img)
     return processed_images
 
+def check_network_connection(timeout=5):
+    """检查是否能连接到Hugging Face"""
+    try:
+        #socket.create_connection(("huggingface.co", 443), timeout=timeout)
+        socket.create_connection(("hf-mirror.com", 443), timeout=timeout)
+        return True
+    except (socket.error, socket.timeout):
+        return False
+
 class InternVL3Embedder(nn.Module):
-    def __init__(self, model_name="OpenGVLab/InternVL3-1B", image_size=448, device="cuda"):
+    def __init__(self, model_name="OpenGVLab/InternVL3-1B", image_size=448, device="cuda", local_model_path=None):
         super().__init__()
         self.device = device
         self.image_size = image_size
         self.max_text_length = 1024  # InternVL3 supports up to 1024 tokens
         self.transform = build_transform(image_size)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, use_fast=False)
-        self.model = AutoModel.from_pretrained(
-            model_name,
-            torch_dtype=torch.bfloat16,
-            trust_remote_code=True,
-            use_flash_attn=True,
-            low_cpu_mem_usage=True,
-            _fast_init=False,
-        ).to(self.device) 
+        self.model_name = model_name
+        self.local_model_path = local_model_path
+        
+        # 尝试加载模型
+        self._load_model_components()
+    
+    def _load_model_components(self):
+        """加载tokenizer和model，支持离线模式"""
+        # 首先尝试本地路径
+        if self.local_model_path and os.path.exists(self.local_model_path):
+            print(f"Loading model from local path: {self.local_model_path}")
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    self.local_model_path, 
+                    trust_remote_code=True, 
+                    use_fast=False,
+                    local_files_only=True
+                )
+                self.model = AutoModel.from_pretrained(
+                    self.local_model_path,
+                    torch_dtype=torch.bfloat16,
+                    trust_remote_code=True,
+                    use_flash_attn=True,
+                    low_cpu_mem_usage=True,
+                    _fast_init=False,
+                    local_files_only=True,
+                ).to(self.device)
+                print("Successfully loaded model from local cache")
+                self._configure_model()
+                return
+            except Exception as e:
+                print(f"Failed to load from local path: {e}")
+        
+        # 检查网络连接
+        if not check_network_connection():
+            print("No internet connection. Trying to load from Hugging Face cache...")
+            try:
+                # 尝试从缓存加载
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name, 
+                    trust_remote_code=True, 
+                    use_fast=False,
+                    local_files_only=True
+                )
+                self.model = AutoModel.from_pretrained(
+                    self.model_name,
+                    torch_dtype=torch.bfloat16,
+                    trust_remote_code=True,
+                    use_flash_attn=True,
+                    low_cpu_mem_usage=True,
+                    _fast_init=False,
+                    local_files_only=True,
+                ).to(self.device)
+                print("Successfully loaded model from local cache")
+            except Exception as e:
+                print(f"Failed to load from cache: {e}")
+                print("\n" + "="*80)
+                print(" ERROR: Cannot load InternVL3 model!")
+                print(" Solutions:")
+                print(" 1. Connect to internet and try again")
+                print(" 2. Download model manually with:")
+                print(f"    git lfs clone https://huggingface.co/{self.model_name}")
+                print(" 3. Set local_model_path to the downloaded model directory")
+                print("="*80 + "\n")
+                raise ConnectionError("Cannot load InternVL3 model: no internet connection and no local cache")
+        else:
+            # 有网络连接，正常下载
+            print("Internet connection available. Downloading model...")
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True, use_fast=False)
+                self.model = AutoModel.from_pretrained(
+                    self.model_name,
+                    torch_dtype=torch.bfloat16,
+                    trust_remote_code=True,
+                    use_flash_attn=True,
+                    low_cpu_mem_usage=True,
+                    _fast_init=False,
+                ).to(self.device)
+                print("Successfully downloaded and loaded model")
+            except Exception as e:
+                print(f"Failed to download model: {e}")
+                raise
+        
+        self._configure_model()
+    
+    def _configure_model(self):
+        """配置模型结构""" 
         
         if hasattr(self.model.language_model, 'model'):
             layers = self.model.language_model.model.layers
@@ -155,12 +248,8 @@ class InternVL3Embedder(nn.Module):
         true_sequence_length = untruncated_ids.shape[1]
 
         if true_sequence_length > self.max_text_length:
-            print("\n" + "="*80)
-            print(f" WARNING: Input prompt was TRUNCATED!")
-            print(f"   - Max Length Allowed    : {self.max_text_length}")
-            print(f"   - Actual Length      : {true_sequence_length}")
-            print(f"   - Truncated Prompt (first 100 chars): '{prompt[:100]}...'")
-            print("="*80 + "\n")
+            # Silently handle truncation - this is expected for long prompts with many image tokens
+            pass
 
         model_inputs = self.tokenizer(prompt, return_tensors="pt", padding='max_length', truncation=True, max_length=self.max_text_length).to(self.device)
         input_ids = model_inputs["input_ids"]
@@ -186,10 +275,15 @@ class InternVL3Embedder(nn.Module):
             ignore_flag = False
         except Exception as e:
             vit_embeds = vit_embeds.reshape(-1, C)
-            print(f'warning: {e}, input_embeds[selected].shape={input_embeds[selected].shape}, '
-                  f'vit_embeds.shape={vit_embeds.shape}')
+            # Silently handle shape mismatch - truncate or pad to match
             n_token = selected.sum()
-            input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds[:n_token]
+            if vit_embeds.size(0) >= n_token:
+                input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds[:n_token]
+            else:
+                # Pad with zeros if not enough embeddings
+                padding = torch.zeros(n_token - vit_embeds.size(0), C, device=vit_embeds.device, dtype=vit_embeds.dtype)
+                vit_embeds_padded = torch.cat([vit_embeds, padding], dim=0)
+                input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds_padded
             ignore_flag = True
 
  

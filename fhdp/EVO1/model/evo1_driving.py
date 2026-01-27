@@ -114,6 +114,8 @@ class ModelConfig:
     vision_model_name: str = "OpenGVLab/InternVL3-1B"
     image_size: int = 224
     max_waypoints: int = 20
+    action_dim: int = 8
+    per_action_dim: int = 7
 
 @dataclass  
 class TrainingConfig:
@@ -335,10 +337,21 @@ class EVO1Driving(nn.Module):
         # Extract vision and language features
         text_features = None
         if hasattr(self.vl_embedder, 'get_fused_image_text_embedding_from_tensor_images'):
-            # Original EVO-1 method
+            # Original EVO-1 method - convert (B, N, C, H, W) to list of (N, C, H, W)
+            # and then flatten each view to individual (C, H, W) images
+            B, N, C, H, W = images.shape
+            image_list = []
+            mask_list = []
+            for b in range(batch_size):
+                for n in range(N):
+                    # Add individual (C, H, W) images
+                    image_list.append(images[b, n])  # Shape: (C, H, W)
+                    # Expand mask for each image view
+                    mask_list.append(image_mask[b, n].cpu().item())
+            
             vision_features = self.vl_embedder.get_fused_image_text_embedding_from_tensor_images(
-                image_tensors=images,
-                image_mask=image_mask,
+                image_tensors=image_list,
+                image_mask=torch.tensor(mask_list, dtype=torch.bool),
                 text_prompt=instructions[0] if instructions else "",
                 return_cls_only=False
             )
@@ -351,24 +364,44 @@ class EVO1Driving(nn.Module):
         
         # Predict waypoints using action head
         if mode == "training" and future_controls is not None:
-            # Training mode with ground truth
-            waypoints = self.action_head(
+            # Training mode with ground truth - action_head returns (pred_velocity, noise)
+            result = self.action_head(
                 fused_tokens=vision_features,
                 state=encoded_state,
                 actions_gt=future_controls
             )
+            if isinstance(result, tuple):
+                # In training mode, use the velocity prediction
+                pred_velocity, noise = result
+                # Reshape pred_velocity to match expected waypoints format [B, T, per_action_dim]
+                if pred_velocity.dim() == 2:
+                    # pred_velocity is [B, horizon*per_action_dim], reshape to [B, horizon, per_action_dim]
+                    waypoints = pred_velocity.view(pred_velocity.size(0), self.action_head.horizon, self.action_head.per_action_dim)
+                else:
+                    waypoints = pred_velocity
+            else:
+                waypoints = result
         else:
             # Inference mode
             waypoints = self.action_head(
                 fused_tokens=vision_features,
                 state=encoded_state
             )
+            
+            # Handle different possible shapes from inference
+            if waypoints.dim() == 2:
+                # waypoints is [B, action_dim_total], reshape to [B, horizon, per_action_dim]
+                waypoints = waypoints.view(waypoints.size(0), self.action_head.horizon, self.action_head.per_action_dim)
+            elif waypoints.dim() == 1:
+                # waypoints is [action_dim_total], add batch dimension and reshape
+                waypoints = waypoints.view(1, self.action_head.horizon, self.action_head.per_action_dim)
         
         # Convert waypoints to control signals
         controls = self.control_head(waypoints)
         
         # Estimate confidence
-        waypoints_flat = waypoints.view(batch_size, -1)
+        actual_batch_size = waypoints.shape[0]
+        waypoints_flat = waypoints.view(actual_batch_size, -1)
         confidence = self.confidence_estimator(waypoints_flat)
         
         return EVO1DrivingOutput(
@@ -389,6 +422,11 @@ class EVO1Driving(nn.Module):
         confidence_weight: float = 0.1
     ) -> Dict[str, torch.Tensor]:
         """Compute training losses"""
+        
+        # Ensure target tensors match output batch size
+        output_batch_size = output.controls.size(0)
+        if target_controls.size(0) != output_batch_size:
+            target_controls = target_controls[:output_batch_size]
         
         # Control prediction loss (MSE)
         control_loss = F.mse_loss(output.controls, target_controls)

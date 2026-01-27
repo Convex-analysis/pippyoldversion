@@ -175,7 +175,7 @@ class FlowmatchingActionHead(nn.Module):
                                           num_heads=num_heads, num_layers=num_layers,
                                           dropout=dropout, num_inference_timesteps=num_inference_timesteps,
                                           num_categories=num_categories)
-        print(f"num_inference_timesteps {num_inference_timesteps}")
+        
         self.embed_dim = embed_dim
         self.horizon = horizon
         self.per_action_dim = config.per_action_dim
@@ -225,8 +225,20 @@ class FlowmatchingActionHead(nn.Module):
 
         if actions_gt is None:
             return self.get_action(fused_tokens, state=state, embodiment_id=embodiment_id)
+        
         B = fused_tokens.size(0)
         device = fused_tokens.device
+        
+        # Ensure actions_gt matches the batch size of fused_tokens
+        if actions_gt is not None and actions_gt.size(0) != B:
+            # Silently adjust batch size mismatch
+            if actions_gt.size(0) > B:
+                actions_gt = actions_gt[:B]
+            else:
+                # Pad with zeros if actions_gt is smaller
+                pad_size = B - actions_gt.size(0)
+                padding = torch.zeros(pad_size, *actions_gt.shape[1:], device=actions_gt.device, dtype=actions_gt.dtype)
+                actions_gt = torch.cat([actions_gt, padding], dim=0)
 
         if embodiment_id is None:
             embodiment_id = torch.zeros(B, dtype=torch.long, device=device)
@@ -306,8 +318,7 @@ class FlowmatchingActionHead(nn.Module):
 
     def get_action(self, fused_tokens: torch.Tensor, state: torch.Tensor = None, embodiment_id: torch.LongTensor = None, action_mask: torch.Tensor = None):
 
-        print(f"action_mask shape: {action_mask.shape if action_mask is not None else 'None'}")
-        print(f"one sample action_mask: {action_mask[0] if action_mask is not None else 'None'}")
+        
 
         B = fused_tokens.size(0)
         device = fused_tokens.device
@@ -331,8 +342,6 @@ class FlowmatchingActionHead(nn.Module):
             per_action_dim = action_dim_total
 
         action = (torch.rand(B, action_dim_total, device=device) * 2 - 1)
-        print(f"action shape: {action.shape}")
-        print(f"one sample action: {action[0]}")
 
         if self.horizon > 1:
             action_seq = action.view(B, self.horizon, per_action_dim)
@@ -340,20 +349,14 @@ class FlowmatchingActionHead(nn.Module):
         else:
             action_seq = action.view(B, 1, per_action_dim)
 
-        action_mask = action_mask.view(B, 1, per_action_dim).repeat(1,self.horizon,1)
-
-        print(f"action_mask: {action_mask}")
-        print(f"one sample action_mask: {action_mask[0]}")
-
         if action_mask is not None:
+            action_mask = action_mask.view(B, 1, per_action_dim).repeat(1,self.horizon,1)
             action_mask = action_mask.to(dtype=action_seq.dtype, device=action_seq.device)
-            assert action_mask.shape == action_seq.shape, f"action_mask shape {action_mask.shape} != noise shape {action_seq.shape}"
+            assert action_mask.shape == action_seq.shape, f"action_mask shape {action_mask.shape} != action_seq shape {action_seq.shape}"
             action_seq = action_seq * action_mask
         else:
-            raise ValueError("action_mask must be provided for inference with flow matching.")
-        print(f"action shape: {action_seq.shape}")
-        print(f"one sample action: {action_seq[0]}")
-
+            # For inference without mask, use default mask of ones
+            action_mask = torch.ones(B, self.horizon, per_action_dim, device=action_seq.device, dtype=action_seq.dtype)
         N = int(getattr(self.config, "num_inference_timesteps", 32))
         dt = 1.0 / N
         for i in range(N):

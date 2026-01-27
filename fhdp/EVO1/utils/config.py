@@ -19,7 +19,9 @@ class ModelConfig:
     num_views: int = 3  # Front, left, right cameras
     
     # Action head config
-    action_dim: int = 8  # [steering, throttle, brake, + 5 auxiliary controls]
+    action_dim: int = 60  # 20 * 3 (horizon * per_action_dim)
+    per_action_dim: int = 3  # [steering, throttle, brake]
+    horizon: int = 20  # Time horizon for action sequence
     action_hidden_dim: int = 512
     action_num_layers: int = 6
     flow_matching_steps: int = 50

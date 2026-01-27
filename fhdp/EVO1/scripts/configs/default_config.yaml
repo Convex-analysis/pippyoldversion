@@ -6,7 +6,9 @@ model:
   vision_layers: 14
   image_size: 448
   num_views: 3
-  action_dim: 8
+  action_dim: 60
+  per_action_dim: 3
+  horizon: 20
   action_hidden_dim: 512
   action_num_layers: 6
   flow_matching_steps: 50
