@@ -701,13 +701,22 @@ class FederatedEVO1Trainer:
                 total_loss += loss_dict['total_loss'].item()
                 num_batches += 1
                 
-                # Compute control errors
-                control_error = F.mse_loss(output.controls, target_controls, reduction='none')
+                # Compute control errors (handle batch size mismatch)
+                batch_size = min(output.controls.size(0), target_controls.size(0))
+                control_error = F.mse_loss(
+                    output.controls[:batch_size], 
+                    target_controls[:batch_size], 
+                    reduction='none'
+                )
                 control_errors.extend(control_error.flatten().cpu().numpy())
                 
                 # Compute waypoint errors (approximate)
-                target_waypoints = self.global_model._controls_to_waypoints(target_controls)
-                waypoint_error = F.mse_loss(output.waypoints, target_waypoints, reduction='none')
+                target_waypoints = self.global_model._controls_to_waypoints(target_controls[:batch_size])
+                waypoint_error = F.mse_loss(
+                    output.waypoints[:batch_size], 
+                    target_waypoints, 
+                    reduction='none'
+                )
                 waypoint_errors.extend(waypoint_error.flatten().cpu().numpy())
         
         metrics = {

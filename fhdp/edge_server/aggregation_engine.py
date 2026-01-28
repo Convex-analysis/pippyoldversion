@@ -14,11 +14,11 @@ from dataclasses import dataclass, field
 import queue
 import torch
 
-from ..core.types import (
+from core.types import (
     ModelUpdate, AggregationResult, TrainingMode, FairnessMetrics,
     VehicleInfo, ErrorPropagation
 )
-from ..core.constants import (
+from core.constants import (
     ASYNC_AGGREGATION_INTERVAL, MIN_AGGREGATION_PARTICIPANTS,
     AGGREGATION_TIMEOUT, WEIGHT_DECAY_FACTOR, 
     ERROR_ACCUMULATION_THRESHOLD, MAX_ERROR_PROPAGATION_DELAY

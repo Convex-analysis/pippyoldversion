@@ -14,11 +14,11 @@ from .communication import V2VCommunicationManager
 from .pipeline_formation import PipelineFormation
 from .training_engine import TrainingExecutor
 from .monitor import VehicleMonitor
-from ..core.types import (
+from core.types import (
     VehicleInfo, VehicleState, TrainingMode, Pipeline, PipelineTemplate,
     ModelUpdate, ResourceMetrics, CommunicationBundle
 )
-from ..core.constants import HEARTBEAT_INTERVAL
+from core.constants import HEARTBEAT_INTERVAL
 
 class Vehicle:
     """Main Vehicle implementation with complete FHDP functionality"""
@@ -100,7 +100,7 @@ class Vehicle:
         
         protocol_objects = []
         for protocol in protocols:
-            from ..core.types import CommunicationProtocol
+            from core.types import CommunicationProtocol
             try:
                 protocol_objects.append(CommunicationProtocol(protocol))
             except ValueError:
@@ -192,8 +192,18 @@ class Vehicle:
         """Update vehicle resources"""
         self.vehicle_info.resources.update(resources)
         
-        # Vehicle monitor resources are updated automatically by the monitoring thread
-        # No need to manually record participation here
+        # Update vehicle monitor resources
+        resource_metrics = ResourceMetrics(
+            cpu_usage=1.0 - resources.get('cpu', 0.7),
+            memory_usage=1.0 - resources.get('memory', 0.6),
+            battery_level=resources.get('battery', 0.8),
+            network_quality=resources.get('network_quality', 0.8),
+            thermal_state=resources.get('thermal_state', 0.3)
+        )
+        
+        self.vehicle_monitor.record_training_participation(
+            TrainingMode.INDIVIDUAL, "", None, 0.0, True, 1.0
+        )  # Update participation tracking
     
     def _handle_neighbor_update(self, neighbor_id: str, neighbor_info):
         """Handle neighbor update events"""
@@ -244,8 +254,8 @@ class Vehicle:
             position = pipeline_info.get('position', -1)
             
             # Create template object
-            from ..core.types import PipelineTemplate, TrainingConfig
-            from ..core.types import ResourceClass
+            from core.types import PipelineTemplate, TrainingConfig
+            from core.types import ResourceClass
             
             template = PipelineTemplate(
                 template_id=template_data.get('template_id', ''),
@@ -347,7 +357,7 @@ class Vehicle:
             model = self._create_mock_model()
             training_data = self._create_mock_data()
             
-            from ..core.types import TrainingConfig, TrainingTask
+            from core.types import TrainingConfig, TrainingTask
             training_config = TrainingConfig(
                 epochs=request_data.get('epochs', 1),
                 batch_size=request_data.get('batch_size', 32),
@@ -433,7 +443,7 @@ class Vehicle:
     
     def _create_pipeline_template(self, num_vehicles: int) -> Dict[str, Any]:
         """Create pipeline template for formation"""
-        from ..core.types import ResourceClass
+        from core.types import ResourceClass
         
         return {
             'template_id': f"template_{self.vehicle_info.vehicle_id}_{int(time.time())}",
@@ -445,7 +455,7 @@ class Vehicle:
     def submit_model_update(self, update_data: torch.Tensor, metadata: Dict[str, Any]):
         """Submit model update to neighbors or edge server"""
         try:
-            from ..core.types import ModelUpdate
+            from core.types import ModelUpdate
             update = ModelUpdate(
                 source_id=self.vehicle_info.vehicle_id,
                 update_data=update_data,

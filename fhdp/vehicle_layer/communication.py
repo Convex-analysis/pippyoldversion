@@ -15,11 +15,11 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 import queue
 
-from ..core.types import (
+from core.types import (
     VehicleInfo, CommunicationProtocol, CommunicationBundle,
     ModelUpdate, Pipeline, ErrorPropagation
 )
-from ..core.constants import (
+from core.constants import (
     MAX_NEIGHBOR_DISTANCE, MIN_SIGNAL_STRENGTH,
     PROTOCOL_BANDWIDTH, PROTOCOL_LATENCY, PROTOCOL_RANGE,
     COMMUNICATION_BUNDLE_SIZE, MAX_CONNECTION_ATTEMPTS,

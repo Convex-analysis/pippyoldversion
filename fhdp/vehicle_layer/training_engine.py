@@ -18,11 +18,11 @@ import pickle
 import zlib
 import json
 
-from ..core.types import (
+from core.types import (
     VehicleInfo, Pipeline, PipelineTemplate, ModelUpdate, TrainingMode,
     TrainingConfig, CommunicationBundle, ErrorPropagation, ResourceMetrics
 )
-from ..core.constants import (
+from core.constants import (
     TRAINING_EPOCHS_SHORT, COMMUNICATION_BUNDLE_SIZE,
     ERROR_ACCUMULATION_THRESHOLD, MAX_ERROR_PROPAGATION_DELAY,
     MAX_VEHICLE_MEMORY_USAGE, MIN_LOCAL_DATA_SIZE

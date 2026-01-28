@@ -12,11 +12,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import heapq
 
-from ..core.types import (
+from core.types import (
     VehicleInfo, Pipeline, PipelineTemplate, ResourceClass,
     TrainingMode, MobilityPrediction
 )
-from ..core.constants import (
+from core.constants import (
     MAX_PIPELINE_LENGTH, MIN_PIPELINE_PARTICIPANTS,
     PIPELINE_RECOMPOSITION_TIME, PIPELINE_TIMEOUT,
     MAX_NEIGHBOR_DISTANCE

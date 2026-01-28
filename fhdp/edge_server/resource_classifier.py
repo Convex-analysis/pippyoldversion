@@ -11,11 +11,11 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 import threading
 
-from ..core.types import (
+from core.types import (
     VehicleInfo, ResourceClass, ResourceMetrics, FairnessMetrics,
     VehicleState, TrainingMode
 )
-from ..core.constants import (
+from core.constants import (
     HIGH_RESOURCE_CPU, HIGH_RESOURCE_MEMORY, HIGH_RESOURCE_BATTERY,
     MEDIUM_RESOURCE_CPU, MEDIUM_RESOURCE_MEMORY, MEDIUM_RESOURCE_BATTERY,
     FAIRNESS_WINDOW_SIZE, FAIRNESS_DECAY_FACTOR, 
