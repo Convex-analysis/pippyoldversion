@@ -60,6 +60,13 @@ class DataConfig:
 @dataclass
 class TrainingConfig:
     """Training configuration for federated learning"""
+    # Two-stage training strategy
+    use_stage_training: bool = True
+    stage1_rounds: int = 50
+    stage2_rounds: int = 50
+    stage1_lr: float = 1e-4
+    stage2_lr: float = 5e-5
+    
     # Federated learning
     federated_learning: bool = True
     num_clients: int = 10

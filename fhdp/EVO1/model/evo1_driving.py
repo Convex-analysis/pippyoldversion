@@ -310,6 +310,52 @@ class EVO1Driving(nn.Module):
                 nn.init.constant_(module.weight, 1)
                 nn.init.constant_(module.bias, 0)
     
+    def set_stage1_mode(self):
+        """Stage 1: Freeze vision-language backbone, only train action expert and integration module"""
+        print(f"[STAGE1] Freezing vision-language backbone, training only action expert and integration")
+        
+        # Freeze vision-language encoder (backbone)
+        for param in self.vl_embedder.parameters():
+            param.requires_grad = False
+        
+        # Unfreeze action head (action expert)
+        for param in self.action_head.parameters():
+            param.requires_grad = True
+        
+        # Unfreeze state encoder (integration module)
+        for param in self.state_encoder.parameters():
+            param.requires_grad = True
+        
+        # Unfreeze control head (integration module)
+        for param in self.control_head.parameters():
+            param.requires_grad = True
+        
+        # Unfreeze confidence estimator
+        for param in self.confidence_estimator.parameters():
+            param.requires_grad = True
+        
+        # Log parameter counts
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in self.parameters())
+        print(f"[STAGE1] Trainable parameters: {trainable_params:,}/{total_params:,} ({100*trainable_params/total_params:.1f}%)")
+    
+    def set_stage2_mode(self):
+        """Stage 2: Unfreeze all components for full-scale fine-tuning"""
+        print(f"[STAGE2] Unfreezing all components for full-scale fine-tuning")
+        
+        # Unfreeze all parameters
+        for param in self.parameters():
+            param.requires_grad = True
+        
+        # Log parameter counts
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in self.parameters())
+        print(f"[STAGE2] Trainable parameters: {trainable_params:,}/{total_params:,} ({100*trainable_params/total_params:.1f}%)")
+    
+    def is_stage1(self, round_idx: int, stage1_rounds: int) -> bool:
+        """Check if current round is in Stage 1"""
+        return round_idx < stage1_rounds
+    
     def forward(
         self,
         images: torch.Tensor,
