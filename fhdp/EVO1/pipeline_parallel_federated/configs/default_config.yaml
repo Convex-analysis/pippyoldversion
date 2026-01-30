@@ -1,0 +1,147 @@
+# Default Configuration for Pipeline Parallel Federated Learning
+
+# Experiment Configuration
+experiment:
+  name: "pipeline_federated_evo1"
+  output_dir: "./outputs/pipeline_federated"
+  save_interval: 10
+  log_level: "INFO"
+
+# System Configuration
+system:
+  num_edge_servers: 3
+  num_vehicles: 10
+  num_rounds: 50
+  
+  # Edge Server Configuration
+  edge_servers:
+    device: "cuda"
+    model_name: "OpenGVLab/InternVL3-1B"
+    max_concurrent_requests: 100
+    request_timeout: 30.0
+    cache_size: 1000
+  
+  # Vehicle Configuration  
+  vehicles:
+    encoder_type: "resnet18"
+    device_distribution: [2, 8]  # 2 GPU, 8 CPU vehicles
+    batch_size: 8
+    learning_rate: 0.001
+
+# Training Configuration
+training:
+  # Learning rates
+  encoder_learning_rate: 0.001
+  action_head_learning_rate: 0.001
+  
+  # Training parameters
+  batch_size: 8
+  accumulation_steps: 4
+  gradient_clip: 1.0
+  mixed_precision: true
+  
+  # Pipeline parallel settings
+  pipeline_parallel: true
+  async_aggregation: true
+  fairness_enabled: true
+  resource_aware_selection: true
+  
+  # Communication
+  communication_interval: 10
+  aggregation_interval: 60.0
+  min_participating_vehicles: 3
+  max_participating_vehicles: 10
+
+# Resource Adaptation
+resource_adaptation:
+  enabled: true
+  
+  # Device constraints
+  memory_constraint_gb: 4.0
+  compute_constraint: "medium"  # low, medium, high
+  network_bandwidth_mbps: 100
+  
+  # Optimization strategies
+  memory_optimization: true
+  compute_optimization: true
+  network_optimization: true
+  adaptive_batching: true
+  gradient_checkpointing: true
+  
+  # Advanced features
+  model_pruning: false
+  quantization: false
+  knowledge_distillation: false
+  compression_ratio: 0.5
+
+# FHDP Integration
+fhdp:
+  enabled: true
+  config_file: "fhdp_config.yaml"
+  
+  # FHDP Features
+  hybrid_participation: true
+  asynchronous_aggregation: true
+  fairness_management: true
+  resource_balancing: true
+
+# Pipeline Stages
+pipeline:
+  stages: ["encoder", "vlm_backbone", "action_head"]
+  parallel_degree: 2
+  load_balancing_strategy: "resource_aware"
+  
+  # Stage-specific settings
+  encoder:
+    compute_intensity: "medium"
+    memory_requirement: "low"
+    communication_pattern: "frequent"
+  
+  vlm_backbone:
+    compute_intensity: "high"
+    memory_requirement: "high"
+    communication_pattern: "infrequent"
+    deployment: "edge_server"
+  
+  action_head:
+    compute_intensity: "low"
+    memory_requirement: "low"
+    communication_pattern: "frequent"
+
+# Monitoring and Debugging
+monitoring:
+  enabled: true
+  log_metrics: true
+  save_checkpoints: true
+  
+  # Performance metrics
+  track_resource_usage: true
+  track_training_metrics: true
+  track_communication_overhead: true
+  track_fairness_metrics: true
+
+# Hardware Profiles (for different vehicle types)
+vehicle_profiles:
+  high_performance:
+    memory_gb: 8
+    gpu_memory_gb: 6
+    compute_capability: "high"
+    network_bandwidth_mbps: 1000
+    encoder_type: "resnet34"
+    batch_size: 16
+  
+  medium_performance:
+    memory_gb: 4
+    gpu_memory_gb: 2
+    compute_capability: "medium"
+    network_bandwidth_mbps: 100
+    encoder_type: "resnet18"
+    batch_size: 8
+  
+  low_performance:
+    memory_gb: 2
+    gpu_memory_gb: 0
+    compute_capability: "low"
+    network_bandwidth_mbps: 50
+    encoder_type: "efficientnet_b0"
+    batch_size: 4
