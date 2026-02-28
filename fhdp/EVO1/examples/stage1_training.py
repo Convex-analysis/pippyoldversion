@@ -16,8 +16,8 @@ from pathlib import Path
 # Add FHDP to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from utils.config import EVO1DrivingConfig
-from training.stage_trainer import SeparatedStageTrainer
+from EVO1.utils.config import EVO1DrivingConfig
+from EVO1.training.stage_trainer import SeparatedStageTrainer
 
 
 def create_stage1_config():
@@ -26,24 +26,32 @@ def create_stage1_config():
     config = EVO1DrivingConfig()
     
     # Stage 1 specific settings
+    config = override_for_stage1(config)
+    
+    # Default output configuration
+    config.experiment_name = "evo1_stage1_action_expert"
+    config.output_dir = "./outputs/evo1_stage1"
+    
+    return config
+
+
+def override_for_stage1(config: EVO1DrivingConfig) -> EVO1DrivingConfig:
+    """Apply Stage 1 specific settings to configuration"""
+    # Stage 1 specific settings
     config.training.use_stage_training = False  # We'll handle stages manually
-    config.training.stage1_rounds = 50
+    config.training.stage1_rounds = 50  # Will be overridden by CLI
     config.training.stage2_rounds = 0  # Not used in Stage 1
-    config.training.aggregation_rounds = 50  # Only Stage 1 rounds
+    config.training.aggregation_rounds = 50  # Will be overridden by CLI
     
     # Learning rate for action expert training
     config.training.stage1_lr = 1e-4
     
     # Training parameters
-    config.training.num_clients = 4  # Reduced for GPU efficiency
+    config.training.num_clients = 4  # Will be overridden by CLI
     config.training.client_fraction = 0.75  # Use more clients per round
     config.training.local_epochs = 3  # More local epochs for Stage 1
-    config.training.batch_size = 4  # Smaller batch for memory
+    config.training.batch_size = 4  # Will be overridden by CLI
     config.training.save_frequency = 10  # Save more frequently
-    
-    # Output configuration
-    config.experiment_name = "evo1_stage1_action_expert"
-    config.output_dir = "./outputs/evo1_stage1"
     
     return config
 
@@ -52,6 +60,8 @@ def main():
     """Main function for Stage 1 training"""
     
     parser = argparse.ArgumentParser(description="EVO-1 Stage 1 Training: Action Expert Alignment")
+    parser.add_argument("--config", type=str, default=None, 
+                       help="Path to configuration YAML file")
     parser.add_argument("--resume", type=str, default=None, 
                        help="Resume from checkpoint path")
     parser.add_argument("--gpu", type=str, default="cuda",
@@ -62,6 +72,10 @@ def main():
                        help="Number of federated clients")
     parser.add_argument("--batch-size", type=int, default=4,
                        help="Batch size per client")
+    parser.add_argument("--experiment_name", type=str, default=None,
+                       help="Name of the experiment")
+    parser.add_argument("--output_dir", type=str, default=None,
+                       help="Directory to save outputs")
     
     args = parser.parse_args()
     
@@ -71,13 +85,26 @@ def main():
     print()
     
     # Create configuration
-    config = create_stage1_config()
+    if args.config:
+        print(f"Loading configuration from: {args.config}")
+        config = EVO1DrivingConfig.from_yaml(args.config)
+        # Apply Stage 1 specific overrides
+        config = override_for_stage1(config)
+    else:
+        print("Using default Stage 1 configuration")
+        config = create_stage1_config()
     
     # Override with command line arguments
     config.training.stage1_rounds = args.rounds
     config.training.aggregation_rounds = args.rounds
     config.training.num_clients = args.clients
     config.training.batch_size = args.batch_size
+    
+    # Override output settings if provided
+    if args.experiment_name:
+        config.experiment_name = args.experiment_name
+    if args.output_dir:
+        config.output_dir = args.output_dir
     
     # Setup logging
     logging.basicConfig(

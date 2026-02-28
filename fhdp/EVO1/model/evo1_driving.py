@@ -16,11 +16,11 @@ import logging
 # Import original EVO-1 components (adapted path)
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../../Evo-1/Evo_1'))
+#sys.path.append(os.path.join(os.path.dirname(__file__), '../../../Evo-1/Evo_1'))
 
 try:
-    from model.internvl3.internvl3_embedder import InternVL3Embedder
-    from model.action_head.flow_matching import FlowmatchingActionHead
+    from .internvl3.internvl3_embedder import InternVL3Embedder
+    from .action_head.flow_matching import FlowmatchingActionHead
 except ImportError:
     # Fallback implementation for standalone usage
     logging.warning("EVO-1 original components not found. Using fallback implementation.")
@@ -41,7 +41,9 @@ except ImportError:
             self.device = device
         
         def forward(self, images, prompts=None):
-            batch_size = images.shape[0]
+            # Move images to device
+            images = images.to(self.device)
+            
             # Flatten batch and camera dimensions
             B, N, C, H, W = images.shape
             images_flat = images.view(B * N, C, H, W)

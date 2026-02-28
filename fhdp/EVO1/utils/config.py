@@ -55,6 +55,7 @@ class DataConfig:
     min_speed: float = 0.0    # m/s
     max_steering: float = 0.6 # radians
     max_acceleration: float = 3.0 # m/s^2
+    max_waypoints: int = 20   # Number of future waypoints to predict
 
 
 @dataclass

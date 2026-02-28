@@ -186,7 +186,8 @@ class NuScenesDrivingLoader(Dataset):
     
     def _get_camera_image(self, sample_token: str, camera_channel: str) -> np.ndarray:
         """Get camera image for specified channel"""
-        sample_data = self.nusc.get('sample_data', self.nusc.get('sample', sample_token)[camera_channel])
+        sample = self.nusc.get('sample', sample_token)
+        sample_data = self.nusc.get('sample_data', sample['data'][camera_channel])
         
         # Load image
         image_path = os.path.join(self.nusc.dataroot, sample_data['filename'])
@@ -199,8 +200,10 @@ class NuScenesDrivingLoader(Dataset):
         """Get vehicle state from sample"""
         sample = self.nusc.get('sample', sample_token)
         
-        # Get ego pose
-        ego_pose_token = sample['ego_pose_token']
+        # Get ego pose from front camera sample data
+        front_cam_token = sample['data']['CAM_FRONT']
+        front_cam_data = self.nusc.get('sample_data', front_cam_token)
+        ego_pose_token = front_cam_data['ego_pose_token']
         ego_pose_data = self.nusc.get('ego_pose', ego_pose_token)
         
         ego_pose = np.array([

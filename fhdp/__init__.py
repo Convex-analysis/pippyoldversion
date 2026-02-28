@@ -1,27 +1,25 @@
 """
-FHDP (Federated Highway-based Distributed Pipeline) System Architecture
+EVO-1 Autonomous Driving Integration for FHDP Framework
 
-A two-level federated learning system designed for vehicular environments with:
-- Decentralized two-level decision hierarchy
-- Transient pipeline constructs  
-- Persistent edge server state
-- Resource-aware participation
-- Communication-efficient training
-
-Components:
-- Edge Server: Mobility prediction, template generation, async aggregation
-- Vehicle Layer: Neighbor discovery, pipeline formation, training execution
-- Core System: Hybrid participation, fairness mechanisms, lazy error propagation
+This module provides the complete training pipeline for EVO-1 model
+integration into the FHDP federated learning system, specifically
+adapted for autonomous driving tasks using nuScenes dataset.
 """
 
-from .edge_server.server import EdgeServer
-from .vehicle_layer.vehicle import Vehicle
-from .core.fhdp_system import FHDPSystem
-from .core.types import *
-
 __version__ = "1.0.0"
+__author__ = "FHDP-EVO1 Integration Team"
+
+from .model.evo1_driving import EVO1Driving, FederatedEVO1Driving
+from .data.nuscenes_loader import NuScenesDrivingLoader
+from .training.stage_trainer import SeparatedStageTrainer
+from .evaluation.driving_metrics import DrivingMetricsEvaluator
+from .utils.config import EVO1DrivingConfig
+
 __all__ = [
-    "EdgeServer",
-    "Vehicle", 
-    "FHDPSystem"
+    "EVO1Driving",
+    "FederatedEVO1Driving",
+    "NuScenesDrivingLoader", 
+    "SeparatedStageTrainer",
+    "DrivingMetricsEvaluator",
+    "EVO1DrivingConfig"
 ]

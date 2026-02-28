@@ -160,13 +160,16 @@ class DrivingAugmentation:
     def _augment_state(self, state: torch.Tensor) -> torch.Tensor:
         """Augment vehicle state with sensor noise"""
         if random.random() < 0.3:
+            # Create noise on the same device as the state tensor
+            device = state.device
+            
             # Add realistic sensor noise to pose and velocity
             # Pose noise (smaller)
-            pose_noise = torch.randn(6) * 0.01  # 1cm position, 0.01 rad orientation
+            pose_noise = torch.randn(6, device=device) * 0.01  # 1cm position, 0.01 rad orientation
             # Velocity noise (larger)
-            vel_noise = torch.randn(3) * 0.1   # 0.1 m/s velocity
+            vel_noise = torch.randn(3, device=device) * 0.1   # 0.1 m/s velocity
             # Acceleration noise (larger)
-            acc_noise = torch.randn(3) * 0.2   # 0.2 m/s^2 acceleration
+            acc_noise = torch.randn(3, device=device) * 0.2   # 0.2 m/s^2 acceleration
             
             noise = torch.cat([pose_noise, vel_noise, acc_noise])
             return state + noise
