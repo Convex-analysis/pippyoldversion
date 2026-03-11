@@ -271,17 +271,24 @@ class InternVL3Embedder(nn.Module):
 
             
         try:
-            input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds.reshape(-1, C)
+            # Ensure dtypes match for mixed precision training
+            target_dtype = input_embeds.dtype
+            vit_embeds_casted = vit_embeds.reshape(-1, C).to(dtype=target_dtype)
+            input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds_casted
             ignore_flag = False
         except Exception as e:
             vit_embeds = vit_embeds.reshape(-1, C)
+            # Ensure dtypes match for mixed precision training
+            target_dtype = input_embeds.dtype
+            vit_embeds = vit_embeds.to(dtype=target_dtype)
+
             # Silently handle shape mismatch - truncate or pad to match
             n_token = selected.sum()
             if vit_embeds.size(0) >= n_token:
                 input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds[:n_token]
             else:
                 # Pad with zeros if not enough embeddings
-                padding = torch.zeros(n_token - vit_embeds.size(0), C, device=vit_embeds.device, dtype=vit_embeds.dtype)
+                padding = torch.zeros(n_token - vit_embeds.size(0), C, device=vit_embeds.device, dtype=target_dtype)
                 vit_embeds_padded = torch.cat([vit_embeds, padding], dim=0)
                 input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds_padded
             ignore_flag = True

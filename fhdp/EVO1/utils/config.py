@@ -57,6 +57,11 @@ class DataConfig:
     max_acceleration: float = 3.0 # m/s^2
     max_waypoints: int = 20   # Number of future waypoints to predict
 
+    # Camera and scene options (backward compatible)
+    num_views: int = 3                # 3 (front only) or 6 (surround)
+    use_6_cameras: bool = False       # True to load all 6 NuScenes cameras
+    filter_by_keywords: bool = False  # Filter scenes by driving-related keywords
+
 
 @dataclass
 class TrainingConfig:

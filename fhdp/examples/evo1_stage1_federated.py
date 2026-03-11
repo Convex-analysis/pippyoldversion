@@ -27,11 +27,11 @@ from collections import deque
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Removed FHDP imports for standalone testing
-# from fhdp.core import FHDPSystem, SystemConfiguration
-# from fhdp.edge_server import EdgeServer
-# from fhdp.vehicle_layer import Vehicle
-# from fhdp.core.types import VehicleInfo, TrainingConfig, TrainingMode
+# FHDP Core Framework Integration
+from fhdp.core import FHDPSystem, SystemConfiguration
+from fhdp.edge_server import EdgeServer
+from fhdp.vehicle_layer import Vehicle
+from fhdp.core.types import VehicleInfo, TrainingConfig, TrainingMode
 
 # Jetson-specific optimizations
 import torch.cuda.amp as amp
@@ -277,19 +277,24 @@ class Stage1ActionExpertTrainer:
             self.optimizer, T_max=100, eta_min=1e-6
         )
     
-    def train_step(self, batch_data: List[Dict[str, Any]]) -> Dict[str, float]:
+    def train_step(self, batch_data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Dict[str, float]:
         """
         Single training step for Stage 1
         
         Args:
-            batch_data: List of training samples, each containing images, prompts, and target actions
+            batch_data: Either a single training sample (dict) or list of training samples,
+                       each containing images, prompts, and target actions
         
         Returns:
             Training metrics for this step
         """
         self.action_head.train()
         
-        # Extract data from batch (batch_data is a list of dicts)
+        # Handle both single dict and list of dicts
+        if isinstance(batch_data, dict):
+            batch_data = [batch_data]
+        
+        # Extract data from batch
         images = [sample['images'] for sample in batch_data]  # List of image lists
         prompts = [sample['prompts'][0] if isinstance(sample['prompts'], list) else sample['prompts'] for sample in batch_data]  # List of text prompts
         target_actions = [sample['actions'] for sample in batch_data]  # List of target actions
@@ -560,9 +565,43 @@ class JetsonAutonomousVehicle:
             'status': 'completed',
             'avg_loss': avg_loss,
             'training_time': training_time,
-            'num_samples': len(self.training_data),
-            'epoch_results': epoch_results
+            'vehicle_id': self.vehicle_id,
+            'num_samples': len(self.training_data)
         }
+    
+    def run_stage1_simulation(self, duration: float = 30.0, epochs: int = 3) -> Dict[str, Any]:
+        """
+        Run complete Stage 1 simulation including data collection and training
+        
+        Args:
+            duration: Duration of driving simulation in seconds
+            epochs: Number of training epochs
+            
+        Returns:
+            Simulation results including driving metrics and training outcomes
+        """
+        print(f"🚀 {self.vehicle_id}: Starting Stage 1 simulation")
+        
+        # Run driving simulation to collect data
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(simulate_jetson_driving(self, duration))
+        
+        # Train the Stage 1 model on collected data
+        training_results = self.train_stage1(epochs)
+        
+        # Combine results
+        results = {
+            'vehicle_id': self.vehicle_id,
+            'driving_metrics': self.driving_metrics.copy(),
+            'training_results': training_results,
+            'simulation_duration': duration,
+            'timestamp': time.time()
+        }
+        
+        print(f"🏁 {self.vehicle_id}: Stage 1 simulation completed")
+        print(f"📊 Driving metrics: {results['driving_metrics']}")
+        
+        return results
 
 def create_jetson_scenarios() -> List[Dict[str, Any]]:
     """Create driving scenarios optimized for Jetson testing"""
@@ -771,6 +810,44 @@ async def main():
     
     print(f"\n✅ Stage 1 simulation completed successfully!")
     print(f"   Ready for Stage 2: Full EVO-1 fine-tuning")
+
+def test_lightweight_action_head():
+    """Test lightweight action head for Stage 1 (exported for documentation)"""
+    print("\n🧠 Testing Lightweight Action Head...")
+    
+    try:
+        # Create action head
+        action_head = LightweightActionHead(
+            vision_dim=2048,
+            language_dim=768,
+            hidden_dim=256,
+            action_dim=3
+        )
+        
+        param_count = action_head.get_parameter_count()
+        print(f"✅ Action head created with {param_count:,} parameters")
+        
+        # Test forward pass
+        vision_features = torch.randn(2, 2048)
+        language_features = torch.randn(2, 768)
+        
+        with torch.no_grad():
+            actions = action_head(vision_features, language_features)
+        
+        print(f"✅ Forward pass successful: {actions.shape}")
+        print(f"   Output range: [{actions.min():.3f}, {actions.max():.3f}]")
+        
+        # Test training mode
+        action_head.train()
+        actions_train = action_head(vision_features, language_features)
+        
+        print(f"✅ Training mode works: {actions_train.requires_grad}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Action head test failed: {e}")
+        return False
 
 if __name__ == '__main__':
     asyncio.run(main())

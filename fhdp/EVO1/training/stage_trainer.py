@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import autocast, GradScaler
 from typing import Dict, List, Tuple, Optional, Any, Callable
 from dataclasses import dataclass, asdict
 import wandb
@@ -159,7 +159,7 @@ class StageClientTrainer:
             self.optimizer.zero_grad()
             
             if self.config.training.mixed_precision:
-                with autocast():
+                with autocast('cuda'):
                     output = self.model(
                         images=batch['images'],
                         image_mask=batch['image_mask'],

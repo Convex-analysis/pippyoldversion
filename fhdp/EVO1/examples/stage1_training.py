@@ -39,18 +39,20 @@ def override_for_stage1(config: EVO1DrivingConfig) -> EVO1DrivingConfig:
     """Apply Stage 1 specific settings to configuration"""
     # Stage 1 specific settings
     config.training.use_stage_training = False  # We'll handle stages manually
-    config.training.stage1_rounds = 50  # Will be overridden by CLI
+    config.training.stage1_rounds = 50  # Will be overridden by CLI if provided
     config.training.stage2_rounds = 0  # Not used in Stage 1
-    config.training.aggregation_rounds = 50  # Will be overridden by CLI
+    config.training.aggregation_rounds = 50  # Will be overridden by CLI if provided
     
     # Learning rate for action expert training
     config.training.stage1_lr = 1e-4
     
-    # Training parameters
-    config.training.num_clients = 4  # Will be overridden by CLI
-    config.training.client_fraction = 0.75  # Use more clients per round
+    # Training parameters (only set if not already configured)
+    if config.training.num_clients == 4:  # Default value, override
+        config.training.num_clients = 4  # Will be overridden by CLI if provided
+    if config.training.client_fraction == 0.3:  # Default value, override
+        config.training.client_fraction = 0.75  # Use more clients per round
     config.training.local_epochs = 3  # More local epochs for Stage 1
-    config.training.batch_size = 4  # Will be overridden by CLI
+    config.training.batch_size = 4  # Will be overridden by CLI if provided
     config.training.save_frequency = 10  # Save more frequently
     
     return config
@@ -68,10 +70,10 @@ def main():
                        help="Device to use (cuda/cpu)")
     parser.add_argument("--rounds", type=int, default=50,
                        help="Number of training rounds")
-    parser.add_argument("--clients", type=int, default=4,
-                       help="Number of federated clients")
-    parser.add_argument("--batch-size", type=int, default=4,
-                       help="Batch size per client")
+    parser.add_argument("--clients", type=int, default=None,
+                       help="Number of federated clients (uses config file if not specified)")
+    parser.add_argument("--batch-size", type=int, default=None,
+                       help="Batch size per client (uses config file if not specified)")
     parser.add_argument("--experiment_name", type=str, default=None,
                        help="Name of the experiment")
     parser.add_argument("--output_dir", type=str, default=None,
@@ -94,11 +96,13 @@ def main():
         print("Using default Stage 1 configuration")
         config = create_stage1_config()
     
-    # Override with command line arguments
+    # Override with command line arguments (only if provided)
     config.training.stage1_rounds = args.rounds
     config.training.aggregation_rounds = args.rounds
-    config.training.num_clients = args.clients
-    config.training.batch_size = args.batch_size
+    if args.clients is not None:
+        config.training.num_clients = args.clients
+    if args.batch_size is not None:
+        config.training.batch_size = args.batch_size
     
     # Override output settings if provided
     if args.experiment_name:

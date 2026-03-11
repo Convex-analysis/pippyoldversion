@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import autocast, GradScaler
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 import wandb
@@ -440,7 +440,7 @@ class EfficientStage1Trainer:
             optimizer.zero_grad()
             
             if self.config.training.mixed_precision and scaler is not None:
-                with autocast():
+                with autocast('cuda'):
                     output = self.model(
                         client_id=client_name,
                         images=batch['images'],
