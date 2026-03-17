@@ -1,0 +1,170 @@
+# EVO-1 Model Configuration
+# This configuration file defines EVO-1 specific settings for FHDP integration
+
+# System Configuration
+system:
+  max_vehicles_per_region: 20
+  pipeline_formation_interval: 3.0  # seconds
+  model_broadcast_interval: 8.0     # seconds
+  participation_timeout: 25.0        # seconds
+  aggregation_interval: 1.5         # seconds
+  enable_pipeline_training: true
+  enable_individual_training: false
+  fairness_enabled: true
+  default_protocol: "dsrc"
+
+# EVO-1 Model Configuration
+evo1:
+  model_type: "vision_language_action"
+  vlm_model: "OpenGVLab/InternVL3-1B"
+  vlm_dimension: 768
+  vision_feature_dim: 2048
+  language_feature_dim: 768
+  hidden_dim: 256
+  action_dim: 3  # steering, throttle, brake
+  enable_vlm_freezing: true
+  gradient_checkpointing: true
+  precision: "float16"
+  
+  # Training Configuration
+  training:
+    stage1_epochs: 10
+    stage2_epochs: 5
+    stage3_epochs: 3
+    learning_rate: 1e-4
+    batch_size: 4
+    optimizer: "adamw"
+    weight_decay: 0.01
+    loss_function: "mse"
+  
+  # Inference Configuration
+  inference:
+    max_tokens: 256
+    temperature: 0.1
+    top_p: 0.9
+    top_k: 50
+    timeout: 2.0
+
+# Edge Server Configuration (EVO-1 optimized)
+edge_server:
+  mobility_prediction:
+    prediction_horizon: 15.0  # seconds
+    transition_memory: 8
+    update_interval: 0.5      # seconds
+    position_tolerance: 3.0   # meters
+    
+  template_management:
+    cache_size: 1500
+    lookup_latency_threshold: 0.003  # 3ms
+    generation_interval: 45.0        # seconds
+    recomposition_time: 1.0          # seconds
+    enable_evo1_templates: true
+  
+  aggregation:
+    min_participants: 2
+    timeout: 8.0          # seconds
+    weight_decay: 0.9
+    evo1_aggregation: true
+  
+  resource_classification:
+    high_resource_cpu: 0.75
+    high_resource_memory: 0.75
+    high_resource_battery: 0.65
+    medium_resource_cpu: 0.45
+    medium_resource_memory: 0.45
+    medium_resource_battery: 0.35
+
+# Vehicle Layer Configuration (EVO-1 optimized)
+vehicle_layer:
+  communication:
+    max_neighbor_distance: 250.0  # meters
+    min_signal_strength: -80.0    # dBm
+    heartbeat_interval: 1.5        # seconds
+    missing_heartbeat_threshold: 2
+    protocols:
+      dsrc:
+        enabled: true
+        port: 20001
+        bandwidth: 27.0    # Mbps
+        latency: 0.01      # seconds
+        range: 300.0       # meters
+      cv2x:
+        enabled: true
+        port: 20002
+        bandwidth: 100.0   # Mbps
+        latency: 0.005     # seconds
+        range: 500.0       # meters
+        
+  pipeline_formation:
+    max_pipeline_length: 4
+    min_participants: 2
+    timeout: 25.0         # seconds
+    selection_bias_correction: 0.15
+    evo1_optimized: true
+  
+  training_execution:
+    epochs_range: [2, 3]           # short-horizon training for EVO-1
+    communication_bundle_size: 32768  # 32KB optimized for EVO-1
+    memory_usage_limit: 0.75        # 75% for EVO-1 memory intensive tasks
+    min_data_size: 50
+    max_data_size: 5000
+    enable_gradient_checkpointing: true
+  
+  resource_monitoring:
+    monitoring_interval: 3.0  # seconds
+    cpu_critical: 0.85
+    memory_critical: 0.85
+    battery_critical: 0.2
+    thermal_critical: 0.8
+    storage_critical: 0.15
+
+# Fairness and Error Propagation (EVO-1 optimized)
+fairness_error:
+  fairness:
+    window_size: 150
+    decay_factor: 0.92
+    min_participation_interval: 4.0
+    max_participation_rate: 0.12  # per second
+    max_priority_weight: 2.5
+    
+  error_propagation:
+    accumulation_threshold: 0.08
+    max_propagation_delay: 4.0  # seconds
+    compression_ratio: 0.6
+    compression_enabled: true
+
+# Performance Requirements (EVO-1 specific)
+performance:
+  template_lookup_latency: 0.003    # 3ms
+  pipeline_recomposition_time: 0.8   # seconds
+  max_vehicle_memory_usage: 0.75     # 75%
+  min_pipeline_participants: 2
+  max_pipeline_length: 4
+  evo1_inference_latency: 0.5       # seconds
+
+# Security and Reliability
+security:
+  max_connection_attempts: 3
+  connection_timeout: 2.5      # seconds
+  encryption_enabled: false
+  message_authentication: true
+
+# Logging and Monitoring
+logging:
+  level: "INFO"
+  monitoring_interval: 3.0      # seconds
+  metrics_collection_interval: 8.0  # seconds
+  save_metrics: true
+  metrics_file: "evo1_metrics.log"
+  enable_tensorboard: true
+  tensorboard_log_dir: "runs/evo1"
+
+# Data Configuration
+data:
+  dataset_type: "nuscenes"
+  data_path: "/data/nuscenes"
+  cache_dir: "./cache"
+  enable_data_augmentation: true
+  max_data_cache_size: 1000
+  frame_rate: 10
+  resolution: [224, 224]

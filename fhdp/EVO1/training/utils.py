@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from typing import Dict, Optional
-from EVO1.utils.config import TrainingConfig
+from utils.config import TrainingConfig
 
 
 class TrainingMetrics:

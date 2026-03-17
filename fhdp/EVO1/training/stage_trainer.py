@@ -20,11 +20,11 @@ import wandb
 from pathlib import Path
 
 # Import EVO-1 components
-from ..utils.config import EVO1DrivingConfig
-from ..model.evo1_driving import FederatedEVO1Driving
-from ..data.nuscenes_loader import create_dataloader
-from ..data.augmentation import DrivingAugmentation, create_comprehensive_augmentation
-from ..training.utils import TrainingMetrics, CheckpointManager, LearningRateScheduler
+from utils.config import EVO1DrivingConfig
+from model.evo1_driving import FederatedEVO1Driving
+from data.nuscenes_loader import create_dataloader
+from data.augmentation import DrivingAugmentation, create_comprehensive_augmentation
+from training.utils import TrainingMetrics, CheckpointManager, LearningRateScheduler
 
 
 @dataclass

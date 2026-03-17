@@ -31,7 +31,7 @@ try:
 except ImportError:
     logging.warning("NuScenes SDK not found. Install with: pip install nuscenes-devkit")
 
-from ..utils.config import DataConfig, ModelConfig
+from utils.config import DataConfig, ModelConfig
 
 
 # ---------------------------------------------------------------------------

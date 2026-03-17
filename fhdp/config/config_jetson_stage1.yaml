@@ -1,0 +1,190 @@
+# EVO-1 Stage 1 Configuration for NVIDIA Jetson Devices
+# Optimized for Jetson Orin/Nano with resource constraints
+
+# System Configuration (Jetson-optimized)
+system:
+  max_vehicles_per_region: 5
+  pipeline_formation_interval: 5.0  # seconds (reduced frequency for Jetson)
+  model_broadcast_interval: 15.0    # seconds
+  participation_timeout: 30.0        # seconds
+  aggregation_interval: 3.0         # seconds
+  enable_pipeline_training: true
+  enable_individual_training: true
+  fairness_enabled: true
+  default_protocol: "dsrc"
+
+# Jetson Device Configuration
+jetson:
+  model: "auto_detect"  # auto_detect, orin, nano, xavier
+  max_memory_mb: 4096   # 4GB default, auto-adjusts based on detected model
+  max_power_watts: 15   # Power constraint for Jetson
+  thermal_threshold: 85.0  # Temperature threshold in Celsius
+  enable_jetson_clocks: false  # Enable performance mode
+  enable_thermal_monitoring: true
+
+# EVO-1 Stage 1 Model Configuration
+evo1_stage1:
+  model_type: "lightweight_action_head"
+  vision_feature_dim: 2048
+  language_feature_dim: 768
+  hidden_dim: 128  # Reduced hidden dimension for Jetson
+  action_dim: 3  # steering, throttle, brake
+  enable_vlm_freezing: true  # Critical for Jetson - freezes VLM to save memory
+  gradient_checkpointing: true
+  precision: "float16"  # FP16 for memory efficiency
+  enable_weight_compression: true
+  
+  # Training Configuration (Jetson-optimized)
+  training:
+    epochs: 3  # Reduced epochs for faster training on Jetson
+    learning_rate: 5e-5  # Lower LR for smaller models
+    batch_size: 2  # Small batch size for memory efficiency
+    optimizer: "adamw"
+    weight_decay: 0.005
+    loss_function: "mse"
+    enable_early_stopping: true
+    patience: 2
+  
+  # Inference Configuration (low-latency)
+  inference:
+    timeout: 1.0  # seconds
+    enable_batching: false  # Disable batching for lower latency
+    prefetch_size: 1
+
+# Edge Server Configuration (Jetson-compatible)
+edge_server:
+  mobility_prediction:
+    prediction_horizon: 10.0  # seconds
+    transition_memory: 5
+    update_interval: 1.0      # seconds
+    position_tolerance: 8.0   # meters (increased tolerance for Jetson)
+    
+  template_management:
+    cache_size: 500  # Reduced cache size for Jetson
+    lookup_latency_threshold: 0.01  # 10ms (increased for Jetson)
+    generation_interval: 120.0       # seconds (reduced frequency)
+    recomposition_time: 2.0          # seconds (increased for Jetson)
+    enable_evo1_templates: true
+  
+  aggregation:
+    min_participants: 2
+    timeout: 15.0         # seconds (increased for Jetson)
+    weight_decay: 0.9
+    evo1_aggregation: true
+    enable_lazy_aggregation: true
+  
+  resource_classification:
+    high_resource_cpu: 0.7
+    high_resource_memory: 0.7
+    high_resource_battery: 0.6
+    medium_resource_cpu: 0.4
+    medium_resource_memory: 0.4
+    medium_resource_battery: 0.3
+
+# Vehicle Layer Configuration (Jetson-specific)
+vehicle_layer:
+  communication:
+    max_neighbor_distance: 200.0  # meters (reduced for Jetson)
+    min_signal_strength: -90.0    # dBm (increased sensitivity)
+    heartbeat_interval: 3.0        # seconds
+    missing_heartbeat_threshold: 4
+    protocols:
+      dsrc:
+        enabled: true
+        port: 20001
+        bandwidth: 27.0    # Mbps
+        latency: 0.01      # seconds
+        range: 300.0       # meters
+      cv2x:
+        enabled: false     # Disabled by default for Jetson (power saving)
+        port: 20002
+        bandwidth: 100.0   # Mbps
+        latency: 0.005     # seconds
+        range: 500.0       # meters
+        
+  pipeline_formation:
+    max_pipeline_length: 3  # Short pipeline for Jetson
+    min_participants: 2
+    timeout: 45.0         # seconds (increased for Jetson)
+    selection_bias_correction: 0.1
+    evo1_optimized: true
+    jetson_optimized: true
+  
+  training_execution:
+    epochs_range: [1, 2]           # Very short training for Jetson
+    communication_bundle_size: 16384  # 16KB (reduced for Jetson)
+    memory_usage_limit: 0.7        # 70% (conservative for Jetson)
+    min_data_size: 20              # Reduced minimum data size
+    max_data_size: 2000            # Reduced maximum data size
+    enable_gradient_checkpointing: true
+    enable_memory_optimization: true
+  
+  resource_monitoring:
+    monitoring_interval: 2.0  # seconds (frequent monitoring for Jetson)
+    cpu_critical: 0.9
+    memory_critical: 0.85
+    battery_critical: 0.25
+    thermal_critical: 0.85
+    storage_critical: 0.2
+
+# Fairness and Error Propagation (Jetson-adjusted)
+fairness_error:
+  fairness:
+    window_size: 50  # Reduced window size for Jetson
+    decay_factor: 0.9
+    min_participation_interval: 8.0  # Increased interval for Jetson
+    max_participation_rate: 0.05  # per second (reduced for Jetson)
+    max_priority_weight: 2.0
+    
+  error_propagation:
+    accumulation_threshold: 0.15  # Increased threshold for Jetson
+    max_propagation_delay: 8.0  # seconds (increased for Jetson)
+    compression_ratio: 0.8      # Higher compression for Jetson
+    compression_enabled: true
+
+# Performance Requirements (Jetson-specific)
+performance:
+  template_lookup_latency: 0.01    # 10ms (relaxed for Jetson)
+  pipeline_recomposition_time: 3.0   # seconds (relaxed for Jetson)
+  max_vehicle_memory_usage: 0.7     # 70% (conservative for Jetson)
+  min_pipeline_participants: 2
+  max_pipeline_length: 3
+  evo1_inference_latency: 1.0       # seconds (relaxed for Jetson)
+
+# Security and Reliability (Jetson-adjusted)
+security:
+  max_connection_attempts: 3
+  connection_timeout: 4.0      # seconds (increased for Jetson)
+  encryption_enabled: false    # Disabled by default for Jetson (saves CPU)
+  message_authentication: false
+
+# Logging and Monitoring (Jetson-specific)
+logging:
+  level: "INFO"
+  monitoring_interval: 2.0      # seconds (frequent monitoring for Jetson)
+  metrics_collection_interval: 15.0  # seconds (reduced frequency)
+  save_metrics: true
+  metrics_file: "jetson_stage1_metrics.log"
+  enable_tensorboard: false    # Disabled by default for Jetson (saves memory)
+  enable_jetson_stats: true    # Enable Jetson-specific stats (temperature, power)
+
+# Data Configuration (Jetson-optimized)
+data:
+  dataset_type: "nuscenes_lite"  # Lite version for Jetson
+  data_path: "/data/nuscenes"  # Default data path
+  cache_dir: "./cache/jetson"  # Jetson-specific cache directory
+  enable_data_augmentation: false  # Disabled by default for Jetson (saves CPU)
+  max_data_cache_size: 500     # Reduced cache size for Jetson
+  frame_rate: 5                # Reduced frame rate for Jetson
+  resolution: [112, 112]       # Reduced resolution for faster processing
+  enable_lazy_loading: true    # Critical for Jetson - loads data on demand
+  enable_data_compression: true
+
+# Memory Optimization (Critical for Jetson)
+memory_optimization:
+  enable_memory_cleanup: true  # Regular memory cleanup
+  cleanup_interval: 10.0       # seconds
+  enable_gc_collect: true      # Run garbage collector
+  enable_cuda_cache_clear: true  # Clear CUDA cache regularly
+  enable_model_quantization: true  # Quantize model for inference
+  quantization_type: "dynamic"  # Dynamic quantization for balance of speed and accuracy

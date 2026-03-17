@@ -13,11 +13,14 @@ import logging
 import argparse
 from pathlib import Path
 
-# Add FHDP to path
-sys.path.append(str(Path(__file__).parent.parent.parent))
+# Add FHDP and EVO1 to path with EVO1 taking precedence
+evo1_root = str(Path(__file__).parent.parent)
+fhdp_root = str(Path(__file__).parent.parent.parent)
+sys.path.insert(0, evo1_root)
+sys.path.append(fhdp_root)
 
-from EVO1.utils.config import EVO1DrivingConfig
-from EVO1.training.stage_trainer import SeparatedStageTrainer
+from utils.config import EVO1DrivingConfig
+from training.stage_trainer import SeparatedStageTrainer
 
 
 def create_stage1_config():

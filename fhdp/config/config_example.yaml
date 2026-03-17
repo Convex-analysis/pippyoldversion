@@ -1,0 +1,211 @@
+# FHDP + EVO-1 Example Configuration
+# This file provides a template for configuring the FHDP system with EVO-1 integration
+# Copy this file to config_custom.yaml and modify it according to your needs
+
+# System Configuration
+system:
+  max_vehicles_per_region: 20        # Maximum number of vehicles in each region
+  pipeline_formation_interval: 5.0    # How often to form new pipelines (seconds)
+  model_broadcast_interval: 10.0      # How often to broadcast model updates (seconds)
+  participation_timeout: 30.0         # Timeout for vehicle participation (seconds)
+  aggregation_interval: 2.0           # Interval for model aggregation (seconds)
+  enable_pipeline_training: true      # Enable/disable pipeline training
+  enable_individual_training: false   # Enable/disable individual vehicle training
+  fairness_enabled: true              # Enable/disable fairness mechanisms
+  default_protocol: "dsrc"            # Default communication protocol (dsrc, cv2x, wifi_direct)
+
+# EVO-1 Model Configuration
+evo1:
+  model_type: "vision_language_action"  # Type of EVO-1 model to use
+  vlm_model: "OpenGVLab/InternVL3-1B"   # Vision-Language Model name from HuggingFace
+  vision_feature_dim: 2048             # Dimension of vision features
+  language_feature_dim: 768            # Dimension of language features
+  hidden_dim: 256                      # Hidden dimension for action head
+  action_dim: 3                        # Number of action outputs (steering, throttle, brake)
+  enable_vlm_freezing: true            # Freeze VLM during training (recommended for Stage 1)
+  gradient_checkpointing: true         # Enable gradient checkpointing to save memory
+  precision: "float16"                 # Floating point precision (float32, float16)
+  
+  # Training Configuration
+  training:
+    stage1_epochs: 10                  # Number of epochs for Stage 1 training
+    stage2_epochs: 5                   # Number of epochs for Stage 2 training
+    stage3_epochs: 3                   # Number of epochs for Stage 3 training
+    learning_rate: 1e-4                # Learning rate for training
+    batch_size: 4                      # Batch size for training
+    optimizer: "adamw"                 # Optimizer to use (adam, adamw, sgd)
+    weight_decay: 0.01                 # Weight decay for regularization
+    loss_function: "mse"               # Loss function (mse, mae, huber)
+  
+  # Inference Configuration
+  inference:
+    max_tokens: 256                    # Maximum number of tokens for VLM inference
+    temperature: 0.1                   # Temperature for generation
+    top_p: 0.9                         # Top-p sampling parameter
+    top_k: 50                          # Top-k sampling parameter
+    timeout: 2.0                       # Timeout for inference (seconds)
+
+# Edge Server Configuration
+edge_server:
+  mobility_prediction:
+    prediction_horizon: 10.0           # How far to predict vehicle movement (seconds)
+    transition_memory: 5               # Number of past states to remember
+    update_interval: 1.0               # How often to update predictions (seconds)
+    position_tolerance: 5.0            # Position prediction tolerance (meters)
+    
+  template_management:
+    cache_size: 1000                  # Number of templates to keep in cache
+    lookup_latency_threshold: 0.005    # Maximum acceptable lookup latency (seconds)
+    generation_interval: 60.0          # How often to generate new templates (seconds)
+    recomposition_time: 1.5            # Time to recompute templates (seconds)
+    enable_evo1_templates: true        # Enable EVO-1 specific templates
+  
+  aggregation:
+    min_participants: 3                # Minimum number of participants for aggregation
+    timeout: 10.0                      # Timeout for aggregation (seconds)
+    weight_decay: 0.95                 # Weight decay for aggregation
+    evo1_aggregation: true             # Enable EVO-1 specific aggregation
+  
+  resource_classification:
+    high_resource_cpu: 0.8             # CPU threshold for high resource vehicles
+    high_resource_memory: 0.8          # Memory threshold for high resource vehicles
+    high_resource_battery: 0.7         # Battery threshold for high resource vehicles
+    medium_resource_cpu: 0.5           # CPU threshold for medium resource vehicles
+    medium_resource_memory: 0.5        # Memory threshold for medium resource vehicles
+    medium_resource_battery: 0.4       # Battery threshold for medium resource vehicles
+
+# Vehicle Layer Configuration
+vehicle_layer:
+  communication:
+    max_neighbor_distance: 300.0       # Maximum distance for neighbor discovery (meters)
+    min_signal_strength: -85.0         # Minimum signal strength for communication (dBm)
+    heartbeat_interval: 2.0            # Interval for sending heartbeat messages (seconds)
+    missing_heartbeat_threshold: 3     # Number of missing heartbeats before considering a vehicle offline
+    
+    # Communication Protocols (enable only what you need)
+    protocols:
+      dsrc:
+        enabled: true                  # Enable DSRC protocol
+        port: 20001                    # Port for DSRC communication
+        bandwidth: 27.0                # Bandwidth (Mbps)
+        latency: 0.01                  # Latency (seconds)
+        range: 300.0                   # Range (meters)
+      
+      cv2x:
+        enabled: false                 # Enable C-V2X protocol
+        port: 20002                    # Port for C-V2X communication
+        bandwidth: 100.0               # Bandwidth (Mbps)
+        latency: 0.005                 # Latency (seconds)
+        range: 500.0                   # Range (meters)
+      
+      wifi_direct:
+        enabled: false                 # Enable WiFi Direct protocol
+        port: 20003                    # Port for WiFi Direct communication
+        bandwidth: 250.0               # Bandwidth (Mbps)
+        latency: 0.002                 # Latency (seconds)
+        range: 200.0                   # Range (meters)
+  
+  pipeline_formation:
+    max_pipeline_length: 5             # Maximum number of vehicles in a pipeline
+    min_participants: 2                # Minimum number of vehicles to form a pipeline
+    timeout: 30.0                      # Timeout for pipeline formation (seconds)
+    selection_bias_correction: 0.1     # Bias correction factor for pipeline selection
+    evo1_optimized: true               # Enable EVO-1 specific pipeline optimization
+  
+  training_execution:
+    epochs_range: [1, 3]               # Range of epochs for training
+    communication_bundle_size: 65536    # Size of communication bundles (bytes)
+    memory_usage_limit: 0.8            # Maximum memory usage (percentage)
+    min_data_size: 100                 # Minimum data size for training
+    max_data_size: 10000               # Maximum data size for training
+    enable_gradient_checkpointing: true # Enable gradient checkpointing
+  
+  resource_monitoring:
+    monitoring_interval: 5.0           # How often to monitor resources (seconds)
+    cpu_critical: 0.9                  # Critical CPU usage threshold (percentage)
+    memory_critical: 0.9               # Critical memory usage threshold (percentage)
+    battery_critical: 0.15             # Critical battery level (percentage)
+    thermal_critical: 0.85             # Critical temperature (percentage of max)
+    storage_critical: 0.1              # Critical storage remaining (percentage)
+
+# Fairness and Error Propagation
+fairness_error:
+  fairness:
+    window_size: 100                   # Window size for fairness calculations
+    decay_factor: 0.9                  # Decay factor for historical fairness
+    min_participation_interval: 5.0    # Minimum interval between participation (seconds)
+    max_participation_rate: 0.1        # Maximum participation rate (per second)
+    max_priority_weight: 3.0           # Maximum weight for priority-based fairness
+    
+  error_propagation:
+    accumulation_threshold: 0.1        # Threshold for error accumulation
+    max_propagation_delay: 5.0         # Maximum delay for error propagation (seconds)
+    compression_ratio: 0.7             # Compression ratio for error messages
+    compression_enabled: true          # Enable/disable error message compression
+
+# Performance Requirements
+performance:
+  template_lookup_latency: 0.005       # Maximum acceptable template lookup latency (seconds)
+  pipeline_recomposition_time: 1.5     # Maximum acceptable pipeline recomposition time (seconds)
+  max_vehicle_memory_usage: 0.8        # Maximum vehicle memory usage (percentage)
+  min_pipeline_participants: 2         # Minimum number of participants in a pipeline
+  max_pipeline_length: 5               # Maximum length of a pipeline
+
+# Security and Reliability
+security:
+  max_connection_attempts: 3           # Maximum number of connection attempts
+  connection_timeout: 3.0              # Timeout for connections (seconds)
+  encryption_enabled: false            # Enable/disable encryption
+  message_authentication: false        # Enable/disable message authentication
+
+# Logging and Monitoring
+logging:
+  level: "INFO"                        # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  monitoring_interval: 5.0             # How often to monitor system metrics (seconds)
+  metrics_collection_interval: 10.0     # How often to collect metrics (seconds)
+  save_metrics: true                   # Enable/disable metric saving
+  metrics_file: "fhdp_metrics.log"      # File to save metrics to
+  enable_tensorboard: true             # Enable/disable TensorBoard logging
+  tensorboard_log_dir: "runs/fhdp"      # Directory for TensorBoard logs
+
+# Data Configuration
+data:
+  dataset_type: "nuscenes"             # Type of dataset to use
+  data_path: "/path/to/your/dataset"   # Path to your dataset
+  cache_dir: "./cache"                 # Directory for caching data
+  enable_data_augmentation: true       # Enable/disable data augmentation
+  max_data_cache_size: 1000            # Maximum size of data cache
+  frame_rate: 10                       # Frame rate for data collection
+  resolution: [224, 224]               # Resolution for input images
+
+# Device-Specific Configuration (Uncomment and modify for your device)
+# 
+# # Jetson Device Configuration
+# jetson:
+#   model: "orin"                      # Jetson model (orin, nano, xavier, auto_detect)
+#   max_memory_mb: 6144                # Maximum memory to use (MB)
+#   max_power_watts: 15                # Power constraint (Watts)
+#   thermal_threshold: 85.0            # Temperature threshold (Celsius)
+#   enable_jetson_clocks: true         # Enable performance mode
+#
+# # GPU Configuration
+# gpu:
+#   enable_mixed_precision: true       # Enable mixed precision training
+#   max_batch_size: 8                  # Maximum batch size for GPU
+#   enable_amp: true                   # Enable Automatic Mixed Precision
+
+# Memory Optimization (Advanced)
+memory_optimization:
+  enable_memory_cleanup: true          # Enable regular memory cleanup
+  cleanup_interval: 10.0               # How often to clean up memory (seconds)
+  enable_gc_collect: true              # Enable garbage collection
+  enable_cuda_cache_clear: true        # Clear CUDA cache regularly
+
+# Usage Instructions:
+# 1. Copy this file to config_custom.yaml
+# 2. Modify the parameters according to your environment and requirements
+# 3. Run the system with: python -m fhdp --config config/config_custom.yaml
+#
+# For Jetson devices, use the config_jetson_stage1.yaml file as reference
+# For EVO-1 Stage 1 training, enable vlm_freezing and use lower batch sizes
+# For high-performance environments, increase batch sizes and hidden dimensions
