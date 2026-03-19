@@ -97,14 +97,9 @@ echo "📦 Installing Jetson-optimized dependencies..."
 # Option 1: Use the Python installation script (recommended)
 echo "   Using staged installation script..."
 python3 install_evo1_deps.py
-STAGED_INSTALL_RESULT=$?
-
-# Install FHDP System from source
-echo "   Installing FHDP (Federated Highway-based Distributed Pipeline)..."
-pip install -e .[communication] || echo "   ⚠️  FHDP installation failed"
 
 # Option 2: Manual installation (fallback)
-if [ $STAGED_INSTALL_RESULT -ne 0 ]; then
+if [ $? -ne 0 ]; then
     echo "   ⚠️  Staged installation failed, trying manual install..."
     
     # Install PyTorch for Jetson
@@ -136,27 +131,12 @@ if [ $STAGED_INSTALL_RESULT -ne 0 ]; then
     
     # Install Stage 1 requirements (without flash-attn)
     echo "   Installing Stage 1 requirements..."
-    if [ -f requirements_jetson_stage1.txt ]; then
-        pip install -r requirements_jetson_stage1.txt
-    elif [ -f requirements/requirements_jetson_stage1.txt ]; then
-        pip install -r requirements/requirements_jetson_stage1.txt
-    else
-        echo "   ⚠️  requirements_jetson_stage1.txt not found, checking other requirement files..."
-        if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-        elif [ -f requirements/requirements.txt ]; then
-            pip install -r requirements/requirements.txt
-        fi
-    fi
+    pip install -r requirements_jetson_stage1.txt
     
     # Try flash-attn separately (optional)
     echo "   Attempting flash-attn installation (optional)..."
     export MAX_JOBS=2
     pip install flash-attn --no-build-isolation || echo "   ⚠️  flash-attn failed (optional)"
-    
-    # Install FHDP System from source
-    echo "   Installing FHDP (Federated Highway-based Distributed Pipeline)..."
-    pip install -e .[communication] || echo "   ⚠️  FHDP installation failed"
     
     # Optional: Install JetPack-specific packages
     if [ -f /etc/nv_tegra_release ]; then

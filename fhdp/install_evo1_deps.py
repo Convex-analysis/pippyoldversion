@@ -208,8 +208,25 @@ def main():
         print(f"You can now run:")
         print(f"   python examples/autonomous_driving_simulation.py")
         print(f"   python examples/evo1_stage1_federated.py")
-        
-    else:
+    
+    # Install FHDP System from source
+    print("\n📦 Installing FHDP (Federated Highway-based Distributed Pipeline)...")
+    try:
+        import sys
+        import subprocess
+        # Install FHDP in editable mode with communication extras
+        result = subprocess.run([
+            sys.executable, "-m", "pip", "install", "-e", ".[communication]"
+        ], check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            print("   ✅ FHDP installed successfully")
+        else:
+            print(f"   ⚠️  FHDP installation failed: {result.stderr}")
+            print("   💡 You can try installing it manually with: pip install -e .[communication]")
+    except Exception as e:
+        print(f"   ⚠️  FHDP installation error: {e}")
+
+    if success_count != total_stages:
         print(f"⚠️  {total_stages - success_count} stage(s) failed")
         print(f"Please check the errors above and try again")
         
