@@ -170,48 +170,68 @@ def main():
     """Main installation function"""
     print("🚀 EVO-1 Dependencies Installation")
     print("=" * 50)
-    
+
     # Check Python version
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     print(f"🐍 Python version: {python_version}")
-    
-    if sys.version_info < (3, 8) or sys.version_info > (3, 10):
-        print("⚠️  Warning: Python 3.8-3.10 recommended")
-    
-    # Installation stages
-    stages = [
-        ("Stage 1: Core Dependencies", "requirements_evo1_stages.txt", install_pytorch),
-        ("Stage 2: ML and Advanced Features", "requirements_evo1_stage2.txt", None),
-        ("Stage 3: Optional and Specialized", "requirements_evo1_stage3.txt", None),
-    ]
-    
+
+    if sys.version_info < (3, 8) or sys.version_info > (3, 11):
+        print("⚠️  Warning: Python 3.8-3.11 recommended")
+
+    # Detect if running on Jetson
+    is_jetson = os.path.exists('/etc/nv_tegra_release')
+    if is_jetson:
+        print("📱 Jetson device detected")
+    else:
+        print("💻 Standard system detected")
+
+    # Determine which requirements files to use
+    if is_jetson:
+        # For Jetson, use jetson-optimized requirements
+        stages = [
+            ("Stage 1: Core Dependencies", "requirements/jetson.txt", install_pytorch),
+            ("Stage 2: EVO-1 Model", "requirements/evo1.txt", None),
+            ("Stage 3: Communication", "requirements/ml.txt", None),
+        ]
+    else:
+        # For standard systems, use modular requirements
+        stages = [
+            ("Stage 1: Base Dependencies", "requirements/base.txt", install_pytorch),
+            ("Stage 2: ML Features", "requirements/ml.txt", None),
+            ("Stage 3: EVO-1 Model", "requirements/evo1.txt", None),
+        ]
+
     success_count = 0
     total_stages = len(stages)
-    
+
     for stage_name, req_file, special_install in stages:
         print(f"\n{'='*20} {stage_name} {'='*20}")
-        
+
         stage_success = True
-        
+
         # Special installation for some stages
         if special_install:
             stage_success = special_install()
-        
+
         # Install from requirements file
         if stage_success:
             stage_success = install_requirements_file(req_file, stage_name)
-        
+
         # Flash-attn special handling (install after PyTorch)
-        if stage_name == "Stage 1: Core Dependencies" and stage_success:
-            flash_success = install_flash_attention()
-            # Don't fail the entire stage if flash-attn fails
-        
+        if stage_name.startswith("Stage 1") and stage_success:
+            # Only try flash-attn on non-Jetson systems
+            if not is_jetson:
+                flash_success = install_flash_attention()
+                # Don't fail the entire stage if flash-attn fails
+            else:
+                print("   ⏭️  Skipping flash-attn on Jetson (uses optimized attention)")
+
         if stage_success:
             success_count += 1
             print(f"✅ {stage_name} completed")
         else:
             print(f"❌ {stage_name} failed")
-    
+
     # Summary
     print(f"\n{'='*50}")
     print("📊 Installation Summary")

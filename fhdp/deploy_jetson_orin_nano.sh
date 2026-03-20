@@ -95,12 +95,15 @@ fi
 
 # Install Stage 1 requirements
 echo "   Installing Stage 1 requirements..."
-if [ -f requirements_jetson_stage1.txt ]; then
+if [ -f requirements/jetson.txt ]; then
+    echo "   Using optimized Jetson requirements..."
+    pip3 install -r requirements/jetson.txt || echo "   ⚠️  Some dependencies failed"
+elif [ -f requirements_jetson_stage1.txt ]; then
     pip3 install -r requirements_jetson_stage1.txt || echo "   ⚠️  Some dependencies failed"
 elif [ -f requirements.txt ]; then
     pip3 install -r requirements.txt || echo "   ⚠️  Some dependencies failed"
 else
-    echo "   ⚠️  requirements_jetson_stage1.txt not found, installing minimal dependencies..."
+    echo "   ⚠️  No requirements file found, installing minimal dependencies..."
     pip3 install numpy pandas psutil websockets aiohttp pyyaml python-dotenv tqdm
 fi
 

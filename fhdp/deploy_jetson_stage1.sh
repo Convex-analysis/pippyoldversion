@@ -164,18 +164,22 @@ if [ $STAGED_INSTALL_RESULT -ne 0 ]; then
         echo "   ❌ Could not determine PyTorch URL"
     fi
     
-    # Install Stage 1 requirements (without flash-attn)
+    # Install Stage 1 requirements (using modular requirements system)
     echo "   Installing Stage 1 requirements..."
-    if [ -f requirements_jetson_stage1.txt ]; then
+    if [ -f requirements/jetson.txt ]; then
+        echo "   Using optimized Jetson requirements from requirements/jetson.txt..."
+        pip install -r requirements/jetson.txt
+    elif [ -f requirements_jetson_stage1.txt ]; then
         pip install -r requirements_jetson_stage1.txt
-    elif [ -f requirements/requirements_jetson_stage1.txt ]; then
-        pip install -r requirements/requirements_jetson_stage1.txt
+    elif [ -f requirements.txt ]; then
+        echo "   Using standard requirements..."
+        pip install -r requirements.txt
     else
-        echo "   ⚠️  requirements_jetson_stage1.txt not found, checking other requirement files..."
-        if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-        elif [ -f requirements/requirements.txt ]; then
-            pip install -r requirements/requirements.txt
+        echo "   ⚠️  No requirements file found, checking modular system..."
+        if [ -f requirements/base.txt ]; then
+            pip install -r requirements/base.txt
+        else
+            echo "   ⚠️  Cannot find requirements files"
         fi
     fi
     

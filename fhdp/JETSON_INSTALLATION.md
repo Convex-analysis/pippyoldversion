@@ -52,8 +52,11 @@ pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://dev
 # Install packaging module first
 pip3 install packaging
 
-# Install Stage 1 requirements
-pip3 install -r requirements_jetson_stage1.txt
+# Install Jetson-optimized requirements (recommended)
+pip3 install -r requirements/jetson.txt
+
+# Or install EVO-1 specific requirements
+pip3 install -r requirements/evo1.txt
 
 # Install flash-attn (optional, may take 10-30 minutes)
 export MAX_JOBS=2
