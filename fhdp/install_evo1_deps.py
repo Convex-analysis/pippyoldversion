@@ -34,7 +34,7 @@ def check_package_installed(package_name: str) -> bool:
 def install_pytorch():
     """Install PyTorch with CUDA detection"""
     print("🔥 Installing PyTorch...")
-    
+
     # Check CUDA availability
     try:
         import torch
@@ -42,30 +42,73 @@ def install_pytorch():
         return True
     except ImportError:
         pass
-    
-    # Detect CUDA version if available
-    cuda_available = False
-    try:
-        import pynvml
-        pynvml.nvmlInit()
-        cuda_available = True
-        print("   🚀 CUDA detected, installing CUDA version")
-    except:
-        print("   💻 CUDA not detected, installing CPU version")
-    
-    if cuda_available:
+
+    # Check if running on Jetson device
+    is_jetson = False
+    if os.path.exists('/etc/nv_tegra_release'):
+        is_jetson = True
+        print("   📱 Jetson device detected")
+
+        # Get JetPack version
+        jetpack_version = ""
+        try:
+            with open('/etc/nv_tegra_release', 'r') as f:
+                content = f.read()
+                import re
+                match = re.search(r'R(\d+)\.(\d+)', content)
+                if match:
+                    jetpack_version = f"R{match.group(1)}.{match.group(2)}"
+        except:
+            pass
+
+        print(f"   JetPack version: {jetpack_version or 'unknown'}")
+
+        # Determine PyTorch URL based on JetPack version
+        pytorch_url = ""
+        if jetpack_version.startswith('R36'):
+            # JetPack 6.0
+            pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch"
+        elif jetpack_version.startswith('R35'):
+            # JetPack 5.x
+            pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v505/pytorch"
+        elif jetpack_version.startswith('R34'):
+            # JetPack 4.x
+            pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v461/pytorch"
+        else:
+            # Default to JetPack 6.0
+            pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch"
+
+        print(f"   Installing from: {pytorch_url}")
+
         cmd = [
-            sys.executable, "-m", "pip", "install", 
-            "torch", "torchvision", "torchaudio", 
-            "--index-url", "https://download.pytorch.org/whl/cu118"
+            sys.executable, "-m", "pip", "install", "--upgrade", "pip",
+            "torch", "torchvision", "torchaudio",
+            "--index-url", pytorch_url
         ]
     else:
-        cmd = [
-            sys.executable, "-m", "pip", "install", 
-            "torch", "torchvision", "torchaudio", 
-            "--index-url", "https://download.pytorch.org/whl/cpu"
-        ]
-    
+        # Regular CUDA detection
+        cuda_available = False
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            cuda_available = True
+            print("   🚀 CUDA detected, installing CUDA version")
+        except:
+            print("   💻 CUDA not detected, installing CPU version")
+
+        if cuda_available:
+            cmd = [
+                sys.executable, "-m", "pip", "install",
+                "torch", "torchvision", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cu118"
+            ]
+        else:
+            cmd = [
+                sys.executable, "-m", "pip", "install",
+                "torch", "torchvision", "torchaudio",
+                "--index-url", "https://download.pytorch.org/whl/cpu"
+            ]
+
     return run_command(cmd, "PyTorch installation")
 
 def install_flash_attention():
@@ -212,8 +255,6 @@ def main():
     # Install FHDP System from source
     print("\n📦 Installing FHDP (Federated Highway-based Distributed Pipeline)...")
     try:
-        import sys
-        import subprocess
         # Install FHDP in editable mode with communication extras
         result = subprocess.run([
             sys.executable, "-m", "pip", "install", "-e", ".[communication]"

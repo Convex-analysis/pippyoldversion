@@ -15,42 +15,44 @@ fi
 echo "📱 Detected Jetson: $JETSON_MODEL"
 
 # Set configuration based on Jetson model
-if [[ "$JETSON_MODEL" == *"AGX Orin"* ]]; then
-    # Jetson AGX Orin (32GB/64GB)
-    MAX_MEMORY_MB=16384  # 16GB for optimal performance
-    MAX_BATCH_SIZE=8
-    NANO_SCALE=0
-    echo "🔥 Jetson AGX Orin detected: High performance mode"
-elif [[ "$JETSON_MODEL" == *"Orin Nano 8GB"* ]]; then
-    # Jetson Orin Nano 8GB
-    MAX_MEMORY_MB=6144   # 6GB for optimal performance
-    MAX_BATCH_SIZE=4
-    NANO_SCALE=0
-    echo "📱 Jetson Orin Nano 8GB detected: Balanced performance mode"
-elif [[ "$JETSON_MODEL" == *"Orin Nano"* ]]; then
-    # Jetson Orin Nano 4GB
-    MAX_MEMORY_MB=3072   # 3GB for optimal performance
-    MAX_BATCH_SIZE=2
-    NANO_SCALE=1
-    echo "📱 Jetson Orin Nano 4GB detected: Power-optimized mode"
-elif [[ "$JETSON_MODEL" == *"Orin NX"* ]]; then
-    # Jetson Orin NX (8GB/16GB)
-    MAX_MEMORY_MB=8192   # 8GB for optimal performance
-    MAX_BATCH_SIZE=6
-    NANO_SCALE=0
-    echo "⚡ Jetson Orin NX detected: High performance mode"
-elif [[ "$JETSON_MODEL" == *"Nano"* ]]; then
-    # Original Jetson Nano
-    MAX_MEMORY_MB=3072
-    MAX_BATCH_SIZE=2
-    NANO_SCALE=1
-    echo "📱 Original Jetson Nano detected: Power-optimized mode"
-else
-    MAX_MEMORY_MB=4096
-    MAX_BATCH_SIZE=3
-    NANO_SCALE=0
-    echo "⚡ Generic Jetson device detected"
-fi
+case "$JETSON_MODEL" in
+    *AGX\ Orin*)
+        MAX_MEMORY_MB=16384
+        MAX_BATCH_SIZE=8
+        NANO_SCALE=0
+        echo "🔥 Jetson AGX Orin detected: High performance mode"
+        ;;
+    *Orin\ Nano\ 8GB*)
+        MAX_MEMORY_MB=6144
+        MAX_BATCH_SIZE=4
+        NANO_SCALE=0
+        echo "📱 Jetson Orin Nano 8GB detected: Balanced performance mode"
+        ;;
+    *Orin\ Nano*)
+        MAX_MEMORY_MB=3072
+        MAX_BATCH_SIZE=2
+        NANO_SCALE=1
+        echo "📱 Jetson Orin Nano 4GB detected: Power-optimized mode"
+        ;;
+    *Orin\ NX*)
+        MAX_MEMORY_MB=8192
+        MAX_BATCH_SIZE=6
+        NANO_SCALE=0
+        echo "⚡ Jetson Orin NX detected: High performance mode"
+        ;;
+    *Nano*)
+        MAX_MEMORY_MB=3072
+        MAX_BATCH_SIZE=2
+        NANO_SCALE=1
+        echo "📱 Original Jetson Nano detected: Power-optimized mode"
+        ;;
+    *)
+        MAX_MEMORY_MB=4096
+        MAX_BATCH_SIZE=3
+        NANO_SCALE=0
+        echo "⚡ Generic Jetson device detected"
+        ;;
+esac
 
 # Environment setup
 echo ""
@@ -60,9 +62,13 @@ echo "🔧 Setting up environment..."
 PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
 echo "   Python version: $PYTHON_VERSION"
 
-if [[ "$PYTHON_VERSION" != "3.8" && "$PYTHON_VERSION" != "3.9" && "$PYTHON_VERSION" != "3.10" && "$PYTHON_VERSION" != "3.11" ]]; then
-    echo "⚠️  Warning: Python 3.8-3.11 recommended, found $PYTHON_VERSION"
-fi
+case "$PYTHON_VERSION" in
+    3.8|3.9|3.10|3.11)
+        ;;
+    *)
+        echo "⚠️  Warning: Python 3.8-3.11 recommended, found $PYTHON_VERSION"
+        ;;
+esac
 
 # Jetson-specific optimizations
 echo ""
@@ -117,21 +123,45 @@ if [ $STAGED_INSTALL_RESULT -ne 0 ]; then
     fi
     
     echo "   Detected JetPack version: ${JETPACK_VERSION:-unknown}"
-    
+
     # Install Jetson-specific PyTorch from NVIDIA's official sources
-    if [[ "$JETPACK_VERSION" == "R36" ]]; then
-        # JetPack 6.0 series
-        pip3 install --no-cache-dir --verbose torch torchvision torchaudio --index-url https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch/
-    elif [[ "$JETPACK_VERSION" == "R35" ]]; then
-        # JetPack 5.x series
-        pip3 install --no-cache-dir --verbose torch torchvision torchaudio --index-url https://developer.download.nvidia.com/compute/redist/jp/v35/pytorch/
-    elif [[ "$JETPACK_VERSION" == "R34" ]]; then
-        # JetPack 4.x series
-        pip3 install --no-cache-dir --verbose torch torchvision torchaudio --index-url https://developer.download.nvidia.com/compute/redist/jp/v34/pytorch/
+    PYTORCH_URL=""
+
+    case "$JETPACK_VERSION" in
+        R36*)
+            # JetPack 6.0 series (Orin)
+            PYTORCH_URL="https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch"
+            echo "   Using JetPack 6.0 PyTorch"
+            ;;
+        R35*)
+            # JetPack 5.x series (Orin/AGX)
+            PYTORCH_URL="https://developer.download.nvidia.com/compute/redist/jp/v505/pytorch"
+            echo "   Using JetPack 5.x PyTorch"
+            ;;
+        R35.3*|R35.4*)
+            # JetPack 5.3/5.4
+            PYTORCH_URL="https://developer.download.nvidia.com/compute/redist/jp/v504/pytorch"
+            echo "   Using JetPack 5.3/5.4 PyTorch"
+            ;;
+        R34*)
+            # JetPack 4.x series
+            PYTORCH_URL="https://developer.download.nvidia.com/compute/redist/jp/v461/pytorch"
+            echo "   Using JetPack 4.x PyTorch"
+            ;;
+        *)
+            # Default to JetPack 6.0
+            echo "   ⚠️  Unknown JetPack version: ${JETPACK_VERSION:-unknown}"
+            echo "   Defaulting to JetPack 6.0 PyTorch"
+            PYTORCH_URL="https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch"
+            ;;
+    esac
+
+    if [ -n "$PYTORCH_URL" ]; then
+        echo "   Installing from: $PYTORCH_URL"
+        pip3 install --no-cache-dir --upgrade pip
+        pip3 install --no-cache-dir --verbose torch torchvision torchaudio --index-url "$PYTORCH_URL"
     else
-        # Default to latest JetPack 6.0 compatible version
-        echo "   ⚠️  Unknown JetPack version, using latest compatible PyTorch"
-        pip3 install --no-cache-dir --verbose torch torchvision torchaudio --index-url https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch/
+        echo "   ❌ Could not determine PyTorch URL"
     fi
     
     # Install Stage 1 requirements (without flash-attn)
@@ -587,3 +617,8 @@ echo "- Power Mode: $([ "$NANO_SCALE" -eq 1 ] && echo "Power-saving" || echo "Hi
 
 echo ""
 echo "🚀 Ready for Stage 1 federated learning on Jetson!"
+echo ""
+echo "⚠️  IMPORTANT: Always run this script with bash, not sh:"
+echo "   bash ./deploy_jetson_stage1.sh"
+echo "   or"
+echo "   ./deploy_jetson_stage1.sh  (after chmod +x deploy_jetson_stage1.sh)"
