@@ -21,6 +21,7 @@ sys.path.append(str(project_root.parent))
 
 import torch
 import numpy as np
+from typing import Dict
 
 # Import EVO-1 components
 from EVO1.utils.config import EVO1DrivingConfig
@@ -199,7 +200,7 @@ def evaluate_model(model: EVO1Driving, dataloader, evaluator: DrivingMetricsEval
     }
 
 
-def save_evaluation_results(results: dict, evaluator: DrivingMetricsEvaluator, 
+def save_evaluation_results(results: Dict, evaluator: DrivingMetricsEvaluator,
                             config: EVO1DrivingConfig, output_dir: str):
     """Save evaluation results"""
     # Create results directory

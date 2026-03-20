@@ -13,7 +13,10 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.amp import autocast, GradScaler
+try:
+    from torch.amp import autocast, GradScaler
+except ImportError:
+    from torch.cuda.amp import autocast, GradScaler
 from typing import Dict, List, Tuple, Optional, Any, Callable
 from dataclasses import dataclass, asdict
 import wandb

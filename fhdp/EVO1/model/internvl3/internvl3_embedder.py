@@ -1,15 +1,15 @@
 # model/internvl3/internvl3_embedder.py
+import os
+# Must set HF_ENDPOINT BEFORE importing huggingface_hub/transformers
+os.environ['HF_ENDPOINT'] = "https://hf-mirror.com"
+
 import torch
 from PIL import Image
-import torch
 import torch.nn as nn
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 from torchvision.transforms.functional import InterpolationMode
-import os
 import socket
-
-os.environ['HF_ENDPOINT'] = "https://hf-mirror.com"
 
 from transformers import AutoModel, AutoTokenizer
 from transformers import GenerationConfig
@@ -324,7 +324,7 @@ class InternVL3Embedder(nn.Module):
 
     def get_fused_image_text_embedding_from_tensor_images(
         self,
-        image_tensors: list[Union[Image.Image, torch.Tensor]],
+        image_tensors: List[Union[Image.Image, torch.Tensor]],
         image_mask: torch.Tensor,
         text_prompt: str,
         return_cls_only: bool = True,
