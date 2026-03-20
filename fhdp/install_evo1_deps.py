@@ -9,18 +9,25 @@ import os
 import time
 from typing import List, Dict
 
-def run_command(cmd: List[str], description: str) -> bool:
+def run_command(cmd: List[str], description: str, capture_output: bool = True) -> bool:
     """Run command and handle errors"""
     print(f"🔧 {description}...")
     print(f"   Command: {' '.join(cmd)}")
-    
+
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, check=True,
+            capture_output=capture_output,
+            text=True
+        )
         print(f"   ✅ {description} completed successfully")
         return True
     except subprocess.CalledProcessError as e:
         print(f"   ❌ {description} failed:")
-        print(f"      Error: {e.stderr}")
+        if e.stderr:
+            print(f"      Error: {e.stderr}")
+        else:
+            print(f"      Return code: {e.returncode}")
         return False
 
 def check_package_installed(package_name: str) -> bool:
@@ -45,46 +52,86 @@ def install_pytorch():
 
     # Check if running on Jetson device
     is_jetson = False
-    if os.path.exists('/etc/nv_tegra_release'):
-        is_jetson = True
-        print("   📱 Jetson device detected")
+    jetpack_version = ""
 
-        # Get JetPack version
-        jetpack_version = ""
-        try:
-            with open('/etc/nv_tegra_release', 'r') as f:
-                content = f.read()
-                import re
-                match = re.search(r'R(\d+)\.(\d+)', content)
-                if match:
-                    jetpack_version = f"R{match.group(1)}.{match.group(2)}"
-        except:
-            pass
+    # Check multiple possible locations for JetPack version
+    for release_file in ['/etc/nv_tegra_release', '/etc/nv_tegra-release']:
+        if os.path.exists(release_file):
+            is_jetson = True
+            print("   📱 Jetson device detected")
 
-        print(f"   JetPack version: {jetpack_version or 'unknown'}")
+            # Get JetPack version
+            try:
+                with open(release_file, 'r') as f:
+                    content = f.read()
+                    import re
+                    # Try multiple patterns
+                    match = re.search(r'R(\d+)\.(\d+)', content)
+                    if match:
+                        jetpack_version = f"R{match.group(1)}.{match.group(2)}"
+                    else:
+                        # Try simpler pattern (e.g., R36)
+                        match = re.search(r'R(\d+)', content)
+                        if match:
+                            jetpack_version = f"R{match.group(1)}"
+            except:
+                pass
+            break  # Found first release file, stop checking
 
+    print(f"   JetPack version: {jetpack_version or 'unknown'}")
+
+    if is_jetson:
         # Determine PyTorch URL based on JetPack version
         pytorch_url = ""
         if jetpack_version.startswith('R36'):
             # JetPack 6.0
             pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch"
+            print("   📌 Using JetPack 6.0 PyTorch repository")
         elif jetpack_version.startswith('R35'):
             # JetPack 5.x
             pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v505/pytorch"
+            print("   📌 Using JetPack 5.x PyTorch repository")
         elif jetpack_version.startswith('R34'):
             # JetPack 4.x
             pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v461/pytorch"
+            print("   📌 Using JetPack 4.x PyTorch repository")
         else:
-            # Default to JetPack 6.0
-            pytorch_url = "https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch"
+            # Unknown JetPack version - try to detect from CUDA
+            print("   ⚠️  Unknown JetPack version, trying to detect from CUDA...")
+            print("   💡 If this fails, run: bash ./jetson_diag.sh")
+
+            # Try different versions starting with newest
+            pytorch_urls = [
+                ("JetPack 6.0", "https://developer.download.nvidia.com/compute/redist/jp/v60/pytorch"),
+                ("JetPack 5.05", "https://developer.download.nvidia.com/compute/redist/jp/v505/pytorch"),
+                ("JetPack 5.04", "https://developer.download.nvidia.com/compute/redist/jp/v504/pytorch"),
+                ("JetPack 4.6", "https://developer.download.nvidia.com/compute/redist/jp/v461/pytorch"),
+            ]
+
+            # Use the first URL (JetPack 6.0) as default
+            pytorch_url = pytorch_urls[0][1]
+            print(f"   📌 Defaulting to JetPack 6.0 URL: {pytorch_url}")
+            print(f"   💡 If installation fails, try manually with:")
+            for name, url in pytorch_urls[1:]:
+                print(f"      pip3 install torch torchvision torchaudio --index-url {url}")
 
         print(f"   Installing from: {pytorch_url}")
+        print(f"   ⏳ This may take 10-30 minutes...")
+
+        # Upgrade pip first
+        pip_upgrade_cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "pip"]
+        if not run_command(pip_upgrade_cmd, "Pip upgrade", capture_output=False):
+            print("   ⚠️  Pip upgrade failed, continuing...")
 
         cmd = [
-            sys.executable, "-m", "pip", "install", "--upgrade", "pip",
+            sys.executable, "-m", "pip", "install",
             "torch", "torchvision", "torchaudio",
             "--index-url", pytorch_url
         ]
+
+        # Don't capture output for PyTorch to see progress
+        result = subprocess.run(cmd, capture_output=False)
+        return result.returncode == 0
     else:
         # Regular CUDA detection
         cuda_available = False
@@ -155,15 +202,28 @@ def install_flash_attention():
     print("   💡 You can continue without flash-attn (will use slower attention)")
     return False
 
-def install_requirements_file(file_path: str, stage_name: str):
-    """Install requirements from a specific file"""
+def install_requirements_file(file_path: str, stage_name: str, skip_upgrade: bool = False):
+    """Install requirements from a specific file
+
+    Args:
+        file_path: Path to requirements file
+        stage_name: Name of the installation stage
+        skip_upgrade: If True, use --no-deps and --no-upgrade to prevent PyTorch overwrites
+    """
     print(f"📦 Installing {stage_name} dependencies...")
-    
+
     if not os.path.exists(file_path):
         print(f"   ⚠️  Requirements file {file_path} not found")
         return True  # Not critical
-    
+
     cmd = [sys.executable, "-m", "pip", "install", "-r", file_path]
+
+    # Prevent PyTorch overwrites on Jetson
+    if skip_upgrade:
+        cmd.extend(["--no-deps"])
+        print("   🛡️  Using --no-deps to prevent PyTorch version conflicts")
+        print("   💡 This may require additional manual dependency resolution")
+
     return run_command(cmd, f"{stage_name} dependencies installation")
 
 def main():
@@ -190,8 +250,8 @@ def main():
         # For Jetson, use jetson-optimized requirements
         stages = [
             ("Stage 1: Core Dependencies", "requirements/jetson.txt", install_pytorch),
-            ("Stage 2: EVO-1 Model", "requirements/evo1.txt", None),
-            ("Stage 3: Communication", "requirements/ml.txt", None),
+            ("Stage 2: EVO-1 Model", "requirements/evo1.txt", None, True),  # skip_upgrade=True
+            ("Stage 3: Communication", "requirements/ml.txt", None, True),  # skip_upgrade=True
         ]
     else:
         # For standard systems, use modular requirements
@@ -204,7 +264,7 @@ def main():
     success_count = 0
     total_stages = len(stages)
 
-    for stage_name, req_file, special_install in stages:
+    for stage_name, req_file, special_install, skip_upgrade in stages:
         print(f"\n{'='*20} {stage_name} {'='*20}")
 
         stage_success = True
@@ -215,7 +275,7 @@ def main():
 
         # Install from requirements file
         if stage_success:
-            stage_success = install_requirements_file(req_file, stage_name)
+            stage_success = install_requirements_file(req_file, stage_name, skip_upgrade=skip_upgrade)
 
         # Flash-attn special handling (install after PyTorch)
         if stage_name.startswith("Stage 1") and stage_success:

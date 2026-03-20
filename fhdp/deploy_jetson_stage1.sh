@@ -100,10 +100,50 @@ fi
 echo ""
 echo "📦 Installing Jetson-optimized dependencies..."
 
-# Option 1: Use the Python installation script (recommended)
-echo "   Using staged installation script..."
-python3 install_evo1_deps.py
-STAGED_INSTALL_RESULT=$?
+# Check if JetPack environment
+IS_JETPACK=0
+if [ -f /etc/nv_tegra_release ]; then
+    IS_JETPACK=1
+fi
+
+# Option 1: Use the Python installation script (ONLY for non-Jetson systems)
+if [ "$IS_JETPACK" -eq 1 ]; then
+    # For Jetson devices, install directly to prevent PyTorch overwrites
+    echo "   🤖 Jetson detected - using direct pip install to prevent PyTorch version conflicts"
+    echo "   (Skipping install_evo1_deps.py which may trigger PyTorch reinstallation)"
+
+    # Install Stage 1 requirements
+    echo "   Installing Stage 1 dependencies..."
+    if [ -f requirements/jetson.txt ]; then
+        echo "   Using optimized Jetson requirements from requirements/jetson.txt..."
+        pip3 install -r requirements/jetson.txt || echo "   ⚠️  Some dependencies failed"
+    elif [ -f requirements_jetson_stage1.txt ]; then
+        pip3 install -r requirements_jetson_stage1.txt
+    elif [ -f requirements.txt ]; then
+        echo "   Using standard requirements..."
+        pip3 install -r requirements.txt
+    else
+        echo "   ⚠️  No requirements file found, installing minimal dependencies..."
+        pip3 install numpy pandas psutil websockets aiohttp pyyaml python-dotenv tqdm
+    fi
+
+    # Install EVO-1 and ML dependencies with --no-deps to prevent PyTorch overwrites
+    echo ""
+    echo "   Installing EVO-1 and ML dependencies (with PyTorch protection)..."
+    for req_file in requirements/evo1.txt requirements/ml.txt; do
+        if [ -f "$req_file" ]; then
+            echo "   Installing $req_file with --no-deps to prevent PyTorch reinstallation..."
+            pip3 install --no-deps -r "$req_file" || echo "   ⚠️  Some dependencies from $req_file failed"
+        fi
+    done
+
+    STAGED_INSTALL_RESULT=0
+else
+    # For non-Jetson systems, use the staged installation script
+    echo "   Using staged installation script..."
+    python3 install_evo1_deps.py
+    STAGED_INSTALL_RESULT=$?
+fi
 
 # Install FHDP System from source
 echo "   Installing FHDP (Federated Highway-based Distributed Pipeline)..."

@@ -1,13 +1,62 @@
 """
 Setup script for FHDP System
 """
+import os
+import platform
+import re
 from setuptools import setup, find_packages
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
-with open("requirements.txt", "r", encoding="utf-8") as fh:
-    requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+# Check if running on Jetson device
+def is_jetson_device():
+    """Detect if running on NVIDIA Jetson platform"""
+    try:
+        # Check for Jetson-specific files
+        if os.path.exists('/etc/nv_tegra_release'):
+            return True
+        # Check for Jetson in /proc/device-tree/model
+        try:
+            with open('/proc/device-tree/model', 'r') as f:
+                model = f.read()
+                if 'jetson' in model.lower():
+                    return True
+        except:
+            pass
+    except:
+        pass
+    return False
+
+IS_JETSON = is_jetson_device()
+
+# Read requirements, handling -r references
+requirements = []
+try:
+    with open("requirements.txt", "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("-r "):
+                # Handle -r reference
+                ref_file = line[3:].strip()
+                try:
+                    with open(ref_file, "r", encoding="utf-8") as ref_fh:
+                        for ref_line in ref_fh:
+                            ref_line = ref_line.strip()
+                            # Skip torch-related packages on Jetson devices
+                            if IS_JETSON and any(pkg in ref_line.lower() for pkg in ['torch', 'torchvision', 'torchaudio']):
+                                continue
+                            if ref_line and not ref_line.startswith("#"):
+                                requirements.append(ref_line)
+                except FileNotFoundError:
+                    continue  # Skip if referenced file doesn't exist
+            else:
+                requirements.append(line)
+except FileNotFoundError:
+    # If requirements.txt doesn't exist, use minimal requirements
+    requirements = []
 
 setup(
     name="fhdp",

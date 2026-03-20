@@ -23,9 +23,46 @@ fi
 # Now try flash-attn with proper environment
 echo "⚡ Installing flash-attn with proper configuration..."
 
+# Detect if running on Jetson device
+IS_JETSON=0
+if [ -f /etc/nv_tegra_release ]; then
+    IS_JETSON=1
+    JETPACK_VERSION=$(grep -oE 'R[0-9]+' /etc/nv_tegra_release | head -1)
+    echo "   🤖 Detected Jetson device (JetPack $JETPACK_VERSION)"
+fi
+
 # Set environment variables for compilation
-export MAX_JOBS=2  # Reduce parallel jobs to avoid memory issues
-export TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9"  # Common GPU architectures
+if [ "$IS_JETSON" -eq 1 ]; then
+    # Jetson-specific settings
+    echo "   ⚙️  Applying Jetson-specific flash-attn configuration..."
+    # Detect Jetson model for correct architecture
+    JETSON_MODEL=$(cat /etc/nv_tegra_release | grep 'TEGRA_RELEASE' || echo "Unknown")
+    case "$JETSON_MODEL" in
+        *Orin*|*orin*)
+            # Orin series uses Ampere architecture
+            export TORCH_CUDA_ARCH_LIST="8.7"  # Orin Nano: SM 8.7
+            echo "   ✓ Set TORCH_CUDA_ARCH_LIST=8.7 for Orin series"
+            ;;
+        *Xavier*)
+            # Xavier uses Volta architecture
+            export TORCH_CUDA_ARCH_LIST="7.2"
+            echo "   ✓ Set TORCH_CUDA_ARCH_LIST=7.2 for Xavier series"
+            ;;
+        *)
+            # Default Jetson (likely Orin)
+            export TORCH_CUDA_ARCH_LIST="8.7"
+            echo "   ✓ Set TORCH_CUDA_ARCH_LIST=8.7 (default for Jetson)"
+            ;;
+    esac
+    # Jetson has limited memory, reduce parallel jobs
+    export MAX_JOBS=1
+    echo "   ✓ Set MAX_JOBS=1 for Jetson memory constraints"
+else
+    # Desktop GPU settings
+    export MAX_JOBS=2  # Reduce parallel jobs to avoid memory issues
+    export TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9"  # Common desktop GPU architectures
+    echo "   ✓ Set TORCH_CUDA_ARCH_LIST=8.0;8.6;8.9 for desktop GPUs"
+fi
 export CMAKE_ARGS="-DFFLAGS='-O3 -march=native'"
 
 # Method 1: Try without build isolation (recommended)
