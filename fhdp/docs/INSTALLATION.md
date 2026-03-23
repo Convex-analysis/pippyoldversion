@@ -18,19 +18,22 @@ pip install numpy pandas matplotlib tqdm psutil
 ### Option 2: EVO-1 Autonomous Driving
 ```bash
 # Install EVO-1 dependencies
-pip install -r requirements_evo1.txt
+pip install -r fhdp/requirements/evo1.txt
 
 # If flash-attn fails, use fix script
-./fix_flash_attn.sh
+bash fhdp/scripts/fix_flash_attn.sh
 ```
 
 ### Option 3: Jetson Stage 1
 ```bash
-# Jetson deployment
-./deploy_jetson_stage1.sh
+# Jetson deployment (generic)
+bash fhdp/scripts/Jetson/deploy_jetson_stage1.sh
+
+# For Orin Nano specifically
+bash fhdp/scripts/Jetson/deploy_jetson_orin_nano.sh
 
 # Or manual
-pip install -r requirements_jetson_stage1.txt
+pip install -r fhdp/requirements/jetson.txt
 ```
 
 ## 🔧 System Requirements
@@ -107,19 +110,19 @@ pycuda>=2022.1
 #### Standard Installation
 ```bash
 # Basic setup
-python install_evo1_deps.py
+python fhdp/scripts/install_evo1_deps.py
 
 # Or step-by-step
-./deploy_jetson_stage1.sh
+bash fhdp/scripts/Jetson/deploy_jetson_stage1.sh
 ```
 
 #### Fix Common Issues
 ```bash
 # Fix flash-attn issues
-./fix_flash_attn.sh
+bash fhdp/scripts/fix_flash_attn.sh
 
 # Test installation
-python test_install_fix.py
+python fhdp/test_install_fix.py
 ```
 
 ### Method 2: Manual Installation
@@ -159,14 +162,14 @@ pip install accelerate deepspeed timm
 ### Method 3: Staged Installation
 
 ```bash
-# Stage 1: Core dependencies
-pip install -r requirements_evo1_stages.txt
+# Stage 1: Base dependencies
+pip install -r fhdp/requirements/base.txt
 
-# Stage 2: ML and advanced features
-pip install -r requirements_evo1_stage2.txt
+# Stage 2: ML features
+pip install -r fhdp/requirements/ml.txt
 
-# Stage 3: Optional and specialized
-pip install -r requirements_evo1_stage3.txt
+# Stage 3: EVO-1 model
+pip install -r fhdp/requirements/evo1.txt
 ```
 
 ## 🔍 Verification

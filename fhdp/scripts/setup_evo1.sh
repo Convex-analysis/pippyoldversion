@@ -39,7 +39,7 @@ fi
 
 # Install EVO-1 dependencies
 echo "📚 Installing EVO-1 dependencies..."
-pip install -r requirements_evo1.txt
+pip install -r fhdp/requirements/evo1.txt
 
 # Install flash-attn (may need compilation)
 echo "⚡ Installing flash-attn for efficient attention..."
@@ -47,7 +47,7 @@ read -p "Do you want to install flash-attn? (may require compilation) (y/n): " i
 if [ "$install_flash" = "y" ]; then
     # Set MAX_JOBS to limit parallel compilation
     export MAX_JOBS=4
-    pip install flash-attn --no-build-isolation
+    bash fhdp/scripts/fix_flash_attn.sh
 fi
 
 # Clone EVO-1 repository (optional)

@@ -212,6 +212,10 @@ def install_requirements_file(file_path: str, stage_name: str, skip_upgrade: boo
     """
     print(f"📦 Installing {stage_name} dependencies...")
 
+    # Convert relative path to absolute path from fhdp/requirements
+    if not os.path.isabs(file_path):
+        file_path = os.path.join(os.path.dirname(__file__), "..", "fhdp", "requirements", file_path)
+
     if not os.path.exists(file_path):
         print(f"   ⚠️  Requirements file {file_path} not found")
         return True  # Not critical

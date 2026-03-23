@@ -10,7 +10,7 @@ git clone <repository-url>
 cd fhdp
 
 # Quick installation (handles all dependencies)
-./fix_flash_attn.sh
+bash fhdp/scripts/fix_flash_attn.sh
 
 # Run basic demo
 python examples/simple_simulation.py
@@ -87,7 +87,7 @@ fhdp/
 
 | Goal | Document | Command |
 |------|----------|----------|
-| **Get Started** | [Installation Guide](docs/INSTALLATION.md) | `./fix_flash_attn.sh` |
+| **Get Started** | [Installation Guide](docs/INSTALLATION.md) | `bash fhdp/scripts/fix_flash_attn.sh` |
 | **EVO-1 Driving** | [Autonomous Driving](docs/README_AUTONOMOUS_DRIVING.md) | `python examples/autonomous_driving_simulation.py` |
 | **Jetson Deployment** | [Stage 1 Guide](docs/README_EVO1_STAGE1.md) | `python examples/evo1_stage1_federated.py` |
 | **Basic Demo** | [Implementation](docs/IMPLEMENTATION_SUMMARY.md) | `python examples/simple_simulation.py` |
@@ -116,10 +116,13 @@ python examples/evo1_stage1_federated.py
 ### 📱 Jetson Deployment
 ```bash
 # Automated deployment
-./deploy_jetson_stage1.sh
+bash fhdp/scripts/Jetson/deploy_jetson_stage1.sh
+
+# For Orin Nano specifically
+bash fhdp/scripts/Jetson/deploy_jetson_orin_nano.sh
 
 # Manual setup
-pip install -r requirements_jetson_stage1.txt
+pip install -r fhdp/requirements/jetson.txt
 ```
 
 ## 🔧 System Requirements

@@ -92,10 +92,10 @@ pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://dev
 pip3 install packaging
 
 # Install Jetson-optimized requirements (recommended)
-pip3 install -r requirements/jetson.txt
+pip3 install -r fhdp/requirements/jetson.txt
 
 # Or install EVO-1 specific requirements
-pip3 install -r requirements/evo1.txt
+pip3 install -r fhdp/requirements/evo1.txt
 
 # Install flash-attn (optional, may take 10-30 minutes)
 export MAX_JOBS=2

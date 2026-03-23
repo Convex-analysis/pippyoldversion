@@ -135,13 +135,13 @@ fi
 
 # Install Stage 1 requirements
 echo "   Installing Stage 1 requirements..."
-if [ -f requirements/jetson.txt ]; then
+if [ -f fhdp/requirements/jetson.txt ]; then
     echo "   Using optimized Jetson requirements..."
-    pip3 install -r requirements/jetson.txt || echo "   ⚠️  Some dependencies failed"
-elif [ -f requirements_jetson_stage1.txt ]; then
-    pip3 install -r requirements_jetson_stage1.txt || echo "   ⚠️  Some dependencies failed"
-elif [ -f requirements.txt ]; then
-    pip3 install -r requirements.txt || echo "   ⚠️  Some dependencies failed"
+    pip3 install -r fhdp/requirements/jetson.txt || echo "   ⚠️  Some dependencies failed"
+elif [ -f fhdp/requirements/jetson.txt ]; then
+    pip3 install -r fhdp/requirements/jetson.txt || echo "   ⚠️  Some dependencies failed"
+elif [ -f fhdp/requirements/jetson.txt ]; then
+    pip3 install -r fhdp/requirements/jetson.txt || echo "   ⚠️  Some dependencies failed"
 else
     echo "   ⚠️  No requirements file found, installing minimal dependencies..."
     pip3 install numpy pandas psutil websockets aiohttp pyyaml python-dotenv tqdm
@@ -198,14 +198,14 @@ if [ "$IS_JETPACK" -eq 1 ]; then
                 # CRITICAL: TORCH_CUDA_ARCH_LIST must be "8.7" for Jetson Orin Nano (Ampere SM 8.7)
                 env CUDA_HOME="$CUDA_HOME" PATH="$PATH" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
                     MAX_JOBS=1 TORCH_CUDA_ARCH_LIST="8.7" \
-                    pip3 install flash-attn --no-build-isolation || {
+                    bash fhdp/scripts/fix_flash_attn.sh || {
                         echo "   ⚠️  flash-attn compilation failed (as expected on Jetson)"
                         echo "   ℹ️  This is normal - falling back to standard attention"
                     }
             else
                 echo "   ⏭️  Skipping flash-attn installation (recommended for Jetson)"
                 echo "   ℹ️  Will use standard attention mechanism"
-                echo "   💡 To force compilation, run: FORCE_FLASH_ATTN=1 bash ./deploy_jetson_orin_nano.sh"
+                echo "   💡 To force compilation, run: FORCE_FLASH_ATTN=1 bash fhdp/scripts/Jetson/deploy_jetson_orin_nano.sh"
             fi
         else
             echo "   ⚠️  nvcc not found at $CUDA_HOME/bin/nvcc"
