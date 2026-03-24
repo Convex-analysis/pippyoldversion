@@ -1,0 +1,37 @@
+[0;34m
+╔════════════════════════════════════════════════════════════╗
+║     FHDP Pipeline Training Test Launcher                  ║
+║     Testing pipeline training across Jetson devices       ║
+╚════════════════════════════════════════════════════════════╝
+[0m
+[0;32m✓ Using Python: Python 3.12.10[0m
+[0;32m✓ PyTorch installed, CUDA available: False[0m
+[0;34m
+==================================
+Starting Server Mode
+==================================
+[0m
+Host: 0.0.0.0
+Port: 5000
+Config: (default)
+
+Executing: python3 test_pipeline_training.py --mode server --host 0.0.0.0 --port 5000
+
+Traceback (most recent call last):
+  File "/Volumes/HardDriveMac/EXP/pippyoldversion/fhdp/tests/pipeline_test/test_pipeline_training.py", line 1211, in main
+    server_instance.start()
+  File "/Volumes/HardDriveMac/EXP/pippyoldversion/fhdp/tests/pipeline_test/test_pipeline_training.py", line 487, in start
+    self.network_server.start()
+  File "/Volumes/HardDriveMac/EXP/pippyoldversion/fhdp/tests/pipeline_test/test_pipeline_training.py", line 110, in start
+    self.server_socket.bind((self.host, self.port))
+OSError: [Errno 48] Address already in use
+============================================================
+Starting FHDP Pipeline Training Test Server
+============================================================
+✓ FHDP system started
+Starting FHDP Edge Server...
+Edge Server started successfully
+✓ Edge server started
+✗ Failed to bind socket: [Errno 48] Address already in use
+
+Error: [Errno 48] Address already in use

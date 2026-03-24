@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-FHDP Pipeline Training Test Script
+FHDP Pipeline Training Test Script (Refactored)
 
 This script tests the FHDP system's capability to orchestrate pipeline training
 across two Jetson devices (AGX Orin and Orin Nano) with a 4090 Linux server.
+
+Refactored to use FHDP's built-in cross_platform_comm.py for reliable network
+communication with length-prefix protocol and compression support.
 
 Architecture:
 - Server: Edge Server (4090 Linux) - Coordinates pipeline formation and aggregation
@@ -12,13 +15,13 @@ Architecture:
 
 Usage:
     # On the 4090 server:
-    python test_pipeline_training.py --mode server --host 0.0.0.0 --port 5000
+    python test_pipeline_training_refactored.py --mode server --host 0.0.0.0 --port 5000
 
     # On Jetson AGX Orin:
-    python test_pipeline_training.py --mode vehicle --vehicle-id agx_orin_001 --server-host <server-ip> --server-port 5000 --resource-level high
+    python test_pipeline_training_refactored.py --mode vehicle --vehicle-id agx_orin_001 --server-host <server-ip> --server-port 5000 --resource-level high
 
     # On Jetson Orin Nano:
-    python test_pipeline_training.py --mode vehicle --vehicle-id orin_nano_001 --server-host <server-ip> --server-port 5000 --resource-level medium
+    python test_pipeline_training_refactored.py --mode vehicle --vehicle-id orin_nano_001 --server-host <server-ip> --server-port 5000 --resource-level medium
 """
 
 import sys
@@ -28,34 +31,65 @@ import time
 import socket
 import threading
 import signal
-import uuid
 import yaml
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
-from enum import Enum
+import uuid
+from typing import Dict, List, Optional, Any, Tuple, Callable
 
-# SOCKS proxy support
-USE_SOCKS_PROXY = os.environ.get('USE_SOCKS_PROXY', 'false').lower() == 'true'
-if USE_SOCKS_PROXY:
+# Add project root to path - support both local and remote deployment
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Debug: print current working directory and script location
+print(f"[DEBUG] Script dir: {script_dir}")
+print(f"[DEBUG] CWD: {os.getcwd()}")
+
+# Try multiple possible project root locations
+# Order matters: try fhdp as root first (remote case), then parent (local case)
+possible_roots = [
+    os.path.abspath(os.path.join(script_dir, '..')),    # fhdp/tests/pipeline_test -> fhdp/ (if fhdp is project root)
+    os.path.abspath(os.path.join(script_dir, '../..')),  # fhdp/tests/pipeline_test -> project root (if nested under fhdp/)
+    os.path.abspath(os.path.join(script_dir, '../../..')), # deeper nesting
+    os.getcwd()  # Current directory as fallback
+]
+
+project_root = None
+for root in possible_roots:
+    print(f"[DEBUG] Checking root: {root}")
+    # Check if fhdp module exists at this root level OR if root contains core/ directory
+    check_path1 = os.path.join(root, 'fhdp')
+    check_path2 = os.path.join(root, 'core')  # Check if root IS fhdp
+    if os.path.exists(check_path1):
+        project_root = root
+        print(f"[DEBUG] Found fhdp/ at {check_path1}")
+        break
+    elif os.path.exists(check_path2):
+        # root is the fhdp package directory itself, use its parent
+        project_root = os.path.dirname(root)
+        print(f"[DEBUG] Found core/ at {check_path2}, root is fhdp, using parent: {project_root}")
+        break
+
+if project_root is not None:
+    sys.path.insert(0, project_root)
+    print(f"[INFO] Using project root: {project_root}")
+    # Verify fhdp import works
     try:
-        import socks
-        print(f"✓ SOCKS proxy enabled")
-    except ImportError:
-        print("✗ PySocks not installed. Install with: pip install pysocks")
-        USE_SOCKS_PROXY = False
-
-# Add project root to path
-# Script location: pippyoldversion/fhdp/tests/pipeline_test/test_pipeline_training.py
-# Project root should be: pippyoldversion/
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
-
-# Add both project root and its parent to path for development mode
-parent_dir = os.path.dirname(project_root)
-sys.path.insert(0, project_root)
-sys.path.insert(0, parent_dir)
+        import fhdp
+        print(f"[INFO] Successfully imported fhdp from {fhdp.__file__}")
+    except ImportError as e:
+        print(f"[ERROR] Cannot import fhdp despite adding root: {e}")
+else:
+    print("[WARNING] Could not determine project root, trying direct import...")
+    # Try importing without modifying path
+    try:
+        import fhdp
+        print(f"[INFO] Direct import successful: {fhdp.__file__}")
+    except ImportError as e:
+        print(f"[ERROR] Cannot import fhdp: {e}")
+        print(f"[HINT] Please run this script from the project root directory")
+        print(f"[HINT] Or set PYTHONPATH to include the project root")
+        sys.exit(1)
 
 from fhdp.core.types import (
     VehicleInfo, VehicleState, TrainingMode, Pipeline, PipelineTemplate,
@@ -65,275 +99,12 @@ from fhdp.vehicle_layer.training_engine import TrainingTask
 from fhdp.core.fhdp_system import FHDPSystem, SystemConfiguration
 from fhdp.edge_server.server import EdgeServer
 from fhdp.vehicle_layer.vehicle import Vehicle
+
+# Use FHDP's built-in cross-platform communication
 from fhdp.core.cross_platform_comm import (
-    CrossPlatformMessage, MessageRouter, PlatformBridge,
-    NetworkEndpoint, TransportProtocol, CompressionType
+    NetworkEndpoint, CrossPlatformMessage, PlatformBridge,
+    TransportProtocol, CompressionType, HardwareCapabilities, HardwarePlatform
 )
-from fhdp.core.hardware_adapter import HardwareDetector, HardwareCapabilities
-
-
-# ==================== Network Communication ====================
-
-class MessageType(Enum):
-    """Message types for network communication"""
-    REGISTER = "register"
-    UNREGISTER = "unregister"
-    MODEL_UPDATE = "model_update"
-    GLOBAL_MODEL = "global_model"
-    PIPELINE_INVITE = "pipeline_invite"
-    PIPELINE_RESPONSE = "pipeline_response"
-    HEARTBEAT = "heartbeat"
-    STATUS = "status"
-    SHUTDOWN = "shutdown"
-
-
-@dataclass
-class NetworkMessage:
-    """Network message structure"""
-    msg_type: MessageType
-    sender_id: str
-    data: Dict[str, Any]
-    timestamp: float = field(default_factory=time.time)
-
-
-# ==================== cross_platform_comm helpers ====================
-
-_hw_detector = HardwareDetector()
-
-
-def _get_hw_caps() -> HardwareCapabilities:
-    """Return HardwareCapabilities for the current machine."""
-    return _hw_detector.get_hardware_capabilities()
-
-
-def _make_cpm(msg_type: MessageType, source_id: str, target_id: str,
-              payload: Any, requires_ack: bool = True) -> CrossPlatformMessage:
-    """Build a CrossPlatformMessage from NetworkMessage fields."""
-    return CrossPlatformMessage(
-        message_id=str(uuid.uuid4()),
-        source_id=source_id,
-        target_id=target_id,
-        message_type=msg_type.value,
-        payload=payload,
-        requires_ack=requires_ack,
-    )
-
-
-def _serialize_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert torch.Tensor values to lists so they can be JSON-serialized."""
-    return {k: v.tolist() if hasattr(v, 'tolist') else v
-            for k, v in state_dict.items()}
-
-
-def _deserialize_state_dict(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Restore lists back to torch.Tensor after JSON deserialization."""
-    return {k: torch.tensor(v) if isinstance(v, list) else v
-            for k, v in raw.items()}
-
-
-class NetworkServer:
-    """
-    Network server for edge server.
-    Backed by MessageRouter (cross_platform_comm.py):
-    JSON + 4-byte length-prefix + ZLIB, no pickle.
-    """
-
-    def __init__(self, host: str, port: int):
-        self.host = host
-        self.port = port
-        hw_caps = _get_hw_caps()
-        self.router = MessageRouter(hw_caps)
-        self.message_handlers: Dict[MessageType, Any] = {}
-        self._endpoint = NetworkEndpoint(
-            host=host,
-            port=port,
-            protocol=TransportProtocol.TCP,
-            compression=CompressionType.ZLIB,
-        )
-
-        # Register internal dispatcher: route incoming CrossPlatformMessages
-        # back to the per-MessageType handlers expected by PipelineTestServer.
-        for msg_type in MessageType:
-            self.router.register_handler(
-                msg_type.value,
-                lambda cpm, _mt=msg_type: self._dispatch(cpm, _mt)
-            )
-
-    def _dispatch(self, cpm: CrossPlatformMessage, msg_type: MessageType):
-        """Convert CrossPlatformMessage → NetworkMessage and call handler."""
-        handler = self.message_handlers.get(msg_type)
-        if handler:
-            nm = NetworkMessage(
-                msg_type=msg_type,
-                sender_id=cpm.source_id,
-                data=cpm.payload if isinstance(cpm.payload, dict) else {},
-                timestamp=cpm.timestamp,
-            )
-            # Pass None for client_socket; server-push goes through
-            # router.client_connections via send_message().
-            handler(nm, None)
-
-    def start(self):
-        """Start network server"""
-        self.router.start_message_listener(self._endpoint)
-        print(f"✓ Network server (cross_platform_comm) listening on {self.host}:{self.port}")
-
-    def stop(self):
-        """Stop network server"""
-        # Close all tracked client connections
-        with self.router._client_conn_lock:
-            for conn in self.router.client_connections.values():
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            self.router.client_connections.clear()
-
-    @property
-    def client_connections(self) -> Dict[str, Any]:
-        """Expose router's client_connections dict for compatibility."""
-        return self.router.client_connections
-
-    def register_handler(self, msg_type: MessageType, handler: Any):
-        """Register message handler for a MessageType."""
-        self.message_handlers[msg_type] = handler
-
-    def send_message(self, vehicle_id: str, message: NetworkMessage):
-        """Send NetworkMessage to a specific vehicle."""
-        payload = dict(message.data)
-        # Serialize any tensor values in payload
-        payload = {k: (v.tolist() if hasattr(v, 'tolist') else v)
-                   for k, v in payload.items()}
-        cpm = _make_cpm(
-            msg_type=message.msg_type,
-            source_id="server",
-            target_id=vehicle_id,
-            payload=payload,
-            requires_ack=False,   # server→client push: no ACK回路
-        )
-        success = self.router.send_message(cpm)
-        if not success:
-            print(f"Send error to {vehicle_id}")
-
-    def broadcast_message(self, message: NetworkMessage):
-        """Broadcast NetworkMessage to all connected vehicles."""
-        with self.router._client_conn_lock:
-            vehicle_ids = list(self.router.client_connections.keys())
-        for vehicle_id in vehicle_ids:
-            self.send_message(vehicle_id, message)
-
-
-class NetworkClient:
-    """
-    Network client for vehicles.
-    Backed by PlatformBridge (cross_platform_comm.py):
-    JSON + 4-byte length-prefix + ZLIB, no pickle.
-    NOTE: SOCKS proxy is not supported via cross_platform_comm.
-    """
-
-    def __init__(self, server_host: str, server_port: int, vehicle_id: str):
-        self.server_host = server_host
-        self.server_port = server_port
-        self.vehicle_id = vehicle_id
-        self.connected = False
-        self.message_handlers: Dict[MessageType, Any] = {}
-        self.lock = threading.Lock()
-
-        if USE_SOCKS_PROXY:
-            print("  WARNING: SOCKS proxy is not supported via cross_platform_comm. "
-                  "Proceeding with direct connection.")
-
-        hw_caps = _get_hw_caps()
-        self.bridge = PlatformBridge(hw_caps)
-        self._server_endpoint = NetworkEndpoint(
-            host=server_host,
-            port=server_port,
-            protocol=TransportProtocol.TCP,
-            compression=CompressionType.ZLIB,
-        )
-
-        # Register internal dispatcher for all MessageTypes
-        for msg_type in MessageType:
-            self.bridge.message_router.register_handler(
-                msg_type.value,
-                lambda cpm, _mt=msg_type: self._dispatch(cpm, _mt)
-            )
-
-    def _dispatch(self, cpm: CrossPlatformMessage, msg_type: MessageType):
-        """Convert CrossPlatformMessage → NetworkMessage and call handler."""
-        handler = self.message_handlers.get(msg_type)
-        if handler:
-            payload = cpm.payload if isinstance(cpm.payload, dict) else {}
-            nm = NetworkMessage(
-                msg_type=msg_type,
-                sender_id=cpm.source_id,
-                data=payload,
-                timestamp=cpm.timestamp,
-            )
-            handler(nm)
-
-    def connect(self, max_retries: int = 10, retry_interval: float = 2.0):
-        """Connect to server (with retry)."""
-        print(f"Attempting to connect to {self.server_host}:{self.server_port}...")
-        for attempt in range(max_retries):
-            print(f"  Attempt {attempt + 1}/{max_retries}...", flush=True)
-            try:
-                # connect_to_platform also starts the background receive thread
-                server_caps = _get_hw_caps()
-                success = self.bridge.connect_to_platform(
-                    remote_node_id="server",
-                    remote_capabilities=server_caps,
-                    network_endpoint=self._server_endpoint,
-                    start_receiving=True,
-                )
-                if success:
-                    self.connected = True
-                    print(f"✓ Connected to server {self.server_host}:{self.server_port}")
-                    return True
-            except Exception as e:
-                print(f"Connection attempt {attempt + 1}/{max_retries} failed: {e}")
-
-            if attempt < max_retries - 1:
-                print(f"  Waiting {retry_interval}s before retry...", flush=True)
-                time.sleep(retry_interval)
-
-        print(f"✗ Failed to connect to server after {max_retries} attempts")
-        return False
-
-    def disconnect(self):
-        """Disconnect from server."""
-        self.connected = False
-        self.bridge.message_router.stop_receiving_from("server")
-
-    def start_receiving(self):
-        """No-op: receiving is started automatically by connect_to_platform."""
-        pass
-
-    def send_message(self, message: NetworkMessage) -> bool:
-        """Send NetworkMessage to server."""
-        if not self.connected:
-            return False
-        try:
-            payload = dict(message.data)
-            # Serialize any tensor values
-            payload = {k: (v.tolist() if hasattr(v, 'tolist') else v)
-                       for k, v in payload.items()}
-            cpm = _make_cpm(
-                msg_type=message.msg_type,
-                source_id=self.vehicle_id,
-                target_id="server",
-                payload=payload,
-                requires_ack=True,
-            )
-            with self.lock:
-                return self.bridge.send_cross_platform_message(cpm)
-        except Exception as e:
-            print(f"Send error: {e}")
-            return False
-
-    def register_handler(self, msg_type: MessageType, handler: Any):
-        """Register message handler for a MessageType."""
-        self.message_handlers[msg_type] = handler
 
 
 # ==================== Simple Model for Testing ====================
@@ -350,7 +121,6 @@ class SimpleCNN(nn.Module):
         self.dropout = nn.Dropout(0.25)
 
         # Calculate flattened size after convolutions
-        # Assuming 28x28 input: -> 14x14 -> 7x7
         self.fc1 = nn.Linear(64 * 7 * 7, 128)
         self.fc2 = nn.Linear(128, num_classes)
 
@@ -372,7 +142,6 @@ def create_mock_data_loader(num_samples: int = 100, batch_size: int = 32):
             self.num_samples = num_samples
             self.batch_size = batch_size
 
-
         def __iter__(self):
             for i in range(0, self.num_samples, self.batch_size):
                 batch_size = min(self.batch_size, self.num_samples - i)
@@ -392,7 +161,7 @@ def create_mock_data_loader(num_samples: int = 100, batch_size: int = 32):
 # ==================== Server Mode ====================
 
 class PipelineTestServer:
-    """Server mode for pipeline training test"""
+    """Server mode for pipeline training test using FHDP's cross_platform_comm"""
 
     def __init__(self, host: str, port: int, config_path: Optional[str] = None):
         self.host = host
@@ -409,13 +178,11 @@ class PipelineTestServer:
         # Initialize FHDP system and edge server
         self.fhdp_system = FHDPSystem(config)
         self.edge_server = EdgeServer(config_path)
-        self.network_server = NetworkServer(host, port)
 
         # Initialize FHDP components for pipeline formation
         from fhdp.edge_server.resource_classifier import ResourceClassifier
         from fhdp.edge_server.template_manager import TemplateManager
         from fhdp.vehicle_layer.pipeline_formation import PipelineFormation
-        from fhdp.core.types import VehicleInfo, ResourceClass, TrainingConfig
 
         self.resource_classifier = ResourceClassifier()
         self.template_manager = TemplateManager()
@@ -431,13 +198,37 @@ class PipelineTestServer:
         )
         self.pipeline_formation = PipelineFormation(dummy_vehicle_info)
 
+        # Initialize cross-platform communication
+        self.server_endpoint = NetworkEndpoint(
+            host=host,
+            port=port,
+            protocol=TransportProtocol.TCP,
+            compression=CompressionType.ZLIB
+        )
+
+        # Create platform bridge with x86 Linux capabilities
+        from fhdp.core.hardware_adapter import ComputeCapability
+
+        self.local_capabilities = HardwareCapabilities(
+            platform=HardwarePlatform.X86_LINUX,
+            compute_capability=ComputeCapability.SERVER_CLASS,
+            cpu_cores=32,
+            cpu_freq=3.5,
+            memory_total=64.0,
+            gpu_memory=24.0,
+            npu_memory=0.0,
+            storage_speed='ssd',
+            network_speed=1000.0,
+            power_profile='high_performance',
+            thermal_limit=95.0,
+            accelerated_compute=True
+        )
+        self.platform_bridge = PlatformBridge(self.local_capabilities)
+
         # Pipeline management
         self.active_pipeline: Optional[Pipeline] = None
         self.pipeline_formed = False
         self.global_model = SimpleCNN()
-
-        # Per-round update buffer: {round_num: {vehicle_id: model_state_dict}}
-        self._round_updates: Dict[int, Dict[str, Any]] = {}
 
         # Statistics
         self.stats = {
@@ -450,6 +241,10 @@ class PipelineTestServer:
 
         # Lock for thread safety
         self.lock = threading.Lock()
+
+        # Pending updates for aggregation
+        self.pending_updates: Dict[str, Dict] = {}
+        self.round_num = 0
 
     def start(self):
         """Start server"""
@@ -465,13 +260,13 @@ class PipelineTestServer:
         self.edge_server.start_server()
         print("✓ Edge server started")
 
-        # Start network server
-        self.network_server.start()
-        print("✓ Network server started")
+        # Register message handlers
+        self._register_message_handlers()
 
-        # Register network handlers
-        self._register_network_handlers()
+        # Start TCP listener using cross_platform_comm
+        self.platform_bridge.message_router.start_message_listener(self.server_endpoint)
 
+        print(f"✓ Network server listening on {self.host}:{self.port}")
         print("\nServer is ready to accept vehicle connections...")
         print(f"Listen on: {self.host}:{self.port}\n")
 
@@ -479,52 +274,46 @@ class PipelineTestServer:
         """Stop server"""
         print("\nStopping server...")
 
-        self.network_server.stop()
         self.edge_server.stop_server()
         self.fhdp_system.stop_system()
 
         print("✓ Server stopped")
 
-    def _register_network_handlers(self):
-        """Register network message handlers"""
+    def _register_message_handlers(self):
+        """Register message handlers for cross-platform communication"""
 
-        # Vehicle registration
-        self.network_server.register_handler(
-            MessageType.REGISTER,
+        self.platform_bridge.message_router.register_handler(
+            'register',
             self._handle_register
         )
 
-        # Model update
-        self.network_server.register_handler(
-            MessageType.MODEL_UPDATE,
+        self.platform_bridge.message_router.register_handler(
+            'model_update',
             self._handle_model_update
         )
 
-        # Heartbeat
-        self.network_server.register_handler(
-            MessageType.HEARTBEAT,
+        self.platform_bridge.message_router.register_handler(
+            'heartbeat',
             self._handle_heartbeat
         )
 
-        # Pipeline response
-        self.network_server.register_handler(
-            MessageType.PIPELINE_RESPONSE,
+        self.platform_bridge.message_router.register_handler(
+            'pipeline_response',
             self._handle_pipeline_response
         )
 
-        # Status request
-        self.network_server.register_handler(
-            MessageType.STATUS,
+        self.platform_bridge.message_router.register_handler(
+            'status',
             self._handle_status
         )
 
-    def _handle_register(self, message: NetworkMessage, client_socket: socket.socket):
+    def _handle_register(self, message: CrossPlatformMessage):
         """Handle vehicle registration"""
-        vehicle_data = message.data
+        vehicle_data = message.payload
 
         # Create vehicle info
         vehicle_info = VehicleInfo(
-            vehicle_id=message.sender_id,
+            vehicle_id=message.source_id,
             position=vehicle_data.get('position', (0.0, 0.0)),
             velocity=vehicle_data.get('velocity', 0.0),
             direction=vehicle_data.get('direction', 0.0),
@@ -541,9 +330,20 @@ class PipelineTestServer:
         if success:
             # Classify vehicle resources
             resource_class = self.resource_classifier.classify_vehicle(vehicle_info)
-            print(f"✓ Vehicle {message.sender_id} registered (Resource Class: {resource_class.value})")
+            print(f"✓ Vehicle {message.source_id} registered (Resource Class: {resource_class.value})")
             print(f"  Position: {vehicle_info.position}")
             print(f"  Resources: {vehicle_info.resources}")
+
+            # Create route to this vehicle
+            # Note: client_socket is already stored in message_router.client_connections
+            # by the _handle_tcp_connection method, so we don't need to specify client_socket here
+            vehicle_endpoint = NetworkEndpoint(
+                host=message.metadata.get('client_host', 'unknown'),
+                port=message.metadata.get('client_port', 0),
+                protocol=TransportProtocol.TCP,
+                compression=CompressionType.ZLIB
+            )
+            self.platform_bridge.message_router.add_route(message.source_id, vehicle_endpoint)
 
             with self.lock:
                 self.stats['vehicles_registered'] += 1
@@ -552,64 +352,67 @@ class PipelineTestServer:
             if self.stats['vehicles_registered'] >= 2 and not self.pipeline_formed:
                 self._try_form_pipeline()
 
-    def _handle_model_update(self, message: NetworkMessage, client_socket: socket.socket):
+    def _handle_model_update(self, message: CrossPlatformMessage):
         """Handle model update from vehicle"""
         with self.lock:
             self.stats['total_updates_received'] += 1
 
-        update_data = message.data
-        source_id = message.sender_id
+        update_data = message.payload
+        source_id = message.source_id
         round_num = update_data.get('round', 0)
 
         print(f"[Round {round_num}] Received update from {source_id}")
 
-        # Buffer this update
-        with self.lock:
-            if round_num not in self._round_updates:
-                self._round_updates[round_num] = {}
-            self._round_updates[round_num][source_id] = update_data.get('model_state', {})
+        # Store update
+        self.pending_updates[source_id] = update_data
 
         # Check if we have updates from all pipeline vehicles
         if self.active_pipeline:
             pipeline_vehicles = set(self.active_pipeline.vehicles)
-            with self.lock:
-                received = set(self._round_updates.get(round_num, {}).keys())
+            received_updates = set(self.pending_updates.keys())
 
-            if pipeline_vehicles.issubset(received):
-                # Gather all updates for this round
-                with self.lock:
-                    updates = list(self._round_updates.pop(round_num, {}).values())
+            if received_updates == pipeline_vehicles:
+                # Aggregate updates
+                updates = [self.pending_updates[vid] for vid in self.active_pipeline.vehicles]
                 self._aggregate_model_updates(round_num, updates)
+                self.pending_updates.clear()
 
-    def _handle_heartbeat(self, message: NetworkMessage, client_socket: socket.socket):
+    def _handle_heartbeat(self, message: CrossPlatformMessage):
         """Handle heartbeat from vehicle"""
         # Just acknowledge - keep connection alive
         pass
 
-    def _handle_pipeline_response(self, message: NetworkMessage, client_socket: socket.socket):
+    def _handle_pipeline_response(self, message: CrossPlatformMessage):
         """Handle pipeline invitation response"""
-        response = message.data
+        response = message.payload
         accepted = response.get('accepted', False)
 
         if accepted:
-            print(f"✓ Vehicle {message.sender_id} accepted pipeline invitation")
+            print(f"✓ Vehicle {message.source_id} accepted pipeline invitation")
 
             # Check if all vehicles have accepted
             if self.active_pipeline:
                 if len(self.active_pipeline.vehicles) >= 2:
                     self._start_pipeline_training()
         else:
-            print(f"✗ Vehicle {message.sender_id} declined pipeline invitation")
+            print(f"✗ Vehicle {message.source_id} declined pipeline invitation")
 
-    def _handle_status(self, message: NetworkMessage, client_socket: socket.socket):
+    def _handle_status(self, message: CrossPlatformMessage):
         """Handle status request"""
         status = self.get_status()
-        response_msg = NetworkMessage(
-            msg_type=MessageType.STATUS,
-            sender_id="server",
-            data=status
+
+        # Send response using cross-platform communication
+        response_msg = CrossPlatformMessage(
+            message_id=str(uuid.uuid4()),
+            source_id="server",
+            target_id=message.source_id,
+            message_type="status_response",
+            payload=status
         )
-        self.network_server.send_message(message.sender_id, response_msg)
+
+        target_endpoint = self.platform_bridge.message_router.routing_table.get(message.source_id)
+        if target_endpoint:
+            self.platform_bridge.send_cross_platform_message(response_msg)
 
     def _try_form_pipeline(self):
         """Try to form a pipeline with registered vehicles using FHDP stage partitioning"""
@@ -680,10 +483,12 @@ class PipelineTestServer:
                 self.pipeline_formed = True
 
             # Send invitations to vehicles with stage assignment
-            invitation = NetworkMessage(
-                msg_type=MessageType.PIPELINE_INVITE,
-                sender_id="server",
-                data={
+            invitation = CrossPlatformMessage(
+                message_id=str(uuid.uuid4()),
+                source_id="server",
+                target_id="",  # Will be set per vehicle
+                message_type="pipeline_invite",
+                payload={
                     'pipeline_id': pipeline_id,
                     'template_id': template.template_id,
                     'vehicles': self.active_pipeline.vehicles,
@@ -693,8 +498,11 @@ class PipelineTestServer:
             )
 
             for vehicle_id in self.active_pipeline.vehicles:
-                self.network_server.send_message(vehicle_id, invitation)
-                print(f"→ Sent pipeline invitation to {vehicle_id}")
+                invitation.target_id = vehicle_id
+                target_endpoint = self.platform_bridge.message_router.routing_table.get(vehicle_id)
+                if target_endpoint:
+                    self.platform_bridge.send_cross_platform_message(invitation)
+                    print(f"→ Sent pipeline invitation to {vehicle_id}")
 
     def _start_pipeline_training(self):
         """Start pipeline training"""
@@ -714,12 +522,14 @@ class PipelineTestServer:
         print(f"\n{'='*20} Round {round_num} {'='*20}")
 
         # Broadcast global model
-        global_model_state = _serialize_state_dict(self.global_model.state_dict())
+        global_model_state = self.global_model.state_dict()
 
-        broadcast_msg = NetworkMessage(
-            msg_type=MessageType.GLOBAL_MODEL,
-            sender_id="server",
-            data={
+        broadcast_msg = CrossPlatformMessage(
+            message_id=str(uuid.uuid4()),
+            source_id="server",
+            target_id="",  # Broadcast to all
+            message_type="global_model",
+            payload={
                 'round': round_num,
                 'model_state': global_model_state,
                 'training_config': {
@@ -730,24 +540,27 @@ class PipelineTestServer:
             }
         )
 
-        self.network_server.broadcast_message(broadcast_msg)
+        # Broadcast to all vehicles in pipeline
+        for vehicle_id in self.active_pipeline.vehicles:
+            broadcast_msg.target_id = vehicle_id
+            target_endpoint = self.platform_bridge.message_router.routing_table.get(vehicle_id)
+            if target_endpoint:
+                self.platform_bridge.send_cross_platform_message(broadcast_msg)
+
         print(f"✓ Broadcast global model for round {round_num}")
 
     def _aggregate_model_updates(self, round_num: int, updates: List[Dict]):
         """Aggregate model updates from all vehicles"""
         print(f"\n→ Aggregating updates for round {round_num}...")
 
-        # Deserialize list→tensor for each update (received via JSON)
-        tensor_updates = [_deserialize_state_dict(u) for u in updates]
-
         # Simple averaging aggregation
         aggregated_state = {}
-        num_updates = len(tensor_updates)
+        num_updates = len(updates)
 
-        for key in tensor_updates[0].keys():
+        for key in updates[0]['model_state'].keys():
             # Average parameters
             aggregated_state[key] = torch.mean(
-                torch.stack([u[key] for u in tensor_updates]),
+                torch.stack([update['model_state'][key] for update in updates]),
                 dim=0
             )
 
@@ -776,8 +589,6 @@ class PipelineTestServer:
 
     def _evaluate_global_model(self, round_num: int):
         """Evaluate global model (simplified)"""
-        # In real implementation, this would evaluate on test data
-        # For testing, we just print a mock accuracy
         mock_accuracy = 0.7 + (round_num * 0.05)
         print(f"  Global model accuracy (round {round_num}): {mock_accuracy:.2%}")
 
@@ -810,7 +621,7 @@ class PipelineTestServer:
 # ==================== Vehicle Mode ====================
 
 class PipelineTestVehicle:
-    """Vehicle mode for pipeline training test"""
+    """Vehicle mode for pipeline training test using FHDP's cross_platform_comm"""
 
     def __init__(self, vehicle_id: str, server_host: str, server_port: int,
                  resource_level: str = "medium", position: Tuple[float, float] = (0.0, 0.0)):
@@ -852,8 +663,37 @@ class PipelineTestVehicle:
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.001)
         self.criterion = nn.CrossEntropyLoss()
 
-        # Network client
-        self.network_client = NetworkClient(server_host, server_port, vehicle_id)
+        # Initialize cross-platform communication
+        self.server_endpoint = NetworkEndpoint(
+            host=server_host,
+            port=server_port,
+            protocol=TransportProtocol.TCP,
+            compression=CompressionType.ZLIB
+        )
+
+        # Create platform bridge with Jetson capabilities
+        from fhdp.core.hardware_adapter import ComputeCapability
+
+        local_platform = HardwarePlatform.JETSON_ORIN if resource_level == "high" else HardwarePlatform.JETSON_NANO
+        capability = ComputeCapability.EDGE_AI if resource_level == "high" else ComputeCapability.EDGE_AI
+
+        gpu_mem = 8.0 if local_platform == HardwarePlatform.JETSON_ORIN else 2.0
+
+        self.local_capabilities = HardwareCapabilities(
+            platform=local_platform,
+            compute_capability=capability,
+            cpu_cores=int(self.resources['cpu_capacity']),
+            cpu_freq=2.0,
+            memory_total=float(self.resources['memory_capacity']),
+            gpu_memory=gpu_mem,
+            npu_memory=0.0,
+            storage_speed='emmc',
+            network_speed=1000.0,
+            power_profile='balanced',
+            thermal_limit=85.0,
+            accelerated_compute=True
+        )
+        self.platform_bridge = PlatformBridge(self.local_capabilities)
 
         # Training state
         self.current_pipeline_id: Optional[str] = None
@@ -882,17 +722,11 @@ class PipelineTestVehicle:
 
         # Connect to server
         print("Connecting to server...")
-        if not self.network_client.connect():
-            print("✗ Failed to connect to server")
-            return False
+        self._connect_to_server()
 
-        # Start receiving messages
-        print("Starting message receiver...")
-        self.network_client.start_receiving()
-
-        # Register network handlers
+        # Register message handlers
         print("Registering network handlers...")
-        self._register_network_handlers()
+        self._register_message_handlers()
 
         # Register with server
         print("Registering with server...")
@@ -906,54 +740,89 @@ class PipelineTestVehicle:
         print(f"\nStopping vehicle {self.vehicle_id}...")
 
         self.training_active = False
-        self.network_client.disconnect()
 
         print("✓ Vehicle stopped")
 
-    def _register_network_handlers(self):
-        """Register network message handlers"""
+    def _connect_to_server(self):
+        """Connect to server using cross-platform communication"""
+        # Add route to server
+        from fhdp.core.hardware_adapter import ComputeCapability
 
-        # Pipeline invitation
-        self.network_client.register_handler(
-            MessageType.PIPELINE_INVITE,
+        remote_capabilities = HardwareCapabilities(
+            platform=HardwarePlatform.X86_LINUX,
+            compute_capability=ComputeCapability.SERVER_CLASS,
+            cpu_cores=32,
+            cpu_freq=3.5,
+            memory_total=64.0,
+            gpu_memory=24.0,
+            npu_memory=0.0,
+            storage_speed='ssd',
+            network_speed=1000.0,
+            power_profile='high_performance',
+            thermal_limit=95.0,
+            accelerated_compute=True
+        )
+
+        success = self.platform_bridge.connect_to_platform(
+            remote_node_id="server",
+            remote_capabilities=remote_capabilities,
+            network_endpoint=self.server_endpoint
+        )
+
+        if success:
+            print(f"✓ Connected to server {self.server_host}:{self.server_port}")
+        else:
+            print(f"✗ Failed to connect to server")
+            raise ConnectionError("Cannot connect to server")
+
+    def _register_message_handlers(self):
+        """Register message handlers for cross-platform communication"""
+
+        self.platform_bridge.message_router.register_handler(
+            'pipeline_invite',
             self._handle_pipeline_invitation
         )
 
-        # Global model
-        self.network_client.register_handler(
-            MessageType.GLOBAL_MODEL,
+        self.platform_bridge.message_router.register_handler(
+            'global_model',
             self._handle_global_model
         )
 
-        # Status
-        self.network_client.register_handler(
-            MessageType.STATUS,
+        self.platform_bridge.message_router.register_handler(
+            'status_response',
             self._handle_status
         )
 
     def _register_with_server(self):
         """Register vehicle with server"""
         print(f"Sending registration message...")
-        registration_msg = NetworkMessage(
-            msg_type=MessageType.REGISTER,
-            sender_id=self.vehicle_id,
-            data={
+
+        registration_msg = CrossPlatformMessage(
+            message_id=str(uuid.uuid4()),
+            source_id=self.vehicle_id,
+            target_id="server",
+            message_type="register",
+            payload={
                 'position': self.position,
                 'velocity': 0.0,
                 'direction': 0.0,
                 'resources': self.resources
+            },
+            metadata={
+                'client_host': socket.gethostbyname(socket.gethostname()),
+                'client_port': 0
             }
         )
 
-        success = self.network_client.send_message(registration_msg)
+        success = self.platform_bridge.send_cross_platform_message(registration_msg)
         if success:
             print("✓ Registration sent to server")
         else:
             print("✗ Failed to send registration message")
 
-    def _handle_pipeline_invitation(self, message: NetworkMessage):
+    def _handle_pipeline_invitation(self, message: CrossPlatformMessage):
         """Handle pipeline invitation from server"""
-        pipeline_data = message.data
+        pipeline_data = message.payload
 
         print(f"\nReceived pipeline invitation from server")
         print(f"  Pipeline ID: {pipeline_data['pipeline_id']}")
@@ -976,10 +845,12 @@ class PipelineTestVehicle:
                 print(f"  Assigned stage: {self.current_stage}")
 
             # Accept invitation
-            response = NetworkMessage(
-                msg_type=MessageType.PIPELINE_RESPONSE,
-                sender_id=self.vehicle_id,
-                data={
+            response = CrossPlatformMessage(
+                message_id=str(uuid.uuid4()),
+                source_id=self.vehicle_id,
+                target_id="server",
+                message_type="pipeline_response",
+                payload={
                     'pipeline_id': pipeline_data['pipeline_id'],
                     'accepted': True,
                     'stage': self.current_stage,
@@ -987,39 +858,41 @@ class PipelineTestVehicle:
                 }
             )
 
-            success = self.network_client.send_message(response)
+            success = self.platform_bridge.send_cross_platform_message(response)
             if success:
                 print(f"✓ Accepted pipeline invitation")
         else:
             print(f"✗ Vehicle {self.vehicle_id} not in selected pipeline vehicles")
-            response = NetworkMessage(
-                msg_type=MessageType.PIPELINE_RESPONSE,
-                sender_id=self.vehicle_id,
-                data={
+            response = CrossPlatformMessage(
+                message_id=str(uuid.uuid4()),
+                source_id=self.vehicle_id,
+                target_id="server",
+                message_type="pipeline_response",
+                payload={
                     'pipeline_id': pipeline_data['pipeline_id'],
                     'accepted': False,
                     'reason': 'Not in vehicle list'
                 }
             )
-            self.network_client.send_message(response)
+            self.platform_bridge.send_cross_platform_message(response)
 
-    def _handle_global_model(self, message: NetworkMessage):
+    def _handle_global_model(self, message: CrossPlatformMessage):
         """Handle global model broadcast from server"""
-        model_data = message.data
+        model_data = message.payload
         round_num = model_data['round']
         training_config = model_data['training_config']
 
         print(f"\nReceived global model for round {round_num}")
 
-        # model_state arrived as JSON-serialized lists; restore to tensors
-        self.model.load_state_dict(_deserialize_state_dict(model_data['model_state']))
+        # Update local model
+        self.model.load_state_dict(model_data['model_state'])
 
         # Start training
         self._train_locally(round_num, training_config)
 
-    def _handle_status(self, message: NetworkMessage):
+    def _handle_status(self, message: CrossPlatformMessage):
         """Handle status response"""
-        status = message.data
+        status = message.payload
         print("\nServer Status:")
         print(f"  Pipeline formed: {status.get('pipeline_formed')}")
         print(f"  Active pipeline: {status.get('active_pipeline')}")
@@ -1093,13 +966,15 @@ class PipelineTestVehicle:
         """Send model update to server"""
         print(f"→ Sending model update for round {round_num}...")
 
-        # Serialize tensor→list for JSON transport
-        model_state = _serialize_state_dict(self.model.state_dict())
+        # Get model state dict
+        model_state = self.model.state_dict()
 
-        update_msg = NetworkMessage(
-            msg_type=MessageType.MODEL_UPDATE,
-            sender_id=self.vehicle_id,
-            data={
+        update_msg = CrossPlatformMessage(
+            message_id=str(uuid.uuid4()),
+            source_id=self.vehicle_id,
+            target_id="server",
+            message_type="model_update",
+            payload={
                 'round': round_num,
                 'model_state': model_state,
                 'loss': float(np.mean(epoch_losses)),
@@ -1107,7 +982,7 @@ class PipelineTestVehicle:
             }
         )
 
-        success = self.network_client.send_message(update_msg)
+        success = self.platform_bridge.send_cross_platform_message(update_msg)
 
         if success:
             with self.lock:
@@ -1118,21 +993,25 @@ class PipelineTestVehicle:
 
     def send_heartbeat(self):
         """Send heartbeat to server"""
-        heartbeat_msg = NetworkMessage(
-            msg_type=MessageType.HEARTBEAT,
-            sender_id=self.vehicle_id,
-            data={'timestamp': time.time()}
+        heartbeat_msg = CrossPlatformMessage(
+            message_id=str(uuid.uuid4()),
+            source_id=self.vehicle_id,
+            target_id="server",
+            message_type="heartbeat",
+            payload={'timestamp': time.time()}
         )
-        self.network_client.send_message(heartbeat_msg)
+        self.platform_bridge.send_cross_platform_message(heartbeat_msg)
 
     def request_status(self):
         """Request server status"""
-        status_msg = NetworkMessage(
-            msg_type=MessageType.STATUS,
-            sender_id=self.vehicle_id,
-            data={}
+        status_msg = CrossPlatformMessage(
+            message_id=str(uuid.uuid4()),
+            source_id=self.vehicle_id,
+            target_id="server",
+            message_type="status",
+            payload={}
         )
-        self.network_client.send_message(status_msg)
+        self.platform_bridge.send_cross_platform_message(status_msg)
 
 
 # ==================== Main ====================
@@ -1152,19 +1031,19 @@ def signal_handler(signum, frame):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='FHDP Pipeline Training Test',
+        description='FHDP Pipeline Training Test (Refactored)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Start server on 4090 Linux machine:
-  python test_pipeline_training.py --mode server --host 0.0.0.0 --port 5000
+  python test_pipeline_training_refactored.py --mode server --host 0.0.0.0 --port 5000
 
   # Start vehicle on Jetson AGX Orin:
-  python test_pipeline_training.py --mode vehicle --vehicle-id agx_orin_001 \\
+  python test_pipeline_training_refactored.py --mode vehicle --vehicle-id agx_orin_001 \\
       --server-host <server-ip> --server-port 5000 --resource-level high
 
   # Start vehicle on Jetson Orin Nano:
-  python test_pipeline_training.py --mode vehicle --vehicle-id orin_nano_001 \\
+  python test_pipeline_training_refactored.py --mode vehicle --vehicle-id orin_nano_001 \\
       --server-host <server-ip> --server-port 5000 --resource-level medium
         """
     )

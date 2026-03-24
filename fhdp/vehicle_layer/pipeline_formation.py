@@ -227,7 +227,7 @@ class PipelineFormation:
         # Perform greedy selection
         selected_candidates = self._perform_greedy_selection(candidates, template)
         
-        if len(selected_candidates) == template.resource_requirements:
+        if len(selected_candidates) == len(template.resource_requirements):
             # Successfully formed pipeline
             pipeline_state.selected_candidates = selected_candidates
             pipeline_state.filled_positions = len(selected_candidates)

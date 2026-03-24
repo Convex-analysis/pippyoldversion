@@ -1,11 +1,12 @@
 #!/bin/bash
 #
-# FHDP Pipeline Training Test Launcher
+# FHDP Pipeline Training Test Launcher (Refactored)
 #
-# This script helps launch the pipeline training test on different machines.
+# This script helps launch pipeline training test on different machines.
+# Now uses FHDP's built-in cross_platform_comm for reliable network communication.
 #
 # Usage:
-#   ./run_pipeline_test.sh [server|agx|nano] [server-ip]
+#   ./run_pipeline_test_refactored.sh [server|agx|nano] [server-ip]
 #
 
 set -e
@@ -22,7 +23,7 @@ print_banner() {
     echo -e "${BLUE}"
     echo "╔════════════════════════════════════════════════════════════╗"
     echo "║     FHDP Pipeline Training Test Launcher                  ║"
-    echo "║     Testing pipeline training across Jetson devices       ║"
+    echo "║     Using FHDP's cross_platform_comm (Refactored)        ║"
     echo "╚════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -37,40 +38,35 @@ print_usage() {
     echo "  nano    - Run on Jetson Orin Nano (medium resource vehicle)"
     echo ""
     echo "Arguments:"
-    echo "  SERVER_IP  - IP address of the server (required for agx and nano modes)"
+    echo "  SERVER_IP  - IP address of Mac proxy (required for agx and nano modes)"
     echo ""
     echo "Examples:"
     echo "  # On 4090 server:"
     echo "  $0 server"
     echo ""
-    echo "  # On Jetson AGX Orin (with SSH tunnel):"
-    echo "  $0 agx 192.168.1.100"
+    echo "  # On Jetson AGX Orin (connect via Mac proxy):"
+    echo "  $0 agx 219.216.65.34"
     echo ""
-    echo "  # On Jetson Orin Nano (with SSH tunnel):"
-    echo "  $0 nano 192.168.1.100"
+    echo "  # On Jetson Orin Nano (connect via Mac proxy):"
+    echo "  $0 nano 219.216.65.34"
     echo ""
-    echo "  # Disable SSH tunnel and connect directly:"
-    echo "  USE_SSH_TUNNEL=false $0 agx 192.168.1.100"
+    echo "Prerequisites:"
+    echo "  1. On Mac: Establish SSH port forwarding:"
+    echo "     ssh -L 0.0.0.0:5001:localhost:5001 xta@219.216.64.173 -N -f"
+    echo ""
+    echo "  2. On Linux 4090 server: Start the server first:"
+    echo "     $0 server"
+    echo ""
+    echo "  3. On Jetson devices: Connect to Mac proxy IP, not Linux server directly"
     echo ""
     echo "Environment Variables:"
-    echo "  FHDP_PORT      - Server port (default: 5000)"
+    echo "  FHDP_PORT      - Server port (default: 5001)"
     echo "  FHDP_CONFIG    - Path to config file"
     echo "  PYTHON         - Python interpreter (default: python3)"
-    echo "  USE_SSH_TUNNEL - Use SSH tunnel (default: true)"
-    echo "  SSH_TUNNEL_USER - SSH username for tunnel (default: current user)"
     echo ""
-    echo "SOCKS Proxy Options (alternative to SSH tunnel):"
-    echo "  USE_SOCKS_PROXY        - Use SOCKS proxy (default: false)"
-    echo "  SOCKS_PROXY_HOST       - SOCKS proxy host (default: 127.0.0.1)"
-    echo "  SOCKS_PROXY_PORT       - SOCKS proxy port (default: 1080)"
-    echo "  SOCKS_PROXY_TYPE       - SOCKS type: SOCKS4 or SOCKS5 (default: SOCKS5)"
-    echo ""
-    echo "Examples with SOCKS proxy:"
-    echo "  # Use SOCKS5 proxy at localhost:1080:"
-    echo "  USE_SOCKS_PROXY=true USE_SSH_TUNNEL=false $0 agx 192.168.1.100"
-    echo ""
-    echo "  # Use SOCKS5 proxy at custom host:port:"
-    echo "  USE_SOCKS_PROXY=true USE_SSH_TUNNEL=false SOCKS_PROXY_HOST=proxy.example.com SOCKS_PROXY_PORT=1080 $0 agx 192.168.1.100"
+    echo "Network Architecture:"
+    echo "  Jetson -> Mac (219.216.65.34:5001) -> Linux 4090 (219.216.64.173:5001)"
+    echo "  Mac acts as SSH port forwarder for cross-subnet communication"
 }
 
 # Check Python installation
@@ -103,7 +99,7 @@ check_pytorch() {
 
 # Run server mode
 run_server() {
-    local port=${FHDP_PORT:-5000}
+    local port=${FHDP_PORT:-5001}
     local config=${FHDP_CONFIG:-""}
 
     echo -e "${BLUE}"
@@ -115,8 +111,11 @@ run_server() {
     echo "Port: $port"
     echo "Config: ${config:-(default)}"
     echo ""
+    echo -e "${GREEN}Using FHDP's built-in cross_platform_comm for reliable communication${NC}"
+    echo "Features: Length-prefix protocol, zlib compression, connection pooling"
+    echo ""
 
-    local cmd="$PYTHON_CMD test_pipeline_training.py --mode server --host 0.0.0.0 --port $port"
+    local cmd="$PYTHON_CMD test_pipeline_training_refactored.py --mode server --host 0.0.0.0 --port $port"
 
     if [ -n "$config" ]; then
         cmd="$cmd --config $config"
@@ -132,9 +131,8 @@ run_server() {
 run_vehicle() {
     local mode=$1
     local server_ip=$2
-    local port=${FHDP_PORT:-5000}
+    local port=${FHDP_PORT:-5001}
     local config=${FHDP_CONFIG:-""}
-    local use_ssh_tunnel=${USE_SSH_TUNNEL:-true}
 
     # Set vehicle parameters based on mode
     if [ "$mode" = "agx" ]; then
@@ -154,38 +152,15 @@ run_vehicle() {
     echo "=================================="
     echo -e "${NC}"
     echo "Vehicle ID: $vehicle_id"
-
-    # Setup SSH tunnel if needed
-    if [ "$use_ssh_tunnel" = "true" ] && [ "$server_ip" != "127.0.0.1" ] && [ "$server_ip" != "localhost" ]; then
-        echo -e "${YELLOW}Setting up SSH tunnel to $server_ip...${NC}"
-
-        # Extract username from SSH_TUNNEL_USER env var or default to current user
-        local ssh_user=${SSH_TUNNEL_USER:-$(whoami)}
-
-        # Create SSH tunnel in background
-        ssh -N -L ${port}:localhost:${port} ${ssh_user}@${server_ip} &
-        SSH_TUNNEL_PID=$!
-
-        # Wait for tunnel to be established
-        sleep 2
-
-        if ps -p $SSH_TUNNEL_PID > /dev/null; then
-            echo -e "${GREEN}✓ SSH tunnel established (PID: $SSH_TUNNEL_PID)${NC}"
-            echo "Server: localhost:$port (via SSH tunnel to $server_ip)"
-            server_ip="localhost"
-        else
-            echo -e "${RED}✗ Failed to establish SSH tunnel, connecting directly${NC}"
-            echo "Server: $server_ip:$port"
-        fi
-    else
-        echo "Server: $server_ip:$port"
-    fi
-
+    echo "Server: $server_ip:$port"
     echo "Resource Level: $resource_level"
     echo "Config: ${config:-(default)}"
     echo ""
+    echo -e "${GREEN}Using FHDP's built-in cross_platform_comm for reliable communication${NC}"
+    echo "Features: Length-prefix protocol, zlib compression, connection pooling"
+    echo ""
 
-    local cmd="$PYTHON_CMD test_pipeline_training.py --mode vehicle --vehicle-id $vehicle_id --server-host $server_ip --server-port $port --resource-level $resource_level"
+    local cmd="$PYTHON_CMD test_pipeline_training_refactored.py --mode vehicle --vehicle-id $vehicle_id --server-host $server_ip --server-port $port --resource-level $resource_level"
 
     if [ -n "$config" ]; then
         cmd="$cmd --config $config"
@@ -210,15 +185,6 @@ main() {
     MODE=$1
     SERVER_IP=${2:-""}
 
-    # Set trap to clean up SSH tunnel on exit
-    cleanup() {
-        if [ ! -z "${SSH_TUNNEL_PID:-}" ] && kill -0 $SSH_TUNNEL_PID 2>/dev/null; then
-            echo -e "${YELLOW}Closing SSH tunnel (PID: $SSH_TUNNEL_PID)...${NC}"
-            kill $SSH_TUNNEL_PID
-        fi
-    }
-    trap cleanup EXIT INT TERM
-
     # Check dependencies
     check_python
     check_pytorch
@@ -234,6 +200,8 @@ main() {
         agx|nano)
             if [ -z "$SERVER_IP" ]; then
                 echo -e "${RED}Error: SERVER_IP is required for $MODE mode${NC}"
+                echo ""
+                echo "Please provide the Mac proxy IP address (219.216.65.34)"
                 print_usage
                 exit 1
             fi
