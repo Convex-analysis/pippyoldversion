@@ -14,7 +14,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 import numpy as np
-import psutil
+
+# Try to import psutil for system resource monitoring
+psutil_available = False
+try:
+    import psutil
+    psutil_available = True
+except ImportError:
+    pass
 
 from ..core.types import ResourceMetrics, ResourceClass
 

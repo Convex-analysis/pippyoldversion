@@ -11,6 +11,9 @@
 
 set -e
 
+# Global variables
+PYTHON_CMD=${PYTHON:-python3}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -71,7 +74,6 @@ print_usage() {
 
 # Check Python installation
 check_python() {
-    PYTHON_CMD=${PYTHON:-python3}
 
     if ! command -v $PYTHON_CMD &> /dev/null; then
         echo -e "${RED}Error: Python not found. Please install Python 3.8+${NC}"
@@ -83,7 +85,6 @@ check_python() {
 
 # Check PyTorch installation
 check_pytorch() {
-    PYTHON_CMD=${PYTHON:-python3}
 
     if ! $PYTHON_CMD -c "import torch" &> /dev/null; then
         echo -e "${YELLOW}Warning: PyTorch not found. Installing...${NC}"

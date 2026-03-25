@@ -14,7 +14,57 @@ import zlib
 import pickle
 import hashlib
 import glob
-import psutil
+
+# Try to import psutil for system resource monitoring
+psutil_available = False
+try:
+    import psutil
+    psutil_available = True
+except ImportError:
+    pass
+
+# Try to import faster JSON libraries
+faster_json_available = False
+try:
+    import orjson
+    faster_json_available = True
+except ImportError:
+    try:
+        import ujson
+        faster_json_available = True
+    except ImportError:
+        pass
+
+# Try to import additional compression libraries
+try:
+    import lz4.frame
+    lz4_available = True
+except ImportError:
+    lz4_available = False
+    
+try:
+    import brotli
+    brotli_available = True
+except ImportError:
+    brotli_available = False
+    
+try:
+    import snappy
+    snappy_available = True
+except ImportError:
+    snappy_available = False
+
+# Try to import binary serialization libraries
+binary_serialization_available = False
+try:
+    import msgpack
+    binary_serialization_available = True
+except ImportError:
+    try:
+        import protobuf
+        binary_serialization_available = True
+    except ImportError:
+        pass
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -26,7 +76,6 @@ from collections import deque
 from .hardware_adapter import HardwarePlatform, HardwareCapabilities, NetworkInterface
 from .types import CommunicationBundle, CommunicationProtocol
 import sys
-sys.path.insert(0, '/Volumes/HardDriveMac/EXP/pippyoldversion')
 try:
     from fhdp.vehicle_layer.communication import V2VMessage
 except ImportError:
@@ -49,6 +98,78 @@ class CompressionType(Enum):
     LZ4 = "lz4"
     BROTLI = "brotli"
 
+class SerializationFormat(Enum):
+    """Serialization formats"""
+    JSON = "json"
+    MSGPACK = "msgpack"
+    PROTOBUF = "protobuf"
+
+class SerializationManager:
+    """Manages serialization/deserialization with automatic backend selection"""
+    
+    def __init__(self, default_format: SerializationFormat = SerializationFormat.JSON):
+        self.default_format = default_format
+        self._setup_serializers()
+    
+    def _setup_serializers(self):
+        # Setup JSON serializers
+        self.json_dumps = json.dumps
+        self.json_loads = json.loads
+        
+        if faster_json_available:
+            if 'orjson' in globals():
+                self.json_dumps = lambda obj: orjson.dumps(obj, default=str).decode('utf-8')
+                self.json_loads = lambda data: orjson.loads(data)
+            elif 'ujson' in globals():
+                self.json_dumps = ujson.dumps
+                self.json_loads = ujson.loads
+        
+        # Setup binary serializers
+        self.binary_available = False
+        self.binary_dumps = None
+        self.binary_loads = None
+        
+        if binary_serialization_available:
+            if 'msgpack' in globals():
+                self.binary_dumps = msgpack.packb
+                self.binary_loads = msgpack.unpackb
+                self.binary_available = True
+    
+    def serialize(self, data: Any, format: Optional[SerializationFormat] = None) -> bytes:
+        """Serialize data using the specified format"""
+        format = format or self.default_format
+        
+        if format == SerializationFormat.JSON:
+            return self.json_dumps(data).encode('utf-8')
+        elif format == SerializationFormat.MSGPACK and self.binary_available:
+            return self.binary_dumps(data, default=str)
+        else:
+            # Fallback to JSON
+            return self.json_dumps(data).encode('utf-8')
+    
+    def deserialize(self, data: bytes, format: Optional[SerializationFormat] = None) -> Any:
+        """Deserialize data using the specified format"""
+        format = format or self.default_format
+        
+        if format == SerializationFormat.JSON:
+            return self.json_loads(data)
+        elif format == SerializationFormat.MSGPACK and self.binary_available:
+            return self.binary_loads(data)
+        else:
+            # Try to detect format
+            try:
+                # First try JSON
+                return self.json_loads(data)
+            except:
+                # Then try msgpack if available
+                if self.binary_available:
+                    try:
+                        return self.binary_loads(data)
+                    except:
+                        pass
+                # Last resort: return as string
+                return data.decode('utf-8', errors='ignore')
+
 @dataclass
 class NetworkEndpoint:
     """Network endpoint configuration"""
@@ -58,6 +179,7 @@ class NetworkEndpoint:
     ssl_enabled: bool = False
     ssl_context: Optional[ssl.SSLContext] = None
     compression: CompressionType = CompressionType.ZLIB
+    serialization_format: SerializationFormat = SerializationFormat.JSON
 
 @dataclass
 class MessageMetrics:
@@ -72,6 +194,33 @@ class MessageMetrics:
     success: bool
     protocol: TransportProtocol
     retry_count: int = 0
+    
+    # Pipeline-specific metrics
+    pipeline_id: Optional[str] = None
+    stage_id: Optional[str] = None
+    sequence_id: Optional[str] = None
+    sequence_index: int = 0
+    data_type: Optional[str] = None
+    
+    # Performance metrics
+    serialization_time: float = 0.0
+    compression_time: float = 0.0
+    deserialization_time: float = 0.0
+    decompression_time: float = 0.0
+    queue_time: float = 0.0
+    processing_time: float = 0.0
+    
+    # Resource usage
+    cpu_usage: float = 0.0
+    memory_usage: float = 0.0
+    
+    # Compression details
+    compression_algorithm: Optional[str] = None
+    serialization_format: Optional[str] = None
+    
+    # Connection details
+    connection_type: str = "regular"  # regular, pipeline, preheated
+    connection_reused: bool = False
 
 @dataclass
 class CrossPlatformMessage:
@@ -87,23 +236,40 @@ class CrossPlatformMessage:
     requires_ack: bool = True
     priority: int = 0
     compression_type: CompressionType = CompressionType.ZLIB
+    serialization_format: SerializationFormat = SerializationFormat.JSON
 
     def _serialize_payload(self, obj: Any) -> Any:
         """递归序列化 payload，处理 Tensor 等不可 JSON 序列化的对象"""
-        if hasattr(obj, 'tolist'):  # numpy array or torch tensor
-            return obj.tolist()
-        elif isinstance(obj, dict):
-            return {k: self._serialize_payload(v) for k, v in obj.items()}
-        elif isinstance(obj, (list, tuple)):
-            return [self._serialize_payload(item) for item in obj]
-        elif isinstance(obj, (str, int, float, bool)) or obj is None:
-            return obj
-        else:
-            return str(obj)  # 其他类型转字符串
+        try:
+            if hasattr(obj, 'tolist'):  # numpy array or torch tensor
+                # 处理大型数组的安全转换
+                import numpy as np
+                # Higher threshold for training-related data to support model parameters
+                # Regular messages: 10,000 elements limit
+                # Training data: 1,000,000 elements limit to support large model parameters
+                max_elements = 1000000 if hasattr(self, 'message_type') and self.message_type in ['global_model', 'model_update', 'pipeline_data'] else 10000
+                if hasattr(obj, 'shape') and np.prod(obj.shape) > max_elements:
+                    return f"<Array shape={obj.shape} dtype={obj.dtype}>"  # 返回元数据而非实际数据
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {k: self._serialize_payload(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                # Keep recursive processing for lists
+                return [self._serialize_payload(item) for item in obj]
+            elif isinstance(obj, (str, int, float, bool)) or obj is None:
+                return obj
+            elif hasattr(obj, '__dict__'):  # 处理自定义对象
+                return {k: self._serialize_payload(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
+            else:
+                return str(obj)  # 其他类型转字符串
+        except Exception as e:
+            logging.warning(f"Failed to serialize object {type(obj).__name__}: {e}, using string representation")
+            return str(obj)
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data['compression_type'] = self.compression_type.value
+        data['serialization_format'] = self.serialization_format.value
         data['payload'] = self._serialize_payload(data['payload'])
         return data
 
@@ -119,10 +285,368 @@ class CrossPlatformMessage:
             )
         if 'compression_type' in data and isinstance(data['compression_type'], str):
             data['compression_type'] = CompressionType(data['compression_type'])
+        if 'serialization_format' in data and isinstance(data['serialization_format'], str):
+            data['serialization_format'] = SerializationFormat(data['serialization_format'])
         # 过滤掉 dataclass 不认识的额外字段，避免 unexpected keyword argument
         _known = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in _known}
         return cls(**filtered)
+
+@dataclass
+class BatchMessage:
+    """Batch message container for efficient bulk transmission"""
+    batch_id: str
+    source_id: str
+    target_id: str
+    messages: List[CrossPlatformMessage]
+    timestamp: float = field(default_factory=time.time)
+    batch_size: int = field(default=0)
+    compression_type: CompressionType = CompressionType.ZLIB
+    serialization_format: SerializationFormat = SerializationFormat.JSON
+    
+    def __post_init__(self):
+        if self.batch_size == 0:
+            self.batch_size = len(self.messages)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data['compression_type'] = self.compression_type.value
+        data['serialization_format'] = self.serialization_format.value
+        data['messages'] = [msg.to_dict() for msg in self.messages]
+        return data
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'BatchMessage':
+        # Convert messages back to CrossPlatformMessage objects
+        messages = [CrossPlatformMessage.from_dict(msg_dict) for msg_dict in data['messages']]
+        
+        # Convert enums back
+        if isinstance(data['compression_type'], str):
+            data['compression_type'] = CompressionType(data['compression_type'])
+        if isinstance(data['serialization_format'], str):
+            data['serialization_format'] = SerializationFormat(data['serialization_format'])
+            
+        # Create batch message
+        return cls(
+            batch_id=data['batch_id'],
+            source_id=data['source_id'],
+            target_id=data['target_id'],
+            messages=messages,
+            timestamp=data['timestamp'],
+            batch_size=data['batch_size'],
+            compression_type=data['compression_type'],
+            serialization_format=data['serialization_format']
+        )
+
+@dataclass
+class PipelineMessage:
+    """Pipeline-specific message for efficient inter-stage communication"""
+    pipeline_id: str
+    stage_id: str
+    source_id: str
+    target_id: str
+    data: Any  # Pipeline data (tensors, activations, gradients, etc.)
+    data_type: str  # Type of data (input, activation, gradient, checkpoint, etc.)
+    sequence_id: str  # Sequence identifier for ordered processing
+    sequence_index: int = 0  # Position in sequence
+    total_sequence_length: int = 1  # Total number of messages in sequence
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+    requires_ack: bool = True
+    compression_type: CompressionType = CompressionType.ZLIB
+    serialization_format: SerializationFormat = SerializationFormat.JSON
+    
+    def __post_init__(self):
+        # Add pipeline-specific metadata
+        self.metadata.update({
+            'pipeline_id': self.pipeline_id,
+            'stage_id': self.stage_id,
+            'sequence_id': self.sequence_id,
+            'sequence_index': self.sequence_index,
+            'data_type': self.data_type
+        })
+    
+    def _serialize_data(self, obj: Any) -> Any:
+        """Specialized serialization for pipeline data"""
+        try:
+            if hasattr(obj, 'tolist'):  # numpy array or torch tensor
+                # Pipeline data often contains large tensors, so we need efficient serialization
+                import numpy as np
+                if hasattr(obj, 'shape') and np.prod(obj.shape) > 50000:  # 更大的限制，流水线数据需要更多细节
+                    # For extremely large tensors, we might want to split them
+                    return {
+                        '__tensor_metadata__': True,
+                        'shape': obj.shape,
+                        'dtype': str(obj.dtype),
+                        'data': obj.tolist()  # Still convert to list for now
+                    }
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {k: self._serialize_data(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [self._serialize_data(item) for item in obj]
+            elif isinstance(obj, (str, int, float, bool)) or obj is None:
+                return obj
+            elif hasattr(obj, '__dict__'):  # 处理自定义对象
+                return {k: self._serialize_data(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
+            else:
+                return str(obj)  # 其他类型转字符串
+        except Exception as e:
+            logging.warning(f"Failed to serialize pipeline data {type(obj).__name__}: {e}, using string representation")
+            return str(obj)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data['compression_type'] = self.compression_type.value
+        data['serialization_format'] = self.serialization_format.value
+        data['data'] = self._serialize_data(data['data'])
+        return data
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'PipelineMessage':
+        # Convert enums back
+        if isinstance(data['compression_type'], str):
+            data['compression_type'] = CompressionType(data['compression_type'])
+        if isinstance(data['serialization_format'], str):
+            data['serialization_format'] = SerializationFormat(data['serialization_format'])
+        
+        # Create pipeline message
+        return cls(**data)
+
+class PipelineCommunicationManager:
+    """Manager for pipeline-specific communication patterns"""
+    
+    def __init__(self, message_router: 'MessageRouter'):
+        self.message_router = message_router
+        self.active_pipelines: Dict[str, Dict[str, Any]] = {}
+        self.sequence_buffers: Dict[str, Dict[int, PipelineMessage]] = {}  # sequence_id -> {index: message}
+        self.sequence_handlers: Dict[str, Callable] = {}  # sequence_id -> handler
+    
+    def register_pipeline(self, pipeline_id: str, stages: List[str], network_endpoints: Dict[str, NetworkEndpoint]):
+        """Register a new pipeline with its stages and endpoints"""
+        self.active_pipelines[pipeline_id] = {
+            'stages': stages,
+            'endpoints': network_endpoints,
+            'created_at': time.time()
+        }
+    
+    def send_pipeline_data(self, pipeline_message: PipelineMessage, target_endpoint: NetworkEndpoint) -> bool:
+        """Send pipeline data to the next stage"""
+        try:
+            # Convert to CrossPlatformMessage for transmission
+            cp_message = CrossPlatformMessage(
+                message_id=f"pipeline_{pipeline_message.pipeline_id}_{pipeline_message.sequence_id}_{pipeline_message.sequence_index}",
+                source_id=pipeline_message.source_id,
+                target_id=pipeline_message.target_id,
+                message_type="pipeline_data",
+                payload=pipeline_message.to_dict(),
+                metadata=pipeline_message.metadata,
+                requires_ack=pipeline_message.requires_ack,
+                compression_type=pipeline_message.compression_type,
+                serialization_format=pipeline_message.serialization_format
+            )
+            
+            # Send using pipeline-specific connection for better performance
+            return self._send_pipeline_message(cp_message, target_endpoint, pipeline_message.pipeline_id)
+        except Exception as e:
+            logging.error(f"Failed to send pipeline data: {e}")
+            return False
+    
+    def send_pipeline_batch(self, pipeline_messages: List[PipelineMessage], target_endpoint: NetworkEndpoint) -> bool:
+        """Send multiple pipeline messages in a batch"""
+        if not pipeline_messages:
+            return True
+            
+        try:
+            # Convert to CrossPlatformMessage for batch transmission
+            cp_messages = []
+            for msg in pipeline_messages:
+                cp_msg = CrossPlatformMessage(
+                    message_id=f"pipeline_{msg.pipeline_id}_{msg.sequence_id}_{msg.sequence_index}",
+                    source_id=msg.source_id,
+                    target_id=msg.target_id,
+                    message_type="pipeline_data",
+                    payload=msg.to_dict(),
+                    metadata=msg.metadata,
+                    requires_ack=msg.requires_ack,
+                    compression_type=msg.compression_type,
+                    serialization_format=msg.serialization_format
+                )
+                cp_messages.append(cp_msg)
+            
+            # Get pipeline ID from first message
+            pipeline_id = pipeline_messages[0].pipeline_id if pipeline_messages else None
+            
+            # Send using pipeline-specific connection for better performance
+            return self._send_pipeline_batch(cp_messages, target_endpoint, pipeline_id)
+        except Exception as e:
+            logging.error(f"Failed to send pipeline batch: {e}")
+            return False
+            
+    def _send_pipeline_message(self, cp_message: CrossPlatformMessage, target_endpoint: NetworkEndpoint, pipeline_id: str) -> bool:
+        """Internal method to send pipeline message using pipeline-specific connection"""
+        try:
+            # Get pipeline connection
+            result = self.message_router.connection_pool.get_pipeline_connection(pipeline_id, target_endpoint)
+            if result is None:
+                # Fallback to regular connection if pipeline connection fails
+                return self.message_router.send_message(cp_message, target_endpoint)
+                
+            conn, recv_lock = result
+            
+            # Serialize message
+            message_dict = cp_message.to_dict()
+            serialized_data = self.message_router.serialization_manager.serialize(message_dict, cp_message.serialization_format)
+            
+            # Compress if needed
+            if cp_message.compression_type != CompressionType.NONE:
+                serialized_data, compression_ratio = self.message_router.compression_manager.compress(
+                    serialized_data, cp_message.compression_type
+                )
+            
+            # Send message
+            msg_len = len(serialized_data).to_bytes(4, byteorder='big')
+            conn.sendall(msg_len + serialized_data)
+            
+            # Send ACK if requested
+            if cp_message.requires_ack:
+                with recv_lock:
+                    ack_len_data = self.message_router._recv_exact(conn, 4)
+                    if not ack_len_data:
+                        return False
+                    ack_length = int.from_bytes(ack_len_data, byteorder='big')
+                    ack_data = self.message_router._recv_exact(conn, ack_length)
+                    if not ack_data:
+                        return False
+            
+            # Update connection usage stats
+            self.message_router.connection_pool.release_connection(target_endpoint, pipeline_id=pipeline_id)
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Failed to send pipeline message: {e}")
+            self.message_router.connection_pool.invalidate_connection(target_endpoint, pipeline_id=pipeline_id)
+            # Fallback to regular connection
+            return self.message_router.send_message(cp_message, target_endpoint)
+            
+    def _send_pipeline_batch(self, cp_messages: List[CrossPlatformMessage], target_endpoint: NetworkEndpoint, pipeline_id: Optional[str]) -> bool:
+        """Internal method to send pipeline batch using pipeline-specific connection"""
+        if not cp_messages:
+            return True
+            
+        try:
+            # Get pipeline connection if available
+            result = None
+            if pipeline_id:
+                result = self.message_router.connection_pool.get_pipeline_connection(pipeline_id, target_endpoint)
+                
+            if result is None:
+                # Fallback to regular batch sending
+                return self.message_router.send_batch(cp_messages, target_endpoint)
+                
+            conn, recv_lock = result
+            
+            # Use the first message's compression type and serialization format
+            compression_type = cp_messages[0].compression_type
+            serialization_format = cp_messages[0].serialization_format
+            
+            # Create batch message
+            batch_id = f"batch_{int(time.time() * 1000)}_{id(cp_messages)}"
+            batch_source_id = cp_messages[0].source_id
+            batch_target_id = cp_messages[0].target_id
+            
+            batch_message = BatchMessage(
+                batch_id=batch_id,
+                source_id=batch_source_id,
+                target_id=batch_target_id,
+                messages=cp_messages,
+                compression_type=compression_type,
+                serialization_format=serialization_format
+            )
+            
+            # Serialize and send batch
+            batch_dict = batch_message.to_dict()
+            batch_data = self.message_router.serialization_manager.serialize(batch_dict, serialization_format)
+            
+            # Compress if needed
+            if compression_type != CompressionType.NONE:
+                batch_data, compression_ratio = self.message_router.compression_manager.compress(batch_data, compression_type)
+            
+            # Send batch
+            msg_len = len(batch_data).to_bytes(4, byteorder='big')
+            conn.sendall(msg_len + batch_data)
+            
+            # Send ACK if requested
+            if any(msg.requires_ack for msg in cp_messages):
+                with recv_lock:
+                    ack_len_data = self.message_router._recv_exact(conn, 4)
+                    if not ack_len_data:
+                        return False
+                    ack_length = int.from_bytes(ack_len_data, byteorder='big')
+                    ack_data = self.message_router._recv_exact(conn, ack_length)
+                    if not ack_data:
+                        return False
+            
+            # Update connection usage stats
+            if pipeline_id:
+                self.message_router.connection_pool.release_connection(target_endpoint, pipeline_id=pipeline_id)
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Failed to send pipeline batch: {e}")
+            if pipeline_id:
+                self.message_router.connection_pool.invalidate_connection(target_endpoint, pipeline_id=pipeline_id)
+            # Fallback to regular batch sending
+            return self.message_router.send_batch(cp_messages, target_endpoint)
+    
+    def handle_pipeline_message(self, message: CrossPlatformMessage):
+        """Handle incoming pipeline messages"""
+        if message.message_type != "pipeline_data":
+            return
+            
+        try:
+            # Convert back to PipelineMessage
+            pipeline_msg = PipelineMessage.from_dict(message.payload)
+            
+            # Check if this is part of a sequence
+            sequence_id = pipeline_msg.sequence_id
+            
+            if sequence_id not in self.sequence_buffers:
+                self.sequence_buffers[sequence_id] = {}
+            
+            # Store the message
+            self.sequence_buffers[sequence_id][pipeline_msg.sequence_index] = pipeline_msg
+            
+            # Check if we have all messages in the sequence
+            buffer = self.sequence_buffers[sequence_id]
+            expected_count = pipeline_msg.total_sequence_length
+            
+            if len(buffer) == expected_count:
+                # Process the complete sequence
+                ordered_messages = [buffer[i] for i in range(expected_count)]
+                
+                # Call the registered handler if any
+                if sequence_id in self.sequence_handlers:
+                    try:
+                        self.sequence_handlers[sequence_id](ordered_messages)
+                    except Exception as e:
+                        logging.error(f"Failed to process pipeline sequence {sequence_id}: {e}")
+                
+                # Clean up
+                del self.sequence_buffers[sequence_id]
+        except Exception as e:
+            logging.error(f"Failed to handle pipeline message: {e}")
+    
+    def register_sequence_handler(self, sequence_id: str, handler: Callable[[List[PipelineMessage]], None]):
+        """Register a handler for a specific pipeline sequence"""
+        self.sequence_handlers[sequence_id] = handler
+    
+    def unregister_sequence_handler(self, sequence_id: str):
+        """Unregister a sequence handler"""
+        if sequence_id in self.sequence_handlers:
+            del self.sequence_handlers[sequence_id]
 
 
 class CompressionManager:
@@ -137,12 +661,90 @@ class CompressionManager:
             CompressionType.NONE: self._no_decompress,
             CompressionType.ZLIB: self._zlib_decompress,
         }
+        
+        # Add support for additional compression algorithms if available
+        if lz4_available:
+            self.compression_map[CompressionType.LZ4] = self._lz4_compress
+            self.decompression_map[CompressionType.LZ4] = self._lz4_decompress
+        
+        if brotli_available:
+            self.compression_map[CompressionType.BROTLI] = self._brotli_compress
+            self.decompression_map[CompressionType.BROTLI] = self._brotli_decompress
+        
+        # Compression algorithm properties for intelligent selection
+        self.compression_properties = {
+            CompressionType.NONE: {
+                'speed': 100,
+                'compression_ratio': 1.0,
+                'cpu_usage': 0,
+                'memory_usage': 0
+            },
+            CompressionType.ZLIB: {
+                'speed': 70,
+                'compression_ratio': 0.4,
+                'cpu_usage': 50,
+                'memory_usage': 30
+            },
+        }
+        
+        if lz4_available:
+            self.compression_properties[CompressionType.LZ4] = {
+                'speed': 95,
+                'compression_ratio': 0.6,
+                'cpu_usage': 20,
+                'memory_usage': 10
+            }
+        
+        if brotli_available:
+            self.compression_properties[CompressionType.BROTLI] = {
+                'speed': 40,
+                'compression_ratio': 0.3,
+                'cpu_usage': 80,
+                'memory_usage': 50
+            }
+        
+        # Data type to optimal compression algorithm mapping
+        self.data_type_mapping = {
+            'pipeline_data_input': CompressionType.LZ4 if lz4_available else CompressionType.ZLIB,
+            'pipeline_data_activation': CompressionType.LZ4 if lz4_available else CompressionType.ZLIB,
+            'pipeline_data_gradient': CompressionType.BROTLI if brotli_available else CompressionType.ZLIB,
+            'pipeline_data_checkpoint': CompressionType.BROTLI if brotli_available else CompressionType.ZLIB,
+            'regular_message': CompressionType.ZLIB,
+            'batch_message': CompressionType.LZ4 if lz4_available else CompressionType.ZLIB,
+            'large_data': CompressionType.BROTLI if brotli_available else CompressionType.ZLIB
+        }
 
     def compress(self, data: bytes, compression_type: CompressionType) -> Tuple[bytes, float]:
         compress_func = self.compression_map.get(compression_type, self._no_compress)
         compressed = compress_func(data)
         compression_ratio = len(compressed) / len(data) if len(data) > 0 else 1.0
         return compressed, compression_ratio
+        
+    def smart_compress(self, data: bytes, data_type: str = 'regular_message', 
+                      prioritize_speed: bool = True) -> Tuple[bytes, CompressionType, float]:
+        """Intelligently select compression algorithm based on data type and priorities"""
+        if len(data) < 100:
+            # No need to compress small data
+            return data, CompressionType.NONE, 1.0
+            
+        # Get recommended algorithm for this data type
+        recommended_algo = self.data_type_mapping.get(data_type, CompressionType.ZLIB)
+        
+        # If prioritize_speed is True, choose the fastest available algorithm
+        if prioritize_speed and lz4_available:
+            best_algo = CompressionType.LZ4
+        else:
+            # Choose based on data type and algorithm properties
+            best_algo = recommended_algo
+        
+        # Compress using the chosen algorithm
+        compressed, ratio = self.compress(data, best_algo)
+        
+        # If compression doesn't help, return uncompressed
+        if ratio > 0.95:
+            return data, CompressionType.NONE, 1.0
+            
+        return compressed, best_algo, ratio
 
     def decompress(self, data: bytes, compression_type: CompressionType) -> bytes:
         decompress_func = self.decompression_map.get(compression_type, self._no_decompress)
@@ -159,27 +761,72 @@ class CompressionManager:
 
     def _zlib_decompress(self, data: bytes) -> bytes:
         return zlib.decompress(data)
+        
+    def _lz4_compress(self, data: bytes) -> bytes:
+        if lz4_available:
+            return lz4.frame.compress(data)
+        return data
+        
+    def _lz4_decompress(self, data: bytes) -> bytes:
+        if lz4_available:
+            return lz4.frame.decompress(data)
+        return data
+        
+    def _brotli_compress(self, data: bytes) -> bytes:
+        if brotli_available:
+            return brotli.compress(data, quality=4)
+        return data
+        
+    def _brotli_decompress(self, data: bytes) -> bytes:
+        if brotli_available:
+            return brotli.decompress(data)
+        return data
 
     @staticmethod
     def is_zlib_compressed(data: bytes) -> bool:
         """Detect ZLIB magic bytes: 0x78 + {0x01, 0x5e, 0x9c, 0xda}"""
         return len(data) >= 2 and data[0] == 0x78 and data[1] in (0x01, 0x5e, 0x9c, 0xda)
+        
+    @staticmethod
+    def is_lz4_compressed(data: bytes) -> bool:
+        """Detect LZ4 magic bytes: 0x04 0x22 0x4D 0x18"""
+        return len(data) >= 4 and data[:4] == b'\x04\x22\x4D\x18'
+        
+    @staticmethod
+    def is_brotli_compressed(data: bytes) -> bool:
+        """Detect Brotli magic bytes: 0x0B 0x79"""
+        return len(data) >= 2 and data[:2] == b'\x0B\x79'
 
     def auto_decompress(self, data: bytes) -> bytes:
-        """Auto-detect and decompress if data is ZLIB compressed"""
-        if self.is_zlib_compressed(data):
+        """Auto-detect and decompress if data is compressed"""
+        if len(data) < 2:
+            return data
+            
+        if self.is_brotli_compressed(data) and brotli_available:
+            try:
+                return self._brotli_decompress(data)
+            except Exception as e:
+                logging.warning(f"Brotli auto-decompression failed, using raw data: {e}")
+        elif self.is_lz4_compressed(data) and lz4_available:
+            try:
+                return self._lz4_decompress(data)
+            except Exception as e:
+                logging.warning(f"LZ4 auto-decompression failed, using raw data: {e}")
+        elif self.is_zlib_compressed(data):
             try:
                 return self._zlib_decompress(data)
             except Exception as e:
-                logging.warning(f"Auto-decompression failed, using raw data: {e}")
+                logging.warning(f"ZLIB auto-decompression failed, using raw data: {e}")
+        
         return data
 
 
 class ConnectionPool:
     """Manages network connections efficiently"""
 
-    def __init__(self, max_connections: int = 100):
+    def __init__(self, max_connections: int = 100, max_pipeline_connections: int = 20):
         self.max_connections = max_connections
+        self.max_pipeline_connections = max_pipeline_connections
         self.active_connections: Dict[str, socket.socket] = {}
         self.connection_lock = threading.Lock()
         self.connection_stats: Dict[str, Dict[str, Any]] = {}
@@ -188,6 +835,16 @@ class ConnectionPool:
         self._recv_locks: Dict[str, threading.Lock] = {}
         # per-connection health check timestamp cache (5s)
         self._last_health_check: Dict[str, float] = {}
+        
+        # Pipeline-specific connection management
+        self._pipeline_connections: Dict[str, socket.socket] = {}  # pipeline_id -> socket
+        self._preheated_connections: Dict[str, List[socket.socket]] = {}  # endpoint_key -> list of preheated sockets
+        self._pipeline_connection_usage: Dict[str, Dict[str, Any]] = {}  # pipeline_id -> usage stats
+        
+        # TCP pipeline optimization settings
+        self._pipeline_flush_interval = 0.01  # 10ms flush interval for pipeline messages
+        self._tcp_nodelay = True  # Disable Nagle for low latency
+        self._socket_buffer_size = 524288  # 512KB buffer size for better throughput
 
     def get_connection(self, endpoint: NetworkEndpoint) -> Optional[Tuple[socket.socket, threading.Lock]]:
         """Get or create connection; returns (socket, recv_lock) tuple, or None on failure."""
@@ -257,17 +914,23 @@ class ConnectionPool:
             # 文件描述符已关闭或无效
             return False
 
-    def _create_connection(self, endpoint: NetworkEndpoint) -> Optional[socket.socket]:
+    def _create_connection(self, endpoint: NetworkEndpoint, is_pipeline: bool = False) -> Optional[socket.socket]:
         """Create new connection with optimized socket parameters"""
         try:
             if endpoint.protocol == TransportProtocol.TCP:
                 conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 conn.settimeout(10.0)
+                
+                # TCP pipeline optimization settings
+                nodelay = self._tcp_nodelay if is_pipeline else True  # Always disable Nagle for pipeline connections
+                buffer_size = self._socket_buffer_size if is_pipeline else 262144
+                
                 # Socket 参数调优
-                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # 禁用 Nagle 算法
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, nodelay)  # 禁用 Nagle 算法
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)    # 启用保活
-                conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144) # 256KB send buffer
-                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144) # 256KB recv buffer
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, buffer_size) # send buffer
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, buffer_size) # recv buffer
+                
                 if endpoint.ssl_enabled and endpoint.ssl_context:
                     conn = endpoint.ssl_context.wrap_socket(conn, server_hostname=endpoint.host)
                 conn.connect((endpoint.host, endpoint.port))
@@ -281,27 +944,141 @@ class ConnectionPool:
         except Exception as e:
             logging.error(f"Failed to create connection: {e}")
             return None
+            
+    def get_pipeline_connection(self, pipeline_id: str, endpoint: NetworkEndpoint) -> Optional[Tuple[socket.socket, threading.Lock]]:
+        """Get or create a dedicated connection for a pipeline"""
+        connection_key = f"{endpoint.host}:{endpoint.port}:{endpoint.protocol.value}"
+        pipeline_key = f"{pipeline_id}:{connection_key}"
+        
+        with self.connection_lock:
+            # Check if pipeline connection already exists
+            if pipeline_key in self._pipeline_connections:
+                conn = self._pipeline_connections[pipeline_key]
+                if self._is_connection_alive_cached(conn, pipeline_key):
+                    # Update usage stats
+                    self._update_pipeline_usage(pipeline_key)
+                    return conn, self._recv_locks.get(pipeline_key, threading.Lock())
+                else:
+                    # Remove dead connection
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    del self._pipeline_connections[pipeline_key]
+                    self._recv_locks.pop(pipeline_key, None)
+                    self._last_health_check.pop(pipeline_key, None)
+                    self._pipeline_connection_usage.pop(pipeline_key, None)
+            
+            # Check preheated connections first
+            if connection_key in self._preheated_connections and self._preheated_connections[connection_key]:
+                conn = self._preheated_connections[connection_key].pop()
+                logging.info(f"Using preheated connection for pipeline {pipeline_id}")
+            else:
+                # Create new pipeline connection
+                if len(self._pipeline_connections) >= self.max_pipeline_connections:
+                    self._cleanup_pipeline_connections()
+                
+                conn = self._create_connection(endpoint, is_pipeline=True)
+                if not conn:
+                    return None
+            
+            # Store pipeline connection
+            self._pipeline_connections[pipeline_key] = conn
+            self._recv_locks[pipeline_key] = threading.Lock()
+            self._last_health_check[pipeline_key] = time.time()
+            
+            # Initialize pipeline usage stats
+            self._pipeline_connection_usage[pipeline_key] = {
+                'created': time.time(),
+                'last_used': time.time(),
+                'message_count': 0,
+                'bytes_sent': 0,
+                'bytes_received': 0
+            }
+            
+            return conn, self._recv_locks[pipeline_key]
+            
+    def preheat_connections(self, endpoint: NetworkEndpoint, count: int = 5):
+        """Preheat connections for an endpoint to reduce connection establishment latency"""
+        connection_key = f"{endpoint.host}:{endpoint.port}:{endpoint.protocol.value}"
+        
+        with self.connection_lock:
+            if connection_key not in self._preheated_connections:
+                self._preheated_connections[connection_key] = []
+            
+            # Create preheated connections
+            for _ in range(count):
+                conn = self._create_connection(endpoint, is_pipeline=True)
+                if conn:
+                    self._preheated_connections[connection_key].append(conn)
+                    logging.info(f"Preheated connection for {connection_key}")
+    
+    def _update_pipeline_usage(self, pipeline_key: str):
+        """Update pipeline connection usage statistics"""
+        if pipeline_key in self._pipeline_connection_usage:
+            self._pipeline_connection_usage[pipeline_key]['last_used'] = time.time()
+            self._pipeline_connection_usage[pipeline_key]['message_count'] += 1
+    
+    def _cleanup_pipeline_connections(self):
+        """Clean up idle pipeline connections"""
+        current_time = time.time()
+        to_remove = [
+            key for key, stats in self._pipeline_connection_usage.items()
+            if current_time - stats.get('last_used', 0) > 300  # 5 minutes idle
+        ]
+        
+        for key in to_remove:
+            try:
+                if key in self._pipeline_connections:
+                    self._pipeline_connections[key].close()
+            except Exception as e:
+                logging.debug(f"Error closing pipeline connection {key}: {e}")
+            self._pipeline_connections.pop(key, None)
+            self._recv_locks.pop(key, None)
+            self._last_health_check.pop(key, None)
+            self._pipeline_connection_usage.pop(key, None)
 
-    def invalidate_connection(self, endpoint: NetworkEndpoint):
+    def invalidate_connection(self, endpoint: NetworkEndpoint, pipeline_id: Optional[str] = None):
         """Forcibly remove a connection from pool (e.g., after error)"""
         connection_key = f"{endpoint.host}:{endpoint.port}:{endpoint.protocol.value}"
         with self.connection_lock:
-            if connection_key in self.active_connections:
-                try:
-                    self.active_connections[connection_key].close()
-                except:
-                    pass
-                del self.active_connections[connection_key]
-                self.connection_stats.pop(connection_key, None)
-                self._recv_locks.pop(connection_key, None)
-                self._last_health_check.pop(connection_key, None)
+            if pipeline_id:
+                # Invalidate pipeline connection
+                pipeline_key = f"{pipeline_id}:{connection_key}"
+                if pipeline_key in self._pipeline_connections:
+                    try:
+                        self._pipeline_connections[pipeline_key].close()
+                    except:
+                        pass
+                    del self._pipeline_connections[pipeline_key]
+                    self._pipeline_connection_usage.pop(pipeline_key, None)
+                    self._recv_locks.pop(pipeline_key, None)
+                    self._last_health_check.pop(pipeline_key, None)
+            else:
+                # Invalidate regular connection
+                if connection_key in self.active_connections:
+                    try:
+                        self.active_connections[connection_key].close()
+                    except:
+                        pass
+                    del self.active_connections[connection_key]
+                    self.connection_stats.pop(connection_key, None)
+                    self._recv_locks.pop(connection_key, None)
+                    self._last_health_check.pop(connection_key, None)
 
-    def release_connection(self, endpoint: NetworkEndpoint):
+    def release_connection(self, endpoint: NetworkEndpoint, pipeline_id: Optional[str] = None):
         """Release connection back to pool (update last_used)"""
         connection_key = f"{endpoint.host}:{endpoint.port}:{endpoint.protocol.value}"
         with self.connection_lock:
-            if connection_key in self.connection_stats:
-                self.connection_stats[connection_key]['last_used'] = time.time()
+            if pipeline_id:
+                # Update pipeline connection usage
+                pipeline_key = f"{pipeline_id}:{connection_key}"
+                if pipeline_key in self._pipeline_connection_usage:
+                    self._pipeline_connection_usage[pipeline_key]['last_used'] = time.time()
+            else:
+                # Update regular connection stats
+                if connection_key in self.connection_stats:
+                    self.connection_stats[connection_key]['last_used'] = time.time()
 
     def _cleanup_connections(self):
         current_time = time.time()
@@ -311,20 +1088,33 @@ class ConnectionPool:
         ]
         for key in to_remove:
             try:
-                self.active_connections[key].close()
-            except:
-                pass
+                if key in self.active_connections:
+                    self.active_connections[key].close()
+            except Exception as e:
+                logging.debug(f"Error closing connection {key}: {e}")
             self.active_connections.pop(key, None)
             self.connection_stats.pop(key, None)
             self._recv_locks.pop(key, None)
             self._last_health_check.pop(key, None)
 
-    def get_stats(self) -> Dict[str, Any]:
-        return {
-            'active_connections': len(self.active_connections),
-            'max_connections': self.max_connections,
-            'connection_stats': dict(self.connection_stats)
-        }
+    def close(self):
+        """Explicitly close all connections and clean up resources"""
+        with self.connection_lock:
+            for key, conn in list(self.active_connections.items()):
+                try:
+                    conn.close()
+                except Exception as e:
+                    logging.debug(f"Error closing connection {key}: {e}")
+            self.active_connections.clear()
+            self.connection_stats.clear()
+            self._recv_locks.clear()
+            self._last_health_check.clear()
+            self._pipeline_connections.clear()
+            self._preheated_connections.clear()
+
+    def __del__(self):
+        """Clean up resources when the pool is garbage collected"""
+        self.close()
 
 
 class MessageRouter:
@@ -332,13 +1122,18 @@ class MessageRouter:
 
     def __init__(self, hardware_capabilities: HardwareCapabilities):
         self.hardware_capabilities = hardware_capabilities
-        self.message_handlers: Dict[str, List[Callable]] = {}
-        self.routing_table: Dict[str, NetworkEndpoint] = {}
-        self.message_queue = queue.Queue()
+        self.message_handlers: Dict[str, List[Callable]] = {}  
+        self.routing_table: Dict[str, NetworkEndpoint] = {}  
+        self.message_queue = queue.Queue()  
         self.metrics: deque[MessageMetrics] = deque(maxlen=10000)  # 环形缓冲防止内存泄漏
         self.compression_manager = CompressionManager()
+        self.serialization_manager = SerializationManager()
         self.connection_pool = ConnectionPool()
-        self._handler_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="msg_handler")  # 异步 handler 分发
+        
+        # Thread pool configuration based on hardware capabilities
+        self._configure_thread_pools()
+        
+        self.pipeline_comm_manager = PipelineCommunicationManager(self)
 
         # server-side: stores sockets accepted from clients (for server→client push)
         self.client_connections: Dict[str, socket.socket] = {}
@@ -367,8 +1162,88 @@ class MessageRouter:
             self.transmission_timeout = 3.0
         else:
             self.default_compression = CompressionType.ZLIB
-            self.message_batch_size = 30
-            self.transmission_timeout = 7.0
+            
+    def _configure_thread_pools(self):
+        """Configure thread pools based on hardware capabilities"""
+        platform = self.hardware_capabilities.platform
+        # Use psutil if available, otherwise default to 4 cores
+        cpu_count = psutil.cpu_count() if psutil_available else 4
+        cpu_count = cpu_count or 4  # Fallback to 4 if psutil returns None
+        
+        # Determine thread pool sizes based on platform and CPU count
+        if platform == HardwarePlatform.JETSON_NANO:
+            # Resource-constrained platform
+            handler_workers = max(2, cpu_count // 2)
+            pipeline_workers = max(1, cpu_count // 4)
+            serialization_workers = max(1, cpu_count // 4)
+            compression_workers = max(1, cpu_count // 4)
+        elif platform == HardwarePlatform.JETSON_ORIN:
+            # More capable embedded platform
+            handler_workers = max(4, cpu_count)
+            pipeline_workers = max(2, cpu_count // 2)
+            serialization_workers = max(2, cpu_count // 2)
+            compression_workers = max(2, cpu_count // 2)
+        elif platform in [HardwarePlatform.X86_LINUX, HardwarePlatform.X86_WINDOWS]:
+            # High-performance platform
+            handler_workers = max(8, cpu_count * 2)
+            pipeline_workers = max(4, cpu_count)
+            serialization_workers = max(4, cpu_count)
+            compression_workers = max(4, cpu_count)
+        else:
+            # Default configuration
+            handler_workers = max(4, cpu_count)
+            pipeline_workers = max(2, cpu_count // 2)
+            serialization_workers = max(2, cpu_count // 2)
+            compression_workers = max(2, cpu_count // 2)
+        
+        # Create thread pools for different types of tasks
+        # Note: thread_creation_flags is Linux-specific, so we don't use it for cross-platform compatibility
+        self._handler_executor = ThreadPoolExecutor(
+            max_workers=handler_workers, 
+            thread_name_prefix="msg_handler"
+        )
+        
+        self._pipeline_executor = ThreadPoolExecutor(
+            max_workers=pipeline_workers, 
+            thread_name_prefix="pipeline"
+        )
+        
+        self._serialization_executor = ThreadPoolExecutor(
+            max_workers=serialization_workers, 
+            thread_name_prefix="serializer"
+        )
+        
+        self._compression_executor = ThreadPoolExecutor(
+            max_workers=compression_workers, 
+            thread_name_prefix="compressor"
+        )
+        
+        logging.info(f"Configured thread pools: handlers={handler_workers}, pipeline={pipeline_workers}, ")
+        logging.info(f"serialization={serialization_workers}, compression={compression_workers}")
+        
+        # Task queue for background processing
+        self._task_queue = queue.Queue(maxsize=10000)
+        self._task_processing = True
+        self._task_thread = threading.Thread(
+            target=self._process_task_queue,
+            name="task_processor",
+            daemon=True
+        )
+        self._task_thread.start()
+        
+    def _process_task_queue(self):
+        """Process background tasks from the task queue"""
+        while self._task_processing:
+            try:
+                task = self._task_queue.get(timeout=0.1)
+                if callable(task):
+                    task()
+                self._task_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logging.error(f"Error processing task queue: {e}")
+                self._task_queue.task_done()
 
     def register_handler(self, message_type: str, handler: Callable[..., Any]):
         if message_type not in self.message_handlers:
@@ -381,6 +1256,55 @@ class MessageRouter:
         if client_socket:
             with self._client_conn_lock:
                 self.client_connections[node_id] = client_socket
+
+    def close(self):
+        """Explicitly close all resources"""
+        # 关闭所有客户端连接
+        with self._client_conn_lock:
+            for key, conn in list(self.client_connections.items()):
+                try:
+                    conn.close()
+                except Exception as e:
+                    logging.debug(f"Error closing client connection {key}: {e}")
+            self.client_connections.clear()
+
+        # 停止监听线程
+        for key in list(self._listener_running.keys()):
+            self._listener_running[key] = False
+        for key, thread in list(self._listener_threads.items()):
+            if thread.is_alive():
+                thread.join(timeout=2.0)
+        self._listener_threads.clear()
+        self._listener_running.clear()
+
+        # 关闭所有线程池
+        executors = ['_handler_executor', '_pipeline_executor', '_serialization_executor', '_compression_executor']
+        for executor_name in executors:
+            if hasattr(self, executor_name):
+                executor = getattr(self, executor_name)
+                executor.shutdown(wait=True)
+
+        # 停止任务队列处理
+        if hasattr(self, '_task_processing'):
+            self._task_processing = False
+            if hasattr(self, '_task_thread') and self._task_thread.is_alive():
+                self._task_thread.join(timeout=1.0)
+
+        # 关闭连接池
+        if hasattr(self, 'connection_pool'):
+            self.connection_pool.close()
+
+        # 清理队列
+        if hasattr(self, 'message_queue'):
+            while not self.message_queue.empty():
+                try:
+                    self.message_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+    def __del__(self):
+        """Clean up resources when the router is garbage collected"""
+        self.close()
 
     def send_message(self, message: Union[CrossPlatformMessage, 'V2VMessage'],
                      target_endpoint: Optional[NetworkEndpoint] = None) -> bool:
@@ -403,7 +1327,7 @@ class MessageRouter:
                     message_type=message.message_type,
                     payload=message.payload,
                     timestamp=message.timestamp,
-                    requires_ack=True,
+                    requires_ack=False,  # Changed from True to avoid blocking
                     priority=0,
                     compression_type=CompressionType.ZLIB
                 )
@@ -428,22 +1352,67 @@ class MessageRouter:
                                     target_endpoint: NetworkEndpoint) -> bool:
         """内部方法：发送 CrossPlatformMessage"""
         try:
-            # Serialize
-            message_data = json.dumps(message.to_dict()).encode('utf-8')
+            # Start performance tracking
+            start_total_time = time.time()
+            
+            # Serialize using appropriate format
+            message_dict = message.to_dict()
+            
+            # Use endpoint's serialization format if specified, otherwise use message's format
+            serialization_format = target_endpoint.serialization_format
+            
+            # Track serialization time
+            start_serialization_time = time.time()
+            message_data = self.serialization_manager.serialize(message_dict, serialization_format)
+            serialization_time = time.time() - start_serialization_time
 
-            # 修复：不修改原始 message 对象的 compression_type，使用局部变量
-            compression_type = message.compression_type
-            compression_ratio = 1.0
-            if compression_type != CompressionType.NONE:
-                message_data, compression_ratio = self.compression_manager.compress(
-                    message_data, compression_type
-                )
+            # Smart compression based on message type
+            data_type = 'regular_message'
+            pipeline_id = None
+            stage_id = None
+            sequence_id = None
+            sequence_index = 0
+            
+            if message.message_type == 'pipeline_data':
+                # Determine pipeline data type from payload
+                if isinstance(message.payload, dict):
+                    if 'data_type' in message.payload:
+                        data_type = f'pipeline_data_{message.payload["data_type"]}'
+                    if 'pipeline_id' in message.payload:
+                        pipeline_id = message.payload['pipeline_id']
+                    if 'stage_id' in message.payload:
+                        stage_id = message.payload['stage_id']
+                    if 'sequence_id' in message.payload:
+                        sequence_id = message.payload['sequence_id']
+                    if 'sequence_index' in message.payload:
+                        sequence_index = message.payload['sequence_index']
+                else:
+                    data_type = 'pipeline_data_activation'
+            elif message.message_type == 'communication_bundle':
+                data_type = 'batch_message'
+            
+            # Track compression time
+            start_compression_time = time.time()
+            message_data, compression_type, compression_ratio = self.compression_manager.smart_compress(
+                message_data, data_type=data_type, prioritize_speed=True
+            )
+            compression_time = time.time() - start_compression_time
 
-            start_time = time.time()
+            # Track resource usage
+            if psutil_available:
+                cpu_usage = psutil.cpu_percent(interval=0.01)
+                memory_usage = psutil.virtual_memory().percent
+            else:
+                cpu_usage = 0.0
+                memory_usage = 0.0
+
+            # Send data
+            start_transmission_time = time.time()
             success = self._transmit_data(message_data, target_endpoint, message)
-            transmission_time = time.time() - start_time
+            transmission_time = time.time() - start_transmission_time
 
-            self.metrics.append(MessageMetrics(
+            # Record metrics
+            metrics = MessageMetrics(
                 message_id=message.message_id,
                 source_id=message.source_id,
                 target_id=message.target_id,
@@ -452,8 +1421,38 @@ class MessageRouter:
                 compression_ratio=compression_ratio,
                 transmission_time=transmission_time,
                 success=success,
-                protocol=target_endpoint.protocol
-            ))
+                protocol=target_endpoint.protocol,
+                retry_count=0,
+                
+                # Pipeline-specific metrics
+                pipeline_id=pipeline_id,
+                stage_id=stage_id,
+                sequence_id=sequence_id,
+                sequence_index=sequence_index,
+                data_type=data_type,
+                
+                # Performance metrics
+                serialization_time=serialization_time,
+                compression_time=compression_time,
+                deserialization_time=0.0,
+                decompression_time=0.0,
+                queue_time=0.0,
+                processing_time=time.time() - start_total_time,
+                
+                # Resource usage
+                cpu_usage=cpu_usage,
+                memory_usage=memory_usage,
+                
+                # Compression details
+                compression_algorithm=compression_type.value,
+                serialization_format=serialization_format.value,
+                
+                # Connection details
+                connection_type="regular",
+                connection_reused=False
+            )
+            
+            self.metrics.append(metrics)
             return success
 
         except Exception as e:
@@ -560,11 +1559,27 @@ class MessageRouter:
         buf = bytearray(n)
         view = memoryview(buf)
         offset = 0
-        while offset < n:
-            received = conn.recv_into(view[offset:], n - offset)
-            if received == 0:
-                return None
-            offset += received
+        
+        # Get current timeout setting
+        original_timeout = conn.gettimeout()
+        try:
+            # Set a timeout for the entire recv operation
+            if original_timeout is None:
+                conn.settimeout(30.0)  # Default 30s timeout if none set
+                
+            while offset < n:
+                try:
+                    received = conn.recv_into(view[offset:], n - offset)
+                    if received == 0:
+                        return None
+                    offset += received
+                except socket.timeout:
+                    logging.warning(f"Timeout waiting to receive {n} bytes")
+                    return None
+        finally:
+            # Restore original timeout
+            conn.settimeout(original_timeout)
+            
         return bytes(buf)
 
     # ----------------------------------------------------------------
@@ -663,13 +1678,81 @@ class MessageRouter:
                 # 自动检测并解压
                 decompressed = self.compression_manager.auto_decompress(msg_data)
 
-                # 解析消息
-                message_dict = json.loads(decompressed.decode('utf-8'))
+                # 解析消息使用合适的序列化格式
                 try:
-                    message = CrossPlatformMessage.from_dict(message_dict)
-                except ValueError as ve:
+                    message_dict = self.serialization_manager.deserialize(decompressed)
+                    
+                    # Handle batch messages
+                    if isinstance(message_dict, dict) and 'batch_id' in message_dict:
+                        try:
+                            batch_message = BatchMessage.from_dict(message_dict)
+                            logging.info(f"Received batch message {batch_message.batch_id} with {batch_message.batch_size} messages")
+                            
+                            # Process each message in the batch
+                            for msg in batch_message.messages:
+                                # --- listen_register：客户端专用接收 socket 的身份注册 ---
+                                if msg.message_type == 'listen_register':
+                                    source_node_id = msg.source_id
+                                    with self._client_conn_lock:
+                                        # 关闭旧的推送连接（如果有的话），切换到新的
+                                        old_conn = self.client_connections.get(source_node_id)
+                                        if old_conn is not None and old_conn is not client_socket:
+                                            # 不关闭旧连接——它可能是客户端的发送连接（ConnectionPool），
+                                            # 由 _handle_tcp_connection 的另一个线程管理
+                                            pass
+                                        self.client_connections[source_node_id] = client_socket
+                                    logging.info(
+                                        f"listen_register: switched push socket for "
+                                        f"{source_node_id} to {addr}")
+                                    is_push_socket = True
+                                    # 退出 recv 循环：这条连接现在专门用于服务器→客户端推送，
+                                    # 客户端不会再往上面发消息（避免双方互 recv 死锁）。
+                                    break
+
+                                # 注册 client_connections（仅首次，普通业务连接）
+                                source_node_id = msg.source_id
+                                with self._client_conn_lock:
+                                    if source_node_id and source_node_id not in self.client_connections:
+                                        self.client_connections[source_node_id] = client_socket
+                                        logging.info(
+                                            f"Registered client connection for {source_node_id} from {addr}")
+
+                                # 发送 ACK
+                                if msg.requires_ack:
+                                    ack_payload = json.dumps(
+                                        {'message_id': msg.message_id}).encode('utf-8')
+                                    ack_len = len(ack_payload).to_bytes(4, byteorder='big')
+                                    try:
+                                        client_socket.sendall(ack_len + ack_payload)  # 合并为单次 sendall
+                                    except Exception as e:
+                                        logging.warning(f"Failed to send ACK to {source_node_id}: {e}")
+
+                                # 分发消息
+                                try:
+                                    self._handle_message(msg)
+                                except Exception as e:
+                                    logging.error(f"Error handling message from {addr}: {e}")
+                            
+                            # If this was a listen_register batch, break the loop
+                            if is_push_socket:
+                                break
+                            
+                            continue
+                        except Exception as e:
+                            logging.error(f"Failed to process batch message: {e}")
+                            continue
+                    
+                    # Handle single messages
+                    try:
+                        message = CrossPlatformMessage.from_dict(message_dict)
+                    except ValueError as ve:
+                        logging.warning(
+                            f"_handle_tcp_connection({addr}): discarding malformed packet: {ve}"
+                        )
+                        continue
+                except Exception as e:
                     logging.warning(
-                        f"_handle_tcp_connection({addr}): discarding malformed packet: {ve}"
+                        f"_handle_tcp_connection({addr}): failed to deserialize message: {e}"
                     )
                     continue
 
@@ -841,7 +1924,15 @@ class MessageRouter:
                                 break
 
                             decompressed = self.compression_manager.auto_decompress(msg_data)
-                            message_dict = json.loads(decompressed.decode('utf-8'))
+                            
+                            # 解析消息使用合适的序列化格式
+                            try:
+                                message_dict = self.serialization_manager.deserialize(decompressed)
+                            except Exception as e:
+                                logging.warning(
+                                    f"start_receiving_from({node_id}): failed to deserialize message: {e}"
+                                )
+                                continue
 
                             # 捕获 ACK 包误入（缺少必需字段）：丢弃并继续，不断连
                             try:
@@ -893,6 +1984,12 @@ class MessageRouter:
 
     def _handle_message(self, message: CrossPlatformMessage):
         """异步分发消息到 handler，避免阻塞接收线程"""
+        # Handle pipeline data messages first for sequence processing
+        if message.message_type == "pipeline_data":
+            # Use pipeline-specific executor for better performance
+            self._pipeline_executor.submit(self.pipeline_comm_manager.handle_pipeline_message, message)
+        
+        # Still distribute to registered handlers for any additional processing
         handlers = self.message_handlers.get(message.message_type, [])
         for handler in handlers:
             self._handler_executor.submit(self._run_handler, handler, message)
@@ -927,6 +2024,73 @@ class MessageRouter:
         except Exception as e:
             logging.error(f"Failed to send bundle: {e}")
             return False
+            
+    def send_batch(self, messages: List[CrossPlatformMessage],
+                   target_endpoint: NetworkEndpoint, 
+                   source_id: Optional[str] = None) -> bool:
+        """Send multiple messages in a single batch for efficient transmission"""
+        if not messages:
+            return True
+            
+        try:
+            # Create batch message
+            batch_id = f"batch_{int(time.time() * 1000)}_{id(messages)}"
+            batch_source_id = source_id or messages[0].source_id
+            batch_target_id = messages[0].target_id
+            
+            # Use the first message's compression type if not specified in endpoint
+            compression_type = target_endpoint.compression
+            
+            # Create batch message
+            batch_message = BatchMessage(
+                batch_id=batch_id,
+                source_id=batch_source_id,
+                target_id=batch_target_id,
+                messages=messages,
+                compression_type=compression_type,
+                serialization_format=target_endpoint.serialization_format
+            )
+            
+            # Serialize and send batch
+            batch_dict = batch_message.to_dict()
+            batch_data = self.serialization_manager.serialize(batch_dict, target_endpoint.serialization_format)
+            
+            # Compress if needed
+            if compression_type != CompressionType.NONE:
+                batch_data, compression_ratio = self.compression_manager.compress(batch_data, compression_type)
+            
+            # Send batch
+            result = self.connection_pool.get_connection(target_endpoint)
+            if result is None:
+                return False
+            conn, recv_lock = result
+            
+            try:
+                msg_len = len(batch_data).to_bytes(4, byteorder='big')
+                conn.sendall(msg_len + batch_data)
+                
+                # Send ACK if requested
+                if any(msg.requires_ack for msg in messages):
+                    with recv_lock:
+                        ack_len_data = self._recv_exact(conn, 4)
+                        if not ack_len_data:
+                            return False
+                        ack_length = int.from_bytes(ack_len_data, byteorder='big')
+                        ack_data = self._recv_exact(conn, ack_length)
+                        if not ack_data:
+                            return False
+                    return True
+                return True
+            except Exception as e:
+                logging.error(f"Failed to send batch: {e}")
+                self.connection_pool.invalidate_connection(target_endpoint)
+                return False
+            finally:
+                self.connection_pool.release_connection(target_endpoint)
+                
+        except Exception as e:
+            logging.error(f"Failed to send batch message: {e}")
+            return False
 
     def get_network_stats(self) -> Dict[str, Any]:
         current_time = time.time()
@@ -948,6 +2112,243 @@ class MessageRouter:
             'total_bytes_transmitted': sum(m.size_bytes for m in recent_metrics),
             'connection_pool_stats': self.connection_pool.get_stats()
         }
+        
+    def get_pipeline_performance_stats(self, pipeline_id: Optional[str] = None, time_window: float = 300.0) -> Dict[str, Any]:
+        """Get detailed performance statistics for pipeline communication"""
+        current_time = time.time()
+        
+        # Filter metrics based on pipeline_id and time window
+        if pipeline_id:
+            pipeline_metrics = [m for m in self.metrics 
+                              if current_time - m.timestamp < time_window 
+                              and m.pipeline_id == pipeline_id]
+        else:
+            pipeline_metrics = [m for m in self.metrics 
+                              if current_time - m.timestamp < time_window 
+                              and m.pipeline_id is not None]
+        
+        if not pipeline_metrics:
+            return {}
+            
+        # Calculate overall statistics
+        total_messages = len(pipeline_metrics)
+        success_rate = sum(1 for m in pipeline_metrics if m.success) / total_messages
+        avg_size_bytes = sum(m.size_bytes for m in pipeline_metrics) / total_messages
+        avg_transmission_time_ms = sum(m.transmission_time for m in pipeline_metrics) / total_messages * 1000
+        avg_serialization_time_ms = sum(m.serialization_time for m in pipeline_metrics) / total_messages * 1000
+        avg_compression_time_ms = sum(m.compression_time for m in pipeline_metrics) / total_messages * 1000
+        avg_processing_time_ms = sum(m.processing_time for m in pipeline_metrics) / total_messages * 1000
+        avg_compression_ratio = sum(m.compression_ratio for m in pipeline_metrics) / total_messages
+        avg_cpu_usage = sum(m.cpu_usage for m in pipeline_metrics) / total_messages
+        avg_memory_usage = sum(m.memory_usage for m in pipeline_metrics) / total_messages
+        
+        # Calculate per-stage statistics
+        stage_stats = {}
+        for metric in pipeline_metrics:
+            if not metric.stage_id:
+                continue
+                
+            if metric.stage_id not in stage_stats:
+                stage_stats[metric.stage_id] = {
+                    "messages": [],
+                    "total_time_ms": 0
+                }
+            
+            stage_stats[metric.stage_id]["messages"].append(metric)
+            stage_stats[metric.stage_id]["total_time_ms"] += metric.processing_time * 1000
+        
+        # Calculate per-stage averages
+        for stage_id, stats in stage_stats.items():
+            messages = stats["messages"]
+            stage_stats[stage_id] = {
+                "total_messages": len(messages),
+                "success_rate": sum(1 for m in messages if m.success) / len(messages),
+                "avg_processing_time_ms": stats["total_time_ms"] / len(messages),
+                "avg_transmission_time_ms": sum(m.transmission_time for m in messages) / len(messages) * 1000,
+                "avg_size_bytes": sum(m.size_bytes for m in messages) / len(messages),
+                "avg_compression_ratio": sum(m.compression_ratio for m in messages) / len(messages)
+            }
+        
+        # Calculate per-data-type statistics
+        data_type_stats = {}
+        for metric in pipeline_metrics:
+            if not metric.data_type:
+                continue
+                
+            if metric.data_type not in data_type_stats:
+                data_type_stats[metric.data_type] = {
+                    "messages": [],
+                    "total_time_ms": 0
+                }
+            
+            data_type_stats[metric.data_type]["messages"].append(metric)
+            data_type_stats[metric.data_type]["total_time_ms"] += metric.processing_time * 1000
+        
+        # Calculate per-data-type averages
+        for data_type, stats in data_type_stats.items():
+            messages = stats["messages"]
+            data_type_stats[data_type] = {
+                "total_messages": len(messages),
+                "success_rate": sum(1 for m in messages if m.success) / len(messages),
+                "avg_processing_time_ms": stats["total_time_ms"] / len(messages),
+                "avg_transmission_time_ms": sum(m.transmission_time for m in messages) / len(messages) * 1000,
+                "avg_size_bytes": sum(m.size_bytes for m in messages) / len(messages),
+                "avg_compression_ratio": sum(m.compression_ratio for m in messages) / len(messages)
+            }
+        
+        # Calculate compression algorithm performance
+        compression_stats = {}
+        for metric in pipeline_metrics:
+            if not metric.compression_algorithm:
+                continue
+                
+            if metric.compression_algorithm not in compression_stats:
+                compression_stats[metric.compression_algorithm] = {
+                    "messages": [],
+                    "total_compression_time_ms": 0
+                }
+            
+            compression_stats[metric.compression_algorithm]["messages"].append(metric)
+            compression_stats[metric.compression_algorithm]["total_compression_time_ms"] += metric.compression_time * 1000
+        
+        # Calculate per-compression-algorithm averages
+        for algorithm, stats in compression_stats.items():
+            messages = stats["messages"]
+            compression_stats[algorithm] = {
+                "total_messages": len(messages),
+                "avg_compression_ratio": sum(m.compression_ratio for m in messages) / len(messages),
+                "avg_compression_time_ms": stats["total_compression_time_ms"] / len(messages),
+                "avg_processing_time_ms": sum(m.processing_time for m in messages) / len(messages) * 1000
+            }
+        
+        return {
+            "pipeline_id": pipeline_id,
+            "time_window_seconds": time_window,
+            "total_messages": total_messages,
+            "success_rate": success_rate,
+            "avg_size_bytes": avg_size_bytes,
+            "avg_compression_ratio": avg_compression_ratio,
+            "avg_transmission_time_ms": avg_transmission_time_ms,
+            "avg_serialization_time_ms": avg_serialization_time_ms,
+            "avg_compression_time_ms": avg_compression_time_ms,
+            "avg_processing_time_ms": avg_processing_time_ms,
+            "avg_cpu_usage_percent": avg_cpu_usage,
+            "avg_memory_usage_percent": avg_memory_usage,
+            "messages_per_second": total_messages / time_window,
+            "bytes_per_second": sum(m.size_bytes for m in pipeline_metrics if m.success) / time_window,
+            "stage_statistics": stage_stats,
+            "data_type_statistics": data_type_stats,
+            "compression_statistics": compression_stats
+        }
+        
+    def print_pipeline_performance_report(self, pipeline_id: Optional[str] = None, time_window: float = 300.0):
+        """Print a detailed performance report for pipeline communication"""
+        stats = self.get_pipeline_performance_stats(pipeline_id, time_window)
+        
+        if not stats:
+            print("No pipeline performance data available")
+            return
+            
+        print(f"=== Pipeline Performance Report ===")
+        print(f"Pipeline ID: {stats['pipeline_id'] or 'All Pipelines'}")
+        print(f"Time Window: {stats['time_window_seconds']} seconds")
+        print(f"Total Messages: {stats['total_messages']:.0f}")
+        print(f"Success Rate: {stats['success_rate']:.2%}")
+        print(f"Messages per Second: {stats['messages_per_second']:.2f}")
+        print(f"Bytes per Second: {stats['bytes_per_second'] / (1024 * 1024):.2f} MB/s")
+        print(f"")
+        print(f"=== Performance Metrics ===")
+        print(f"Avg Transmission Time: {stats['avg_transmission_time_ms']:.2f} ms")
+        print(f"Avg Serialization Time: {stats['avg_serialization_time_ms']:.2f} ms")
+        print(f"Avg Compression Time: {stats['avg_compression_time_ms']:.2f} ms")
+        print(f"Avg Processing Time: {stats['avg_processing_time_ms']:.2f} ms")
+        print(f"Avg Message Size: {stats['avg_size_bytes'] / 1024:.2f} KB")
+        print(f"Avg Compression Ratio: {stats['avg_compression_ratio']:.2f}x")
+        print(f"Avg CPU Usage: {stats['avg_cpu_usage_percent']:.1f}%")
+        print(f"Avg Memory Usage: {stats['avg_memory_usage_percent']:.1f}%")
+        
+        if stats['stage_statistics']:
+            print(f"\n=== Stage Statistics ===")
+            for stage_id, stage_stat in sorted(stats['stage_statistics'].items()):
+                print(f"Stage {stage_id}:")
+                print(f"  Messages: {stage_stat['total_messages']}")
+                print(f"  Success Rate: {stage_stat['success_rate']:.2%}")
+                print(f"  Avg Processing Time: {stage_stat['avg_processing_time_ms']:.2f} ms")
+                print(f"  Avg Message Size: {stage_stat['avg_size_bytes'] / 1024:.2f} KB")
+                
+        if stats['data_type_statistics']:
+            print(f"\n=== Data Type Statistics ===")
+            for data_type, data_stat in stats['data_type_statistics'].items():
+                print(f"{data_type}:")
+                print(f"  Messages: {data_stat['total_messages']}")
+                print(f"  Avg Processing Time: {data_stat['avg_processing_time_ms']:.2f} ms")
+                print(f"  Avg Message Size: {data_stat['avg_size_bytes'] / 1024:.2f} KB")
+                print(f"  Avg Compression Ratio: {data_stat['avg_compression_ratio']:.2f}x")
+                
+        if stats['compression_statistics']:
+            print(f"\n=== Compression Algorithm Performance ===")
+            for algorithm, comp_stat in stats['compression_statistics'].items():
+                print(f"{algorithm}:")
+                print(f"  Messages: {comp_stat['total_messages']}")
+                print(f"  Avg Compression Ratio: {comp_stat['avg_compression_ratio']:.2f}x")
+                print(f"  Avg Compression Time: {comp_stat['avg_compression_time_ms']:.2f} ms")
+                print(f"  Avg Processing Time: {comp_stat['avg_processing_time_ms']:.2f} ms")
+                
+        print(f"\n====================================")
+        
+    def export_pipeline_performance_data(self, pipeline_id: Optional[str] = None, time_window: float = 300.0) -> Dict[str, Any]:
+        """Export pipeline performance data for external analysis"""
+        stats = self.get_pipeline_performance_stats(pipeline_id, time_window)
+        
+        if not stats:
+            return {}
+            
+        # Convert to export format
+        export_data = {
+            "metadata": {
+                "export_time": time.time(),
+                "pipeline_id": stats["pipeline_id"],
+                "time_window_seconds": stats["time_window_seconds"]
+            },
+            "summary": {
+                "total_messages": stats["total_messages"],
+                "success_rate": stats["success_rate"],
+                "messages_per_second": stats["messages_per_second"],
+                "bytes_per_second": stats["bytes_per_second"],
+                "avg_transmission_time_ms": stats["avg_transmission_time_ms"],
+                "avg_processing_time_ms": stats["avg_processing_time_ms"],
+                "avg_compression_ratio": stats["avg_compression_ratio"]
+            },
+            "detailed_metrics": [
+                {
+                    "message_id": m.message_id,
+                    "timestamp": m.timestamp,
+                    "pipeline_id": m.pipeline_id,
+                    "stage_id": m.stage_id,
+                    "sequence_id": m.sequence_id,
+                    "sequence_index": m.sequence_index,
+                    "data_type": m.data_type,
+                    "size_bytes": m.size_bytes,
+                    "compression_ratio": m.compression_ratio,
+                    "transmission_time_ms": m.transmission_time * 1000,
+                    "serialization_time_ms": m.serialization_time * 1000,
+                    "compression_time_ms": m.compression_time * 1000,
+                    "processing_time_ms": m.processing_time * 1000,
+                    "compression_algorithm": m.compression_algorithm,
+                    "serialization_format": m.serialization_format,
+                    "connection_type": m.connection_type,
+                    "success": m.success,
+                    "cpu_usage_percent": m.cpu_usage,
+                    "memory_usage_percent": m.memory_usage
+                }
+                for m in self.metrics 
+                if current_time - m.timestamp < time_window 
+                and (m.pipeline_id == pipeline_id or pipeline_id is None)
+                and m.pipeline_id is not None
+            ]
+        }
+        
+        return export_data
 
 
 class ProtocolNegotiator:
@@ -1054,6 +2455,9 @@ class PlatformBridge:
             result = sock.connect_ex((endpoint.host, endpoint.port))
             sock.close()
 
+            # Get CPU load if psutil is available, otherwise default to 0.5
+            cpu_load = psutil.cpu_percent() / 100.0 if psutil_available else 0.5
+            
             if result == 0:
                 latency = (time.time() - start_time) * 1000
                 quality = max(0.0, min(1.0, 100.0 / max(latency, 1)))
@@ -1062,14 +2466,14 @@ class PlatformBridge:
                     'quality': quality,
                     'latency': latency,
                     'bandwidth': bandwidth,
-                    'cpu_load': psutil.cpu_percent() / 100.0
+                    'cpu_load': cpu_load
                 }
             else:
                 return {'quality': 0.0, 'latency': 9999.0,
-                        'bandwidth': 0.1, 'cpu_load': psutil.cpu_percent() / 100.0}
+                        'bandwidth': 0.1, 'cpu_load': cpu_load}
         except Exception:
             return {'quality': 0.1, 'latency': 1000.0,
-                    'bandwidth': 10.0, 'cpu_load': psutil.cpu_percent() / 100.0}
+                    'bandwidth': 10.0, 'cpu_load': cpu_load}
 
     def send_cross_platform_message(self, message: CrossPlatformMessage) -> bool:
         return self.message_router.send_message(message)

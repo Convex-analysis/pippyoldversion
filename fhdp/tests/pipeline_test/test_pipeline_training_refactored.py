@@ -255,8 +255,9 @@ class PipelineTestServer:
         self.lock = threading.Lock()
 
         # Pending updates for aggregation
-        self.pending_updates: Dict[str, Dict] = {}
-        self.round_num = 0
+        self.current_round = 0
+        self.pending_updates: Dict[int, Dict[str, Dict]] = {}  # round_num -> vehicle_id -> update_data
+        self.training_complete = False
 
     def start(self):
         """Start server"""
@@ -283,13 +284,23 @@ class PipelineTestServer:
         print(f"Listen on: {self.host}:{self.port}\n")
 
     def stop(self):
-        """Stop server"""
+        """Stop server and clean up all resources"""
         print("\nStopping server...")
 
-        self.edge_server.stop_server()
-        self.fhdp_system.stop_system()
-
-        print("✓ Server stopped")
+        try:
+            # Close message router and network connections
+            if hasattr(self.platform_bridge, 'message_router'):
+                self.platform_bridge.message_router.close()
+            
+            # Stop FHDP components
+            self.edge_server.stop_server()
+            self.fhdp_system.stop_system()
+            
+            print("✓ Server stopped")
+        except Exception as e:
+            print(f"Error during server shutdown: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _register_message_handlers(self):
         """Register message handlers for cross-platform communication"""
@@ -375,19 +386,22 @@ class PipelineTestServer:
 
         print(f"[Round {round_num}] Received update from {source_id}")
 
-        # Store update
-        self.pending_updates[source_id] = update_data
+        # Store update - make sure we have an entry for this round
+        if round_num not in self.pending_updates:
+            self.pending_updates[round_num] = {}
+        self.pending_updates[round_num][source_id] = update_data
 
-        # Check if we have updates from all pipeline vehicles
+        # Check if we have updates from all pipeline vehicles for this specific round
         if self.active_pipeline:
             pipeline_vehicles = set(self.active_pipeline.vehicles)
-            received_updates = set(self.pending_updates.keys())
+            received_updates = set(self.pending_updates[round_num].keys())
 
             if received_updates == pipeline_vehicles:
-                # Aggregate updates
-                updates = [self.pending_updates[vid] for vid in self.active_pipeline.vehicles]
+                # Aggregate updates for this round only
+                updates = [self.pending_updates[round_num][vid] for vid in self.active_pipeline.vehicles]
                 self._aggregate_model_updates(round_num, updates)
-                self.pending_updates.clear()
+                # Clear updates for this round only, not all rounds
+                del self.pending_updates[round_num]
 
     def _handle_heartbeat(self, message: CrossPlatformMessage):
         """Handle heartbeat from vehicle"""
@@ -419,7 +433,8 @@ class PipelineTestServer:
             source_id="server",
             target_id=message.source_id,
             message_type="status_response",
-            payload=status
+            payload=status,
+            requires_ack=False
         )
 
         target_endpoint = self.platform_bridge.message_router.routing_table.get(message.source_id)
@@ -506,7 +521,8 @@ class PipelineTestServer:
                     'vehicles': self.active_pipeline.vehicles,
                     'stages': self.active_pipeline.stages,
                     'resource_requirements': [r.value for r in template.resource_requirements]
-                }
+                },
+                requires_ack=False
             )
 
             for vehicle_id in self.active_pipeline.vehicles:
@@ -549,7 +565,8 @@ class PipelineTestServer:
                     'batch_size': 32,
                     'learning_rate': 0.001
                 }
-            }
+            },
+            requires_ack=False
         )
 
         # Broadcast to all vehicles in pipeline
@@ -595,15 +612,23 @@ class PipelineTestServer:
         # Evaluate global model
         self._evaluate_global_model(round_num)
 
-        # Start next round if not done
+        # Start next round if not done (non-recursive)
         if round_num < 3:  # Test with 3 rounds
             time.sleep(2.0)
-            self._start_training_round(round_num + 1)
+            # Create a new thread for the next round to avoid recursion
+            import threading
+            threading.Thread(
+                target=self._start_training_round,
+                args=(round_num + 1,),
+                daemon=True
+            ).start()
         else:
             print("\n" + "=" * 60)
             print("Pipeline training completed!")
             print("=" * 60)
             self._print_summary()
+            # Signal training completion
+            self.training_complete = True
 
     def _evaluate_global_model(self, round_num: int):
         """Evaluate global model (simplified)"""
@@ -755,12 +780,21 @@ class PipelineTestVehicle:
         return True
 
     def stop(self):
-        """Stop vehicle"""
+        """Stop vehicle and clean up all resources"""
         print(f"\nStopping vehicle {self.vehicle_id}...")
 
-        self.training_active = False
-
-        print("✓ Vehicle stopped")
+        try:
+            self.training_active = False
+            
+            # Close message router and network connections
+            if hasattr(self.platform_bridge, 'message_router'):
+                self.platform_bridge.message_router.close()
+            
+            print("✓ Vehicle stopped")
+        except Exception as e:
+            print(f"Error during vehicle shutdown: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _connect_to_server(self):
         """Connect to server using cross-platform communication"""
@@ -830,7 +864,8 @@ class PipelineTestVehicle:
             metadata={
                 'client_host': socket.gethostbyname(socket.gethostname()),
                 'client_port': 0
-            }
+            },
+            requires_ack=False
         )
 
         success = self.platform_bridge.send_cross_platform_message(registration_msg)
@@ -865,17 +900,18 @@ class PipelineTestVehicle:
 
             # Accept invitation
             response = CrossPlatformMessage(
-                message_id=str(uuid.uuid4()),
-                source_id=self.vehicle_id,
-                target_id="server",
-                message_type="pipeline_response",
-                payload={
-                    'pipeline_id': pipeline_data['pipeline_id'],
-                    'accepted': True,
-                    'stage': self.current_stage,
-                    'stage_index': stage_index
-                }
-            )
+            message_id=str(uuid.uuid4()),
+            source_id=self.vehicle_id,
+            target_id="server",
+            message_type="pipeline_response",
+            payload={
+                'pipeline_id': pipeline_data['pipeline_id'],
+                'accepted': True,
+                'stage': self.current_stage,
+                'stage_index': stage_index
+            },
+            requires_ack=False
+        )
 
             success = self.platform_bridge.send_cross_platform_message(response)
             if success:
@@ -883,16 +919,17 @@ class PipelineTestVehicle:
         else:
             print(f"✗ Vehicle {self.vehicle_id} not in selected pipeline vehicles")
             response = CrossPlatformMessage(
-                message_id=str(uuid.uuid4()),
-                source_id=self.vehicle_id,
-                target_id="server",
-                message_type="pipeline_response",
-                payload={
-                    'pipeline_id': pipeline_data['pipeline_id'],
-                    'accepted': False,
-                    'reason': 'Not in vehicle list'
-                }
-            )
+            message_id=str(uuid.uuid4()),
+            source_id=self.vehicle_id,
+            target_id="server",
+            message_type="pipeline_response",
+            payload={
+                'pipeline_id': pipeline_data['pipeline_id'],
+                'accepted': False,
+                'reason': 'Not in vehicle list'
+            },
+            requires_ack=False
+        )
             self.platform_bridge.send_cross_platform_message(response)
 
     def _handle_global_model(self, message: CrossPlatformMessage):
@@ -998,7 +1035,8 @@ class PipelineTestVehicle:
                 'model_state': model_state,
                 'loss': float(np.mean(epoch_losses)),
                 'timestamp': time.time()
-            }
+            },
+            requires_ack=False
         )
 
         success = self.platform_bridge.send_cross_platform_message(update_msg)
@@ -1017,7 +1055,8 @@ class PipelineTestVehicle:
             source_id=self.vehicle_id,
             target_id="server",
             message_type="heartbeat",
-            payload={'timestamp': time.time()}
+            payload={'timestamp': time.time()},
+            requires_ack=False
         )
         self.platform_bridge.send_cross_platform_message(heartbeat_msg)
 
@@ -1028,7 +1067,8 @@ class PipelineTestVehicle:
             source_id=self.vehicle_id,
             target_id="server",
             message_type="status",
-            payload={}
+            payload={},
+            requires_ack=False
         )
         self.platform_bridge.send_cross_platform_message(status_msg)
 
