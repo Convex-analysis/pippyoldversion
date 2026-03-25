@@ -21,9 +21,17 @@ from enum import Enum
 import logging
 import queue
 from concurrent.futures import ThreadPoolExecutor
+from collections import deque
 
 from .hardware_adapter import HardwarePlatform, HardwareCapabilities, NetworkInterface
 from .types import CommunicationBundle, CommunicationProtocol
+import sys
+sys.path.insert(0, '/Volumes/HardDriveMac/EXP/pippyoldversion')
+try:
+    from fhdp.vehicle_layer.communication import V2VMessage
+except ImportError:
+    # If V2VMessage is not available, create a placeholder for type hints
+    V2VMessage = None
 
 class TransportProtocol(Enum):
     """Transport layer protocols"""
@@ -80,23 +88,48 @@ class CrossPlatformMessage:
     priority: int = 0
     compression_type: CompressionType = CompressionType.ZLIB
 
+    def _serialize_payload(self, obj: Any) -> Any:
+        """递归序列化 payload，处理 Tensor 等不可 JSON 序列化的对象"""
+        if hasattr(obj, 'tolist'):  # numpy array or torch tensor
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {k: self._serialize_payload(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._serialize_payload(item) for item in obj]
+        elif isinstance(obj, (str, int, float, bool)) or obj is None:
+            return obj
+        else:
+            return str(obj)  # 其他类型转字符串
+
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data['compression_type'] = self.compression_type.value
+        data['payload'] = self._serialize_payload(data['payload'])
         return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CrossPlatformMessage':
+        # 必需字段检查：ACK 包或格式错误包会缺少这些字段，直接拒绝
+        _required = {'message_id', 'source_id', 'target_id', 'message_type', 'payload'}
+        _missing = _required - data.keys()
+        if _missing:
+            raise ValueError(
+                f"CrossPlatformMessage.from_dict: missing required fields {_missing}; "
+                f"received keys={set(data.keys())}"
+            )
         if 'compression_type' in data and isinstance(data['compression_type'], str):
             data['compression_type'] = CompressionType(data['compression_type'])
-        return cls(**data)
+        # 过滤掉 dataclass 不认识的额外字段，避免 unexpected keyword argument
+        _known = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in data.items() if k in _known}
+        return cls(**filtered)
 
 
 class CompressionManager:
     """Manages compression algorithms"""
 
     def __init__(self):
-        self.compression_map = {
+        self.compression_map: dict[CompressionType, Callable[[bytes], bytes]] = {
             CompressionType.NONE: self._no_compress,
             CompressionType.ZLIB: self._zlib_compress,
         }
@@ -153,6 +186,8 @@ class ConnectionPool:
         # per-connection recv lock: prevents send_message ACK-reader and
         # start_receiving_from listener from racing on the same socket's recv
         self._recv_locks: Dict[str, threading.Lock] = {}
+        # per-connection health check timestamp cache (5s)
+        self._last_health_check: Dict[str, float] = {}
 
     def get_connection(self, endpoint: NetworkEndpoint) -> Optional[Tuple[socket.socket, threading.Lock]]:
         """Get or create connection; returns (socket, recv_lock) tuple, or None on failure."""
@@ -161,7 +196,7 @@ class ConnectionPool:
         with self.connection_lock:
             if connection_key in self.active_connections:
                 conn = self.active_connections[connection_key]
-                if self._is_connection_alive(conn):
+                if self._is_connection_alive_cached(conn, connection_key):
                     return conn, self._recv_locks[connection_key]
                 else:
                     try:
@@ -170,6 +205,7 @@ class ConnectionPool:
                         pass
                     del self.active_connections[connection_key]
                     self._recv_locks.pop(connection_key, None)
+                    self._last_health_check.pop(connection_key, None)
 
             if len(self.active_connections) >= self.max_connections:
                 self._cleanup_connections()
@@ -182,9 +218,22 @@ class ConnectionPool:
                     'created': time.time(),
                     'last_used': time.time(),
                 }
+                self._last_health_check[connection_key] = time.time()
                 return new_conn, self._recv_locks[connection_key]
 
             return None
+
+    def _is_connection_alive_cached(self, conn: socket.socket, connection_key: str) -> bool:
+        """
+        健康检查带 5s 缓存：避免每次 get_connection 都触发 MSG_PEEK syscall
+        """
+        last_check = self._last_health_check.get(connection_key, 0)
+        if time.time() - last_check < 5.0:
+            return True  # 缓存期内跳过检查
+        is_alive = self._is_connection_alive(conn)
+        if is_alive:
+            self._last_health_check[connection_key] = time.time()
+        return is_alive
 
     def _is_connection_alive(self, conn: socket.socket) -> bool:
         """
@@ -192,6 +241,9 @@ class ConnectionPool:
         正确做法：用 MSG_PEEK 检查连接是否已被对端关闭（recv 返回空）。
         """
         try:
+            # 检查 socket 文件描述符是否有效
+            if conn.fileno() < 0:
+                return False
             data = conn.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
             if data == b'':
                 # 对端已关闭连接
@@ -201,15 +253,21 @@ class ConnectionPool:
         except BlockingIOError:
             # 无数据等待，连接正常
             return True
-        except OSError:
+        except (OSError, ValueError):
+            # 文件描述符已关闭或无效
             return False
 
     def _create_connection(self, endpoint: NetworkEndpoint) -> Optional[socket.socket]:
-        """Create new connection"""
+        """Create new connection with optimized socket parameters"""
         try:
             if endpoint.protocol == TransportProtocol.TCP:
                 conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 conn.settimeout(10.0)
+                # Socket 参数调优
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # 禁用 Nagle 算法
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)    # 启用保活
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144) # 256KB send buffer
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144) # 256KB recv buffer
                 if endpoint.ssl_enabled and endpoint.ssl_context:
                     conn = endpoint.ssl_context.wrap_socket(conn, server_hostname=endpoint.host)
                 conn.connect((endpoint.host, endpoint.port))
@@ -236,6 +294,7 @@ class ConnectionPool:
                 del self.active_connections[connection_key]
                 self.connection_stats.pop(connection_key, None)
                 self._recv_locks.pop(connection_key, None)
+                self._last_health_check.pop(connection_key, None)
 
     def release_connection(self, endpoint: NetworkEndpoint):
         """Release connection back to pool (update last_used)"""
@@ -258,6 +317,7 @@ class ConnectionPool:
             self.active_connections.pop(key, None)
             self.connection_stats.pop(key, None)
             self._recv_locks.pop(key, None)
+            self._last_health_check.pop(key, None)
 
     def get_stats(self) -> Dict[str, Any]:
         return {
@@ -275,9 +335,10 @@ class MessageRouter:
         self.message_handlers: Dict[str, List[Callable]] = {}
         self.routing_table: Dict[str, NetworkEndpoint] = {}
         self.message_queue = queue.Queue()
-        self.metrics: List[MessageMetrics] = []
+        self.metrics: deque[MessageMetrics] = deque(maxlen=10000)  # 环形缓冲防止内存泄漏
         self.compression_manager = CompressionManager()
         self.connection_pool = ConnectionPool()
+        self._handler_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="msg_handler")  # 异步 handler 分发
 
         # server-side: stores sockets accepted from clients (for server→client push)
         self.client_connections: Dict[str, socket.socket] = {}
@@ -309,7 +370,7 @@ class MessageRouter:
             self.message_batch_size = 30
             self.transmission_timeout = 7.0
 
-    def register_handler(self, message_type: str, handler: Callable):
+    def register_handler(self, message_type: str, handler: Callable[..., Any]):
         if message_type not in self.message_handlers:
             self.message_handlers[message_type] = []
         self.message_handlers[message_type].append(handler)
@@ -321,15 +382,52 @@ class MessageRouter:
             with self._client_conn_lock:
                 self.client_connections[node_id] = client_socket
 
-    def send_message(self, message: CrossPlatformMessage,
+    def send_message(self, message: Union[CrossPlatformMessage, 'V2VMessage'],
                      target_endpoint: Optional[NetworkEndpoint] = None) -> bool:
+        """发送消息，支持 CrossPlatformMessage 和 V2VMessage"""
         try:
+            # 如果是 V2VMessage，转换为 CrossPlatformMessage
+            if hasattr(message, 'sender_id'):  # V2VMessage
+                target_id = message.receiver_id if hasattr(message, 'receiver_id') else None
+                if target_id and target_endpoint is None:
+                    target_endpoint = self.routing_table.get(target_id)
+                    if not target_endpoint:
+                        logging.error(f"No route to target: {target_id}")
+                        return False
+
+                # 转换 V2VMessage → CrossPlatformMessage
+                cp_message = CrossPlatformMessage(
+                    message_id=message.message_id,
+                    source_id=message.sender_id,
+                    target_id=message.receiver_id,
+                    message_type=message.message_type,
+                    payload=message.payload,
+                    timestamp=message.timestamp,
+                    requires_ack=True,
+                    priority=0,
+                    compression_type=CompressionType.ZLIB
+                )
+                return self._send_cross_platform_message(cp_message, target_endpoint)
+
+            # CrossPlatformMessage 直接发送
             if target_endpoint is None:
                 target_endpoint = self.routing_table.get(message.target_id)
                 if not target_endpoint:
                     logging.error(f"No route to target: {message.target_id}")
                     return False
 
+            return self._send_cross_platform_message(message, target_endpoint)
+
+        except Exception as e:
+            logging.error(f"Failed to send message: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            return False
+
+    def _send_cross_platform_message(self, message: CrossPlatformMessage,
+                                    target_endpoint: NetworkEndpoint) -> bool:
+        """内部方法：发送 CrossPlatformMessage"""
+        try:
             # Serialize
             message_data = json.dumps(message.to_dict()).encode('utf-8')
 
@@ -362,6 +460,19 @@ class MessageRouter:
             logging.error(f"Failed to send message: {e}")
             return False
 
+    @staticmethod
+    def _check_socket_alive(conn: socket.socket) -> bool:
+        """检查 socket 是否可用（静态方法，供跨类使用）"""
+        try:
+            if conn.fileno() < 0:
+                return False
+            conn.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+            return True
+        except BlockingIOError:
+            return True
+        except (OSError, ValueError):
+            return False
+
     def _transmit_data(self, data: bytes, endpoint: NetworkEndpoint,
                        message: CrossPlatformMessage) -> bool:
         """
@@ -376,8 +487,7 @@ class MessageRouter:
         if client_conn is not None:
             try:
                 msg_len = len(data).to_bytes(4, byteorder='big')
-                client_conn.sendall(msg_len)
-                client_conn.sendall(data)
+                client_conn.sendall(msg_len + data)  # 合并为单次 sendall
                 return True
             except Exception as e:
                 logging.error(f"Failed to send via client connection to {message.target_id}: {e}")
@@ -398,11 +508,10 @@ class MessageRouter:
         try:
             if endpoint.protocol == TransportProtocol.TCP:
                 msg_len = len(data).to_bytes(4, byteorder='big')
-                conn.sendall(msg_len)
-                conn.sendall(data)
+                conn.sendall(msg_len + data)  # 合并为单次 sendall
 
                 if message.requires_ack:
-                    # 读取 ACK（length-prefixed），持有 recv_lock 防止与接收线程竞争
+                    # 读取 ACK（length-prefixed），全程持有 recv_lock 防止与接收线程竞争
                     with recv_lock:
                         ack_len_data = self._recv_exact(conn, 4)
                         if not ack_len_data:
@@ -415,7 +524,9 @@ class MessageRouter:
                             logging.warning("Connection closed while reading ACK data")
                             self.connection_pool.invalidate_connection(endpoint)
                             return False
-                    ack = json.loads(ack_data.decode('utf-8'))
+                    # ACK 可能是压缩的，需要先解压
+                    decompressed_ack = self.compression_manager.auto_decompress(ack_data)
+                    ack = json.loads(decompressed_ack.decode('utf-8'))
                     return ack.get('message_id') == message.message_id
 
                 return True
@@ -428,6 +539,11 @@ class MessageRouter:
                 logging.error(f"Unsupported transport protocol: {endpoint.protocol}")
                 return False
 
+        except OSError as e:
+            # 处理 Bad file descriptor 等底层 socket 错误
+            logging.error(f"Socket error during transmission: {e}")
+            self.connection_pool.invalidate_connection(endpoint)
+            return False
         except Exception as e:
             logging.error(f"Transmission failed: {e}")
             self.connection_pool.invalidate_connection(endpoint)
@@ -437,14 +553,19 @@ class MessageRouter:
 
     @staticmethod
     def _recv_exact(conn: socket.socket, n: int) -> Optional[bytes]:
-        """Read exactly n bytes from socket, return None if connection closed"""
-        buf = b''
-        while len(buf) < n:
-            chunk = conn.recv(n - len(buf))
-            if not chunk:
+        """
+        优化的零拷贝接收：使用 bytearray + recv_into 预分配，
+        避免频繁的 bytes 对象分配和拼接。
+        """
+        buf = bytearray(n)
+        view = memoryview(buf)
+        offset = 0
+        while offset < n:
+            received = conn.recv_into(view[offset:], n - offset)
+            if received == 0:
                 return None
-            buf += chunk
-        return buf
+            offset += received
+        return bytes(buf)
 
     # ----------------------------------------------------------------
     # 服务器端：监听入站连接
@@ -465,16 +586,26 @@ class MessageRouter:
         try:
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Socket 参数调优（服务端）
+            server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
             if endpoint.ssl_enabled and endpoint.ssl_context:
                 server_socket = endpoint.ssl_context.wrap_socket(
                     server_socket, server_side=True)
             server_socket.bind((endpoint.host, endpoint.port))
-            server_socket.listen(10)
+            server_socket.listen(128)  # 提高 backlog 支持更多并发连接
             logging.info(f"TCP listener started on {endpoint.host}:{endpoint.port}")
 
             while True:
                 try:
                     client_socket, addr = server_socket.accept()
+                    # 新接受的连接也应用 socket 参数
+                    client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
                     t = threading.Thread(
                         target=self._handle_tcp_connection,
                         args=(client_socket, addr),
@@ -509,9 +640,12 @@ class MessageRouter:
         服务器端处理每个客户端连接的线程。
         - 自动将 source_id → client_socket 注册到 client_connections
         - 收到消息后立即发送 ACK（如果 requires_ack）
+        - 收到 listen_register 消息时，将 client_connections 切换到该
+          socket（专用推送连接），然后退出 recv 循环但**不关闭 socket**
         - 连接关闭时自动清理
         """
         source_node_id = None
+        is_push_socket = False  # 标记：该 socket 是否已移交为推送专用
         try:
             client_socket.settimeout(300.0)
 
@@ -531,9 +665,34 @@ class MessageRouter:
 
                 # 解析消息
                 message_dict = json.loads(decompressed.decode('utf-8'))
-                message = CrossPlatformMessage.from_dict(message_dict)
+                try:
+                    message = CrossPlatformMessage.from_dict(message_dict)
+                except ValueError as ve:
+                    logging.warning(
+                        f"_handle_tcp_connection({addr}): discarding malformed packet: {ve}"
+                    )
+                    continue
 
-                # 注册 client_connections（仅首次）
+                # --- listen_register：客户端专用接收 socket 的身份注册 ---
+                if message.message_type == 'listen_register':
+                    source_node_id = message.source_id
+                    with self._client_conn_lock:
+                        # 关闭旧的推送连接（如果有的话），切换到新的
+                        old_conn = self.client_connections.get(source_node_id)
+                        if old_conn is not None and old_conn is not client_socket:
+                            # 不关闭旧连接——它可能是客户端的发送连接（ConnectionPool），
+                            # 由 _handle_tcp_connection 的另一个线程管理
+                            pass
+                        self.client_connections[source_node_id] = client_socket
+                    logging.info(
+                        f"listen_register: switched push socket for "
+                        f"{source_node_id} to {addr}")
+                    is_push_socket = True
+                    # 退出 recv 循环：这条连接现在专门用于服务器→客户端推送，
+                    # 客户端不会再往上面发消息（避免双方互 recv 死锁）。
+                    break
+
+                # 注册 client_connections（仅首次，普通业务连接）
                 source_node_id = message.source_id
                 with self._client_conn_lock:
                     if source_node_id and source_node_id not in self.client_connections:
@@ -547,8 +706,7 @@ class MessageRouter:
                         {'message_id': message.message_id}).encode('utf-8')
                     ack_len = len(ack_payload).to_bytes(4, byteorder='big')
                     try:
-                        client_socket.sendall(ack_len)
-                        client_socket.sendall(ack_payload)
+                        client_socket.sendall(ack_len + ack_payload)  # 合并为单次 sendall
                     except Exception as e:
                         logging.warning(f"Failed to send ACK to {source_node_id}: {e}")
 
@@ -561,32 +719,90 @@ class MessageRouter:
         except Exception as e:
             logging.error(f"TCP connection error from {addr}: {e}")
         finally:
-            with self._client_conn_lock:
-                if source_node_id and source_node_id in self.client_connections:
-                    del self.client_connections[source_node_id]
-                    logging.info(f"Removed client connection for {source_node_id}")
-            try:
-                client_socket.close()
-            except:
-                pass
+            if is_push_socket:
+                # 推送专用 socket：不关闭、不清理 client_connections，
+                # 由 _transmit_data 路径 1 继续使用
+                logging.info(
+                    f"Push socket handler exiting for {source_node_id}, "
+                    f"socket kept alive for server push")
+            else:
+                with self._client_conn_lock:
+                    if source_node_id and source_node_id in self.client_connections:
+                        # 只有当 client_connections 里存的还是这个 socket 时才清理
+                        # （可能已被 listen_register 替换为专用 socket）
+                        if self.client_connections[source_node_id] is client_socket:
+                            del self.client_connections[source_node_id]
+                            logging.info(f"Removed client connection for {source_node_id}")
+                try:
+                    client_socket.close()
+                except:
+                    pass
 
     # ----------------------------------------------------------------
     # 客户端端：主动监听服务器推送（新增）
     # ----------------------------------------------------------------
 
-    def start_receiving_from(self, node_id: str):
+    def start_receiving_from(self, node_id: str,
+                             self_node_id: Optional[str] = None):
         """
         客户端调用此方法，在后台持续接收来自 node_id 的推送消息。
-        使用与发送共用的同一 ConnectionPool 连接，实现真正的双向复用。
+
+        使用**独立专用 socket**（不走 ConnectionPool），与发送路径完全隔离：
+        - 发送线程（ConnectionPool）和接收线程不再共用同一个 socket
+        - 避免两个线程竞争 settimeout / recv，消除 Bad file descriptor 问题
+
+        连接建立后先发送 listen_register 消息，让服务器将 client_connections
+        切换到这条专用连接，后续推送全部走该 socket。
 
         用法（客户端）：
             router.add_route("server", server_endpoint)
-            router.start_receiving_from("server")
+            router.start_receiving_from("server", self_node_id="agx_orin_001")
         """
         if node_id in self._listener_running and self._listener_running[node_id]:
             return  # 已经在监听
 
         self._listener_running[node_id] = True
+
+        def _make_dedicated_socket(endpoint: NetworkEndpoint) -> Optional[socket.socket]:
+            """建立专用接收 socket，不走 ConnectionPool"""
+            try:
+                conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+                conn.settimeout(30.0)
+                conn.connect((endpoint.host, endpoint.port))
+                return conn
+            except Exception as e:
+                logging.error(f"start_receiving_from: dedicated socket connect failed: {e}")
+                return None
+
+        def _send_listen_register(conn: socket.socket) -> bool:
+            """发送 listen_register 消息，让服务器识别该连接属于本节点"""
+            if not self_node_id:
+                return True  # 未提供 node_id 则跳过
+            try:
+                reg_msg = json.dumps({
+                    'message_id': f'listen_reg_{self_node_id}',
+                    'source_id': self_node_id,
+                    'target_id': node_id,
+                    'message_type': 'listen_register',
+                    'payload': {},
+                    'timestamp': time.time(),
+                    'requires_ack': False,
+                    'priority': 0,
+                    'compression_type': 'none'
+                }).encode('utf-8')
+                # 可能需要压缩（与服务器协议一致使用 zlib）
+                compressed = self.compression_manager.compress(
+                    reg_msg, CompressionType.ZLIB)[0]
+                msg_len = len(compressed).to_bytes(4, byteorder='big')
+                conn.sendall(msg_len + compressed)
+                logging.info(f"Sent listen_register for {self_node_id}")
+                return True
+            except Exception as e:
+                logging.error(f"Failed to send listen_register: {e}")
+                return False
 
         def _run():
             endpoint = self.routing_table.get(node_id)
@@ -595,32 +811,47 @@ class MessageRouter:
                 return
 
             while self._listener_running.get(node_id, False):
-                result = self.connection_pool.get_connection(endpoint)
-                if result is None:
+                conn = _make_dedicated_socket(endpoint)
+                if conn is None:
                     logging.error(f"start_receiving_from: cannot connect to {node_id}, retry in 3s")
                     time.sleep(3.0)
                     continue
-                conn, recv_lock = result
+
+                # 发送身份标识，让服务器将推送连接切换到这个 socket
+                if not _send_listen_register(conn):
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
+                    continue
 
                 try:
-                    conn.settimeout(30.0)
                     while self._listener_running.get(node_id, False):
                         try:
-                            with recv_lock:
-                                len_data = self._recv_exact(conn, 4)
-                                if not len_data:
-                                    logging.info(
-                                        f"Server {node_id} closed connection, reconnecting...")
-                                    break
+                            len_data = self._recv_exact(conn, 4)
+                            if not len_data:
+                                logging.info(
+                                    f"Server {node_id} closed connection, reconnecting...")
+                                break
 
-                                msg_len = int.from_bytes(len_data, byteorder='big')
-                                msg_data = self._recv_exact(conn, msg_len)
-                                if msg_data is None:
-                                    break
+                            msg_len = int.from_bytes(len_data, byteorder='big')
+                            msg_data = self._recv_exact(conn, msg_len)
+                            if msg_data is None:
+                                break
 
                             decompressed = self.compression_manager.auto_decompress(msg_data)
                             message_dict = json.loads(decompressed.decode('utf-8'))
-                            message = CrossPlatformMessage.from_dict(message_dict)
+
+                            # 捕获 ACK 包误入（缺少必需字段）：丢弃并继续，不断连
+                            try:
+                                message = CrossPlatformMessage.from_dict(message_dict)
+                            except ValueError as ve:
+                                logging.warning(
+                                    f"start_receiving_from({node_id}): discarding "
+                                    f"non-business packet: {ve}"
+                                )
+                                continue
 
                             # 不回 ACK：服务器推送走 client_connections 路径，
                             # 不等 ACK，客户端回 ACK 会被 _handle_tcp_connection
@@ -641,8 +872,11 @@ class MessageRouter:
                 except Exception as e:
                     logging.error(f"Listener connection error to {node_id}: {e}")
                 finally:
-                    # 连接断开，从池中移除，下次循环重建
-                    self.connection_pool.invalidate_connection(endpoint)
+                    # 只关闭专用 socket，不影响 ConnectionPool 中的发送连接
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
                     time.sleep(1.0)
 
         t = threading.Thread(target=_run, daemon=True,
@@ -658,12 +892,17 @@ class MessageRouter:
     # ----------------------------------------------------------------
 
     def _handle_message(self, message: CrossPlatformMessage):
+        """异步分发消息到 handler，避免阻塞接收线程"""
         handlers = self.message_handlers.get(message.message_type, [])
         for handler in handlers:
-            try:
-                handler(message)
-            except Exception as e:
-                logging.error(f"Message handler error: {e}")
+            self._handler_executor.submit(self._run_handler, handler, message)
+
+    def _run_handler(self, handler: Callable[..., Any], message: CrossPlatformMessage):
+        """在独立线程中执行 handler"""
+        try:
+            handler(message)
+        except Exception as e:
+            logging.error(f"Message handler error: {e}")
 
     def send_bundle(self, bundle: CommunicationBundle,
                     target_endpoint: NetworkEndpoint) -> bool:
@@ -690,7 +929,8 @@ class MessageRouter:
             return False
 
     def get_network_stats(self) -> Dict[str, Any]:
-        recent_metrics = [m for m in self.metrics if time.time() - m.timestamp < 300]
+        current_time = time.time()
+        recent_metrics = [m for m in self.metrics if current_time - m.timestamp < 300]
         if not recent_metrics:
             return {
                 'total_messages': 0,
@@ -755,8 +995,10 @@ class ProtocolNegotiator:
 class PlatformBridge:
     """Bridges communication between different platforms"""
 
-    def __init__(self, local_capabilities: HardwareCapabilities):
+    def __init__(self, local_capabilities: HardwareCapabilities,
+                 node_id: Optional[str] = None):
         self.local_capabilities = local_capabilities
+        self.node_id = node_id  # 本节点 ID，用于接收线程向服务器注册身份
         self.message_router = MessageRouter(local_capabilities)
         self.protocol_negotiator = ProtocolNegotiator()
         self.active_bridges: Dict[str, Dict[str, Any]] = {}
@@ -787,7 +1029,8 @@ class PlatformBridge:
 
             # 自动启动接收线程（客户端场景）
             if start_receiving:
-                self.message_router.start_receiving_from(remote_node_id)
+                self.message_router.start_receiving_from(
+                    remote_node_id, self_node_id=self.node_id)
 
             self.active_bridges[remote_node_id] = {
                 'capabilities': remote_capabilities,

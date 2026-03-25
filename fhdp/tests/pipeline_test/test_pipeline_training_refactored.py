@@ -134,6 +134,18 @@ class SimpleCNN(nn.Module):
         return x
 
 
+def _serialize_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert torch.Tensor values to lists for JSON serialization."""
+    return {k: v.tolist() if hasattr(v, 'tolist') else v
+            for k, v in state_dict.items()}
+
+
+def _deserialize_state_dict(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Restore lists back to torch.Tensor after JSON deserialization."""
+    return {k: torch.tensor(v) if isinstance(v, list) else v
+            for k, v in raw.items()}
+
+
 def create_mock_data_loader(num_samples: int = 100, batch_size: int = 32):
     """Create mock data loader for testing"""
 
@@ -522,7 +534,7 @@ class PipelineTestServer:
         print(f"\n{'='*20} Round {round_num} {'='*20}")
 
         # Broadcast global model
-        global_model_state = self.global_model.state_dict()
+        global_model_state = _serialize_state_dict(self.global_model.state_dict())
 
         broadcast_msg = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
@@ -558,9 +570,15 @@ class PipelineTestServer:
         num_updates = len(updates)
 
         for key in updates[0]['model_state'].keys():
-            # Average parameters
+            # Average parameters (deserialize list→Tensor if needed)
+            tensors = [
+                torch.tensor(update['model_state'][key])
+                if isinstance(update['model_state'][key], list)
+                else update['model_state'][key]
+                for update in updates
+            ]
             aggregated_state[key] = torch.mean(
-                torch.stack([update['model_state'][key] for update in updates]),
+                torch.stack(tensors),
                 dim=0
             )
 
@@ -693,7 +711,8 @@ class PipelineTestVehicle:
             thermal_limit=85.0,
             accelerated_compute=True
         )
-        self.platform_bridge = PlatformBridge(self.local_capabilities)
+        self.platform_bridge = PlatformBridge(self.local_capabilities,
+                                               node_id=self.vehicle_id)
 
         # Training state
         self.current_pipeline_id: Optional[str] = None
@@ -884,8 +903,8 @@ class PipelineTestVehicle:
 
         print(f"\nReceived global model for round {round_num}")
 
-        # Update local model
-        self.model.load_state_dict(model_data['model_state'])
+        # Update local model (deserialize list→Tensor after JSON transport)
+        self.model.load_state_dict(_deserialize_state_dict(model_data['model_state']))
 
         # Start training
         self._train_locally(round_num, training_config)
@@ -966,8 +985,8 @@ class PipelineTestVehicle:
         """Send model update to server"""
         print(f"→ Sending model update for round {round_num}...")
 
-        # Get model state dict
-        model_state = self.model.state_dict()
+        # Get model state dict (serialize Tensor→list for JSON transport)
+        model_state = _serialize_state_dict(self.model.state_dict())
 
         update_msg = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
