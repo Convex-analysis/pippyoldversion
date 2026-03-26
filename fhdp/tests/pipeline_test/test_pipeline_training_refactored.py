@@ -5,13 +5,16 @@ FHDP Pipeline Training Test Script (Refactored)
 This script tests the FHDP system's capability to orchestrate pipeline training
 across two Jetson devices (AGX Orin and Orin Nano) with a 4090 Linux server.
 
+Model: EVO1Driving (vision-language-action, ~25-30M fallback params, no HF download).
+Template: Full TemplateManager integration with latency benchmark and online-learning feedback.
+
 Refactored to use FHDP's built-in cross_platform_comm.py for reliable network
 communication with length-prefix protocol and compression support.
 
 Architecture:
 - Server: Edge Server (4090 Linux) - Coordinates pipeline formation and aggregation
-- Client 1: Jetson AGX Orin - High-resource vehicle
-- Client 2: Jetson Orin Nano - Medium-resource vehicle
+- Client 1: Jetson AGX Orin - High-resource vehicle (batch=4, 3 views, full params)
+- Client 2: Jetson Orin Nano - Medium-resource vehicle (batch=2, 2 views, stage-1 freeze)
 
 Usage:
     # On the 4090 server:
@@ -22,6 +25,9 @@ Usage:
 
     # On Jetson Orin Nano:
     python test_pipeline_training_refactored.py --mode vehicle --vehicle-id orin_nano_001 --server-host <server-ip> --server-port 5000 --resource-level medium
+
+    # Standalone template benchmark (no network):
+    python test_pipeline_training_refactored.py --mode test-template --resource-level medium
 """
 
 import sys
@@ -34,8 +40,10 @@ import signal
 import yaml
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import uuid
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple, Callable
 
 # Add project root to path - support both local and remote deployment
@@ -72,6 +80,11 @@ for root in possible_roots:
 
 if project_root is not None:
     sys.path.insert(0, project_root)
+    # Also add fhdp/EVO1 to path for utils import (nuscenes_loader uses "from utils.config")
+    evo1_root = os.path.join(project_root, 'fhdp', 'EVO1')
+    if os.path.exists(evo1_root):
+        sys.path.insert(0, evo1_root)
+        print(f"[INFO] Added EVO1 root to path: {evo1_root}")
     print(f"[INFO] Using project root: {project_root}")
     # Verify fhdp import works
     try:
@@ -107,31 +120,64 @@ from fhdp.core.cross_platform_comm import (
 )
 
 
-# ==================== Simple Model for Testing ====================
+# ==================== EVO1Driving Model for Testing ====================
 
-class SimpleCNN(nn.Module):
-    """Simple CNN model for testing"""
+# Import EVO1Driving model (with fallback implementation)
+from fhdp.EVO1.model.evo1_driving import (
+    EVO1Driving, EVO1DrivingOutput,
+    ModelConfig as _EVO1ModelConfig
+)
 
-    def __init__(self, input_channels: int = 1, num_classes: int = 10):
-        super().__init__()
+from fhdp.core.constants import TEMPLATE_LOOKUP_LATENCY_THRESHOLD
 
-        self.conv1 = nn.Conv2d(input_channels, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.dropout = nn.Dropout(0.25)
 
-        # Calculate flattened size after convolutions
-        self.fc1 = nn.Linear(64 * 7 * 7, 128)
-        self.fc2 = nn.Linear(128, num_classes)
+@dataclass
+class TestModelConfig:
+    """Extended ModelConfig for test: adds fields needed by _controls_to_waypoints()
+    and hardware-adaptive parameters for Jetson devices."""
+    # --- inherited from inline ModelConfig ---
+    vision_encoder: str = "OpenGVLab/InternVL3-1B"
+    language_model: str = "Qwen/Qwen2.5-0.5B"
+    image_size: int = 224
+    max_waypoints: int = 20
+    action_dim: int = 8
+    per_action_dim: int = 7
+    sequence_length: int = 32
+    hidden_dim: int = 4096
+    vision_model_name: str = "OpenGVLab/InternVL3-1B"
+    # --- fields required by _controls_to_waypoints ---
+    max_steering: float = 0.6
+    max_speed: float = 30.0
+    # --- driving / hardware-adaptive fields ---
+    num_views: int = 3
+    horizon: int = 20
+    action_hidden_dim: int = 512
 
-    def forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = self.pool(torch.relu(self.conv2(x)))
-        x = self.dropout(x)
-        x = x.view(x.size(0), -1)
-        x = self.dropout(torch.relu(self.fc1(x)))
-        x = self.fc2(x)
-        return x
+
+def _build_model_config(resource_level: str) -> TestModelConfig:
+    """Create device-adaptive model config.
+
+    resource_level:
+        'high'   – AGX Orin  (batch=4, 3 views, 20 waypoints, full params)
+        'medium' – Orin Nano (batch=2, 2 views, 10 waypoints, stage-1 freeze backbone)
+        'server' – 4090 Linux (batch=8, 3 views, 20 waypoints, CPU aggregation only)
+    """
+    if resource_level == 'high':
+        return TestModelConfig(max_waypoints=20, num_views=3, action_hidden_dim=512)
+    elif resource_level == 'medium':
+        return TestModelConfig(max_waypoints=10, num_views=2, action_hidden_dim=256)
+    else:  # server
+        return TestModelConfig(max_waypoints=20, num_views=3, action_hidden_dim=512)
+
+
+def _get_batch_size(resource_level: str) -> int:
+    """Return batch size per device type."""
+    return {'high': 4, 'medium': 2, 'server': 8}.get(resource_level, 4)
+
+
+def _get_device() -> str:
+    """Return 'cuda' if available, else 'cpu'."""
+    return 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 def _serialize_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -146,28 +192,43 @@ def _deserialize_state_dict(raw: Dict[str, Any]) -> Dict[str, Any]:
             for k, v in raw.items()}
 
 
-def create_mock_data_loader(num_samples: int = 100, batch_size: int = 32):
-    """Create mock data loader for testing"""
+def create_mock_driving_data_loader(
+    num_samples: int = 100,
+    batch_size: int = 4,
+    num_views: int = 3,
+    image_size: int = 224,
+    max_waypoints: int = 20
+):
+    """Create mock autonomous-driving data loader.
 
-    class MockDataLoader:
-        def __init__(self, num_samples, batch_size):
+    Yields per batch:
+        images      [B, N, 3, H, W]
+        image_mask  [B, N]          (all True)
+        state       [B, 12]         (vehicle state)
+        controls    [B, T, 3]       (steering, throttle, brake in [-1,1])
+    """
+
+    class MockDrivingDataLoader:
+        def __init__(self, num_samples, batch_size, num_views, image_size, max_waypoints):
             self.num_samples = num_samples
             self.batch_size = batch_size
+            self.num_views = num_views
+            self.image_size = image_size
+            self.max_waypoints = max_waypoints
 
         def __iter__(self):
             for i in range(0, self.num_samples, self.batch_size):
-                batch_size = min(self.batch_size, self.num_samples - i)
-
-                # Mock images (MNIST-like: 1x28x28)
-                images = torch.randn(batch_size, 1, 28, 28)
-                labels = torch.randint(0, 10, (batch_size,))
-
-                yield images, labels
+                bs = min(self.batch_size, self.num_samples - i)
+                images = torch.randn(bs, self.num_views, 3, self.image_size, self.image_size)
+                image_mask = torch.ones(bs, self.num_views, dtype=torch.bool)
+                state = torch.randn(bs, 12)
+                controls = torch.tanh(torch.randn(bs, self.max_waypoints, 3))
+                yield images, image_mask, state, controls
 
         def __len__(self):
             return (self.num_samples + self.batch_size - 1) // self.batch_size
 
-    return MockDataLoader(num_samples, batch_size)
+    return MockDrivingDataLoader(num_samples, batch_size, num_views, image_size, max_waypoints)
 
 
 # ==================== Server Mode ====================
@@ -215,7 +276,7 @@ class PipelineTestServer:
             host=host,
             port=port,
             protocol=TransportProtocol.TCP,
-            compression=CompressionType.ZLIB
+            compression=CompressionType.NONE  # Disabled to avoid zlib decompression errors
         )
 
         # Create platform bridge with x86 Linux capabilities
@@ -240,7 +301,8 @@ class PipelineTestServer:
         # Pipeline management
         self.active_pipeline: Optional[Pipeline] = None
         self.pipeline_formed = False
-        self.global_model = SimpleCNN()
+        self.server_config = _build_model_config('server')
+        self.global_model = EVO1Driving(self.server_config, device='cpu')
 
         # Statistics
         self.stats = {
@@ -258,6 +320,10 @@ class PipelineTestServer:
         self.current_round = 0
         self.pending_updates: Dict[int, Dict[str, Dict]] = {}  # round_num -> vehicle_id -> update_data
         self.training_complete = False
+
+        # Track vehicles that have accepted pipeline invitation
+        self.accepted_vehicles = set()
+        self.training_started = False
 
     def start(self):
         """Start server"""
@@ -364,7 +430,7 @@ class PipelineTestServer:
                 host=message.metadata.get('client_host', 'unknown'),
                 port=message.metadata.get('client_port', 0),
                 protocol=TransportProtocol.TCP,
-                compression=CompressionType.ZLIB
+                compression=CompressionType.NONE  # Disabled to avoid zlib decompression errors
             )
             self.platform_bridge.message_router.add_route(message.source_id, vehicle_endpoint)
 
@@ -416,9 +482,20 @@ class PipelineTestServer:
         if accepted:
             print(f"✓ Vehicle {message.source_id} accepted pipeline invitation")
 
+            # Track accepted vehicles
+            with self.lock:
+                self.accepted_vehicles.add(message.source_id)
+
             # Check if all vehicles have accepted
             if self.active_pipeline:
-                if len(self.active_pipeline.vehicles) >= 2:
+                expected_vehicles = set(self.active_pipeline.vehicles)
+                with self.lock:
+                    all_accepted = (self.accepted_vehicles == expected_vehicles and
+                                   not self.training_started)
+
+                if all_accepted:
+                    with self.lock:
+                        self.training_started = True
                     self._start_pipeline_training()
         else:
             print(f"✗ Vehicle {message.source_id} declined pipeline invitation")
@@ -461,9 +538,32 @@ class PipelineTestServer:
                 vehicle_classes[vehicle.vehicle_id] = resource_class
                 print(f"  {vehicle.vehicle_id}: {resource_class.value}")
 
-            # Step 2: Find best matching template
+            # Step 2: Find best matching template (timed)
             print("\nStep 2: Finding best matching pipeline template...")
+            t0 = time.perf_counter()
             template = self.template_manager.find_template_for_vehicles(candidate_vehicles)
+            lookup_ms = (time.perf_counter() - t0) * 1000
+            threshold_ms = TEMPLATE_LOOKUP_LATENCY_THRESHOLD * 1000
+            status = "PASS" if lookup_ms < threshold_ms else "WARN"
+            print(f"  Template lookup latency: {lookup_ms:.2f}ms (threshold {threshold_ms:.0f}ms) [{status}]")
+
+            # Top-3 candidates with match scores
+            top_candidates = self.template_manager.matcher.find_best_template(
+                candidate_vehicles, max_candidates=3
+            )
+            if top_candidates:
+                for rank, (t, score) in enumerate(top_candidates, 1):
+                    print(f"  Candidate #{rank}: {t.template_id} | score={score:.3f} | "
+                          f"req={[r.value for r in t.resource_requirements]}")
+            else:
+                print("  (no candidates returned by matcher)")
+
+            # Basket statistics
+            stats = self.template_manager.get_template_statistics()
+            print(f"  [Basket Stats] baskets={stats['total_baskets']} "
+                  f"templates={stats['total_templates']} "
+                  f"avg_success={stats['avg_success_rate']:.3f} "
+                  f"cache_hit={stats['cache_hit_rate']:.3f}")
 
             if template is None:
                 print("✗ No suitable template found for current vehicles")
@@ -563,8 +663,11 @@ class PipelineTestServer:
                 'training_config': {
                     'epochs': 2,
                     'batch_size': 32,
-                    'learning_rate': 0.001
-                }
+                    'learning_rate': 1e-4
+                },
+                'num_views': self.server_config.num_views,
+                'image_size': self.server_config.image_size,
+                'max_waypoints': self.server_config.max_waypoints
             },
             requires_ack=False
         )
@@ -623,12 +726,31 @@ class PipelineTestServer:
                 daemon=True
             ).start()
         else:
+            # ---- Template Feedback after final round ----
+            print("\n" + "-" * 40)
+            print("[Template Feedback] Registering pipeline result...")
+            stats_before = self.template_manager.get_template_statistics()
+            elapsed = time.time() - getattr(self.active_pipeline, 'start_time', time.time())
+            self.template_manager.register_successful_pipeline(
+                self.active_pipeline, success=True, duration=elapsed
+            )
+            stats_after = self.template_manager.get_template_statistics()
+            print(f"  Duration: {elapsed:.1f}s")
+            print(f"  Before: templates={stats_before['total_templates']} "
+                  f"avg_success={stats_before['avg_success_rate']:.3f}")
+            print(f"  After:  templates={stats_after['total_templates']} "
+                  f"avg_success={stats_after['avg_success_rate']:.3f}")
+            print("-" * 40)
+
             print("\n" + "=" * 60)
             print("Pipeline training completed!")
             print("=" * 60)
             self._print_summary()
             # Signal training completion
             self.training_complete = True
+
+            # Notify all vehicles that training is complete
+            self._notify_training_complete()
 
     def _evaluate_global_model(self, round_num: int):
         """Evaluate global model (simplified)"""
@@ -646,6 +768,37 @@ class PipelineTestServer:
         print(f"Aggregations performed: {self.stats['aggregations_performed']}")
         print(f"Total updates received: {self.stats['total_updates_received']}")
         print("=" * 60)
+
+    def _notify_training_complete(self):
+        """Notify all vehicles that training is complete"""
+        if not self.active_pipeline:
+            return
+
+        print("\nNotifying vehicles that training is complete...")
+
+        for vehicle_id in self.active_pipeline.vehicles:
+            msg = CrossPlatformMessage(
+                message_id=str(uuid.uuid4()),
+                source_id="server",
+                target_id=vehicle_id,
+                message_type="training_complete",
+                payload={
+                    'pipeline_id': self.active_pipeline.pipeline_id,
+                    'total_rounds': self.current_round,
+                    'final_stats': self.stats.copy()
+                },
+                requires_ack=False
+            )
+
+            try:
+                self.platform_bridge.send_cross_platform_message(msg)
+                print(f"✓ Sent training complete notification to {vehicle_id}")
+            except Exception as e:
+                print(f"✗ Failed to send training complete notification to {vehicle_id}: {e}")
+
+        # Request server shutdown
+        global shutdown_requested
+        shutdown_requested = True
 
     def get_status(self) -> Dict[str, Any]:
         """Get server status"""
@@ -701,17 +854,28 @@ class PipelineTestVehicle:
                 'bandwidth': 50.0
             }
 
-        # Initialize components
-        self.model = SimpleCNN()
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.001)
-        self.criterion = nn.CrossEntropyLoss()
+        # Initialize EVO1Driving model with device-adaptive config
+        self.resource_level = resource_level
+        self.model_config = _build_model_config(resource_level)
+        self.device = _get_device()
+        self.model = EVO1Driving(self.model_config, device=self.device)
+
+        # Orin Nano: freeze VL backbone → only train action head (~6M params)
+        if resource_level == 'medium':
+            self.model.set_stage1_mode()
+
+        # AdamW on trainable params only; no separate criterion (compute_loss handles it)
+        self.optimizer = torch.optim.AdamW(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=1e-4
+        )
 
         # Initialize cross-platform communication
         self.server_endpoint = NetworkEndpoint(
             host=server_host,
             port=server_port,
             protocol=TransportProtocol.TCP,
-            compression=CompressionType.ZLIB
+            compression=CompressionType.NONE  # Disabled to avoid zlib decompression errors
         )
 
         # Create platform bridge with Jetson capabilities
@@ -755,6 +919,10 @@ class PipelineTestVehicle:
 
         # Lock for thread safety
         self.lock = threading.Lock()
+
+        # Training synchronization to prevent concurrent training
+        self.training_lock = threading.Lock()
+        self.latest_round_handled = 0
 
     def start(self):
         """Start vehicle"""
@@ -839,6 +1007,11 @@ class PipelineTestVehicle:
         self.platform_bridge.message_router.register_handler(
             'global_model',
             self._handle_global_model
+        )
+
+        self.platform_bridge.message_router.register_handler(
+            'training_complete',
+            self._handle_training_complete
         )
 
         self.platform_bridge.message_router.register_handler(
@@ -938,13 +1111,46 @@ class PipelineTestVehicle:
         round_num = model_data['round']
         training_config = model_data['training_config']
 
-        print(f"\nReceived global model for round {round_num}")
+        # Deduplicate: ignore if we've already handled this round
+        if round_num <= self.latest_round_handled:
+            return
 
-        # Update local model (deserialize list→Tensor after JSON transport)
-        self.model.load_state_dict(_deserialize_state_dict(model_data['model_state']))
+        # Use lock to prevent concurrent training
+        with self.training_lock:
+            # Double-check after acquiring lock
+            if round_num <= self.latest_round_handled:
+                return
 
-        # Start training
-        self._train_locally(round_num, training_config)
+            # Mark this round as handled
+            self.latest_round_handled = round_num
+
+            print(f"\nReceived global model for round {round_num}")
+
+            # Update local model (deserialize list→Tensor after JSON transport)
+            self.model.load_state_dict(_deserialize_state_dict(model_data['model_state']))
+
+            # Extract num_views/image_size/max_waypoints from broadcast payload
+            # (use local model_config as fallback for backward-compat)
+            training_config['num_views'] = model_data.get('num_views', self.model_config.num_views)
+            training_config['image_size'] = model_data.get('image_size', self.model_config.image_size)
+            training_config['max_waypoints'] = model_data.get('max_waypoints', self.model_config.max_waypoints)
+
+            # Start training (lock released automatically when with block exits)
+            self._train_locally(round_num, training_config)
+
+    def _handle_training_complete(self, message: CrossPlatformMessage):
+        """Handle training complete notification from server"""
+        payload = message.payload
+        print("\n" + "=" * 60)
+        print("Training Complete Notification")
+        print("=" * 60)
+        print(f"Pipeline ID: {payload.get('pipeline_id')}")
+        print(f"Total rounds completed: {payload.get('total_rounds')}")
+        print(f"Final statistics: {payload.get('final_stats')}")
+
+        # Request shutdown (main loop will handle cleanup)
+        global shutdown_requested
+        shutdown_requested = True
 
     def _handle_status(self, message: CrossPlatformMessage):
         """Handle status response"""
@@ -955,55 +1161,79 @@ class PipelineTestVehicle:
         print(f"  Statistics: {status.get('stats')}")
 
     def _train_locally(self, round_num: int, config: Dict[str, Any]):
-        """Train model locally"""
+        """Train EVO1Driving model locally for one federated round."""
         print(f"→ Starting local training for round {round_num}...")
-        print(f"  Epochs: {config['epochs']}")
-        print(f"  Batch size: {config['batch_size']}")
-        print(f"  Learning rate: {config['learning_rate']}")
 
-        # Update learning rate
+        num_views    = config.get('num_views',    self.model_config.num_views)
+        image_size   = config.get('image_size',   self.model_config.image_size)
+        max_waypoints = config.get('max_waypoints', self.model_config.max_waypoints)
+        batch_size   = _get_batch_size(self.resource_level)
+        lr           = config.get('learning_rate', 1e-4)
+        epochs       = config.get('epochs', 2)
+
+        print(f"  Epochs: {epochs}, Batch: {batch_size}, LR: {lr}")
+        print(f"  Device: {self.device} | Views: {num_views} | "
+              f"ImgSize: {image_size} | Waypoints: {max_waypoints}")
+
+        # Update optimizer learning rate
         for param_group in self.optimizer.param_groups:
-            param_group['lr'] = config['learning_rate']
+            param_group['lr'] = lr
 
-        # Create data loader
-        train_loader = create_mock_data_loader(
+        # Create mock driving data loader
+        train_loader = create_mock_driving_data_loader(
             num_samples=200,
-            batch_size=config['batch_size']
+            batch_size=batch_size,
+            num_views=num_views,
+            image_size=image_size,
+            max_waypoints=max_waypoints
         )
 
         # Training loop
         self.model.train()
         epoch_losses = []
 
-        for epoch in range(config['epochs']):
+        for epoch in range(epochs):
             epoch_loss = 0.0
             num_batches = 0
 
-            for batch_idx, (data, target) in enumerate(train_loader):
-                # Forward pass
-                self.optimizer.zero_grad()
-                output = self.model(data)
-                loss = self.criterion(output, target)
+            for batch_idx, (images, image_mask, state, target_controls) in enumerate(train_loader):
+                # Move tensors to device
+                images         = images.to(self.device)
+                image_mask     = image_mask.to(self.device)
+                state          = state.to(self.device)
+                target_controls = target_controls.to(self.device)
 
-                # Backward pass
+                # Forward + loss
+                self.optimizer.zero_grad()
+                output = self.model(
+                    images, image_mask, state,
+                    mode='training',
+                    future_controls=target_controls
+                )
+                losses = self.model.compute_loss(output, target_controls)
+                loss   = losses['total_loss']
+
+                # Backward + gradient clip + step
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
 
-                epoch_loss += loss.item()
-                num_batches += 1
+                epoch_loss   += loss.item()
+                num_batches  += 1
 
                 with self.lock:
                     self.stats['batches_processed'] += 1
 
-                # Progress indicator
+                # Progress + per-batch loss breakdown
                 if batch_idx % 5 == 0:
-                    print(f"  Epoch {epoch+1}/{config['epochs']}, "
-                          f"Batch {batch_idx+1}/{len(train_loader)}, "
-                          f"Loss: {loss.item():.4f}")
+                    print(f"  Epoch {epoch+1}/{epochs}, Batch {batch_idx+1}/{len(train_loader)} "
+                          f"| total={loss.item():.4f} "
+                          f"ctrl={losses['control_loss'].item():.4f} "
+                          f"wp={losses['waypoint_loss'].item():.4f} "
+                          f"conf={losses['confidence_loss'].item():.4f}")
 
             avg_epoch_loss = epoch_loss / max(1, num_batches)
             epoch_losses.append(avg_epoch_loss)
-
             print(f"  Epoch {epoch+1} completed, Avg Loss: {avg_epoch_loss:.4f}")
 
             with self.lock:
@@ -1073,24 +1303,172 @@ class PipelineTestVehicle:
         self.platform_bridge.send_cross_platform_message(status_msg)
 
 
+# ==================== Standalone Template Test ====================
+
+def run_template_standalone_test(resource_level: str = 'medium'):
+    """Run standalone TemplateManager benchmark test (no network required).
+
+    Tests 4 mock vehicle groups × 100 iterations to measure:
+      - Template lookup latency (avg / max / p99) vs 5ms threshold
+      - Top-3 candidate match scores
+      - Basket statistics & online-learning feedback
+    """
+    from fhdp.edge_server.template_manager import TemplateManager
+    from fhdp.core.types import VehicleInfo, VehicleState, ResourceClass, Pipeline
+    from fhdp.core.constants import TEMPLATE_LOOKUP_LATENCY_THRESHOLD
+
+    print("=" * 70)
+    print("  FHDP Template Manager — Standalone Benchmark Test")
+    print("=" * 70)
+
+    # Initialise template manager (generates 100 synthetic templates)
+    tm = TemplateManager()
+    init_stats = tm.get_template_statistics()
+    print(f"\n[Init] baskets={init_stats['total_baskets']}  "
+          f"templates={init_stats['total_templates']}  "
+          f"memory≈{init_stats['memory_usage']/1024:.0f}KB")
+
+    # --- helper: build mock VehicleInfo with specific resource class ---
+    def _mock_vehicle(vid: str, rclass: str) -> VehicleInfo:
+        """Create a VehicleInfo whose resources map to the desired ResourceClass."""
+        if rclass == 'HIGH':
+            res = {'cpu': 0.9, 'memory': 0.8, 'battery': 0.9}
+        elif rclass == 'MEDIUM':
+            res = {'cpu': 0.6, 'memory': 0.5, 'battery': 0.7}
+        else:  # LOW
+            res = {'cpu': 0.3, 'memory': 0.3, 'battery': 0.4}
+        return VehicleInfo(
+            vehicle_id=vid,
+            position=(0.0, 0.0),
+            velocity=0.0,
+            direction=0.0,
+            resources=res,
+            state=VehicleState.IDLE
+        )
+
+    # 4 vehicle groups
+    groups = {
+        'HIGH+HIGH':          [_mock_vehicle('v1', 'HIGH'),  _mock_vehicle('v2', 'HIGH')],
+        'HIGH+MEDIUM':        [_mock_vehicle('v1', 'HIGH'),  _mock_vehicle('v2', 'MEDIUM')],
+        'MEDIUM+MEDIUM':      [_mock_vehicle('v1', 'MEDIUM'), _mock_vehicle('v2', 'MEDIUM')],
+        'HIGH+MEDIUM+HIGH':   [_mock_vehicle('v1', 'HIGH'),  _mock_vehicle('v2', 'MEDIUM'),
+                                _mock_vehicle('v3', 'HIGH')],
+    }
+
+    threshold_s  = TEMPLATE_LOOKUP_LATENCY_THRESHOLD   # 0.005 s
+    num_iters    = 100
+    results      = {}
+    all_pass     = True
+
+    print(f"\nRunning {num_iters} iterations per group "
+          f"(threshold: {threshold_s*1000:.0f}ms)...\n")
+
+    for group_name, vehicles in groups.items():
+        latencies = []
+        best_score = 0.0
+
+        for _ in range(num_iters):
+            t0 = time.perf_counter()
+            candidates = tm.matcher.find_best_template(vehicles, max_candidates=3)
+            lat = time.perf_counter() - t0
+            latencies.append(lat)
+            if candidates and candidates[0][1] > best_score:
+                best_score = candidates[0][1]
+
+        arr = np.array(latencies)
+        avg_ms  = arr.mean() * 1000
+        max_ms  = arr.max() * 1000
+        p99_ms  = np.percentile(arr, 99) * 1000
+        status  = 'PASS' if p99_ms < threshold_s * 1000 else 'FAIL'
+        if status == 'FAIL':
+            all_pass = False
+
+        results[group_name] = {
+            'avg_ms': avg_ms, 'max_ms': max_ms, 'p99_ms': p99_ms,
+            'best_score': best_score, 'status': status
+        }
+
+        # Print top-3 for this group
+        top3 = tm.matcher.find_best_template(vehicles, max_candidates=3)
+        top3_str = '  '.join(
+            f"#{r}:{t.template_id}({s:.3f})" for r, (t, s) in enumerate(top3, 1)
+        ) if top3 else '(none)'
+        print(f"  [{group_name}] avg={avg_ms:.2f}ms  max={max_ms:.2f}ms  "
+              f"p99={p99_ms:.2f}ms  best={best_score:.3f}  [{status}]")
+        print(f"    Top-3: {top3_str}")
+
+    # Online-learning feedback test
+    print(f"\n{'='*70}")
+    print("Online-learning feedback test")
+    print('='*70)
+    stats_pre = tm.get_template_statistics()
+    # Simulate a successful pipeline
+    mock_pipeline = Pipeline(
+        pipeline_id='mock_test_pipeline',
+        vehicles=['v1', 'v2'],
+        stages=['backbone', 'action_head'],
+        template_id='synth_000',
+        start_time=time.time() - 10.0,
+        expected_completion=time.time()
+    )
+    tm.register_successful_pipeline(mock_pipeline, success=True, duration=10.0)
+    stats_post = tm.get_template_statistics()
+    print(f"  Before: templates={stats_pre['total_templates']}  "
+          f"avg_success={stats_pre['avg_success_rate']:.3f}")
+    print(f"  After:  templates={stats_post['total_templates']}  "
+          f"avg_success={stats_post['avg_success_rate']:.3f}")
+    feedback_ok = stats_post['total_templates'] >= stats_pre['total_templates']
+    print(f"  Feedback result: {'PASS' if feedback_ok else 'FAIL'}")
+    if not feedback_ok:
+        all_pass = False
+
+    # Summary table
+    print(f"\n{'='*70}")
+    print(f"{'Group':<22} {'Avg(ms)':>8} {'Max(ms)':>8} {'P99(ms)':>8} "
+          f"{'BestScore':>10} {'Status':>7}")
+    print('-' * 70)
+    for gn, r in results.items():
+        print(f"{gn:<22} {r['avg_ms']:>8.2f} {r['max_ms']:>8.2f} {r['p99_ms']:>8.2f} "
+              f"{r['best_score']:>10.3f} {r['status']:>7}")
+    print('-' * 70)
+    print(f"\nOverall: {'ALL PASSED' if all_pass else 'SOME FAILED'}")
+    print('=' * 70)
+
+    return 0 if all_pass else 1
+
+
 # ==================== Main ====================
+
+shutdown_requested = False
 
 def signal_handler(signum, frame):
     """Handle interrupt signals"""
-    print("\n\nReceived interrupt signal, shutting down...")
-    global server_instance, vehicle_instance
+    global shutdown_requested, server_instance, vehicle_instance
 
-    if 'server_instance' in globals() and server_instance:
-        server_instance.stop()
-    if 'vehicle_instance' in globals() and vehicle_instance:
-        vehicle_instance.stop()
+    if not shutdown_requested:
+        shutdown_requested = True
+        print("\n\nReceived interrupt signal, shutting down...")
 
-    sys.exit(0)
+        if 'server_instance' in globals() and server_instance:
+            try:
+                server_instance.stop()
+            except:
+                pass
+        if 'vehicle_instance' in globals() and vehicle_instance:
+            try:
+                vehicle_instance.stop()
+            except:
+                pass
+
+    # Force exit by calling os._exit instead of sys.exit
+    # This ensures we exit even if there are blocking threads
+    import os
+    os._exit(0)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='FHDP Pipeline Training Test (Refactored)',
+        description='FHDP Pipeline Training Test (Refactored) with EVO1Driving & Template Testing',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1104,11 +1482,15 @@ Examples:
   # Start vehicle on Jetson Orin Nano:
   python test_pipeline_training_refactored.py --mode vehicle --vehicle-id orin_nano_001 \\
       --server-host <server-ip> --server-port 5000 --resource-level medium
+
+  # Run standalone template benchmark (no network):
+  python test_pipeline_training_refactored.py --mode test-template --resource-level medium
         """
     )
 
-    parser.add_argument('--mode', required=True, choices=['server', 'vehicle'],
-                        help='Operation mode: server or vehicle')
+    parser.add_argument('--mode', required=True,
+                        choices=['server', 'vehicle', 'test-template'],
+                        help='Operation mode: server, vehicle, or test-template')
     parser.add_argument('--host', default='0.0.0.0',
                         help='Host address for server')
     parser.add_argument('--port', type=int, default=5000,
@@ -1121,7 +1503,7 @@ Examples:
                         help='Server port (vehicle mode only)')
     parser.add_argument('--resource-level', default='medium',
                         choices=['low', 'medium', 'high'],
-                        help='Resource level (vehicle mode only)')
+                        help='Resource level (vehicle / test-template mode)')
     parser.add_argument('--config', help='Path to configuration file')
 
     args = parser.parse_args()
@@ -1130,10 +1512,15 @@ Examples:
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    global server_instance, vehicle_instance
+    global server_instance, vehicle_instance, shutdown_requested
 
     try:
-        if args.mode == 'server':
+        if args.mode == 'test-template':
+            # Standalone template benchmark (no network)
+            rc = run_template_standalone_test(resource_level=args.resource_level)
+            sys.exit(rc)
+
+        elif args.mode == 'server':
             # Server mode
             server_instance = PipelineTestServer(
                 host=args.host,
@@ -1142,9 +1529,12 @@ Examples:
             )
             server_instance.start()
 
-            # Keep server running
-            while True:
-                time.sleep(1)
+            # Keep server running until shutdown requested
+            while not shutdown_requested:
+                time.sleep(0.1)
+
+            # Clean shutdown after training complete or manual stop
+            server_instance.stop()
 
         else:
             # Vehicle mode
@@ -1158,11 +1548,15 @@ Examples:
             if vehicle_instance.start():
                 # Send periodic heartbeats
                 try:
-                    while True:
+                    while not shutdown_requested:
                         time.sleep(10.0)
                         vehicle_instance.send_heartbeat()
                 except KeyboardInterrupt:
                     pass
+
+            # Clean shutdown after training complete or manual stop
+            if vehicle_instance:
+                vehicle_instance.stop()
 
     except Exception as e:
         print(f"\nError: {e}")

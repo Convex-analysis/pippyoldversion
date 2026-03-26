@@ -21,12 +21,12 @@ import torch.nn as nn
 from typing import List, Dict, Tuple
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
-from core.types import (
+from fhdp.core.types import (
     PipelineTemplate, ResourceClass, TrainingConfig
 )
-from edge_server.template_manager import TemplateManager
+from fhdp.edge_server.template_manager import TemplateManager
 
 
 # ==================== Demo Model ====================
@@ -390,7 +390,7 @@ def demo_template_matching():
     manager = TemplateManager()
     
     # Create test vehicles
-    from core.types import VehicleInfo
+    from fhdp.core.types import VehicleInfo
     vehicles = [
         VehicleInfo(
             vehicle_id=f"vehicle_{i}",
@@ -483,7 +483,7 @@ def demo_performance_benchmark():
     
     # Benchmark template lookup
     manager = TemplateManager()
-    from core.types import VehicleInfo
+    from fhdp.core.types import VehicleInfo
     vehicles = [
         VehicleInfo(f"v{i}", (0, 0), 0, 0, {'cpu': 0.7, 'memory': 0.6, 'battery': 0.8})
         for i in range(5)

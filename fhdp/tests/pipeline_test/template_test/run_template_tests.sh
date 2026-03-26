@@ -44,7 +44,7 @@ print_usage() {
 # Set Python path
 setup_env() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    export PYTHONPATH="${PYTHONPATH}:${SCRIPT_DIR}/.."
+    export PYTHONPATH="${PYTHONPATH}:${SCRIPT_DIR}/../../../.."
 }
 
 # Run unit tests

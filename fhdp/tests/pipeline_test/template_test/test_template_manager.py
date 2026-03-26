@@ -24,13 +24,13 @@ from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 
 # Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../..'))
 
-from core.types import (
+from fhdp.core.types import (
     PipelineTemplate, Pipeline, VehicleInfo, ResourceClass,
-    TrainingConfig, ModelUpdate, AggregationResult
+    TrainingConfig
 )
-from edge_server.template_manager import (
+from fhdp.edge_server.template_manager import (
     TemplateManager, TemplateGenerator, TemplateMatcher,
     TemplateBasket
 )

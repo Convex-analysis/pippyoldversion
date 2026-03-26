@@ -1143,6 +1143,8 @@ class MessageRouter:
         # client-side: incoming message listener thread control
         self._listener_threads: Dict[str, threading.Thread] = {}
         self._listener_running: Dict[str, bool] = {}
+        # client-side: store dedicated sockets used by listener threads (for clean shutdown)
+        self._listener_sockets: Dict[str, socket.socket] = {}
 
         self.optimize_for_platform()
 
@@ -1271,6 +1273,16 @@ class MessageRouter:
         # 停止监听线程
         for key in list(self._listener_running.keys()):
             self._listener_running[key] = False
+
+        # Close all listener sockets first to unblock recv() calls
+        for key, conn in list(self._listener_sockets.items()):
+            try:
+                conn.close()
+            except Exception as e:
+                logging.debug(f"Error closing listener socket {key}: {e}")
+        self._listener_sockets.clear()
+
+        # Wait for listener threads to exit
         for key, thread in list(self._listener_threads.items()):
             if thread.is_alive():
                 thread.join(timeout=2.0)
@@ -1329,7 +1341,7 @@ class MessageRouter:
                     timestamp=message.timestamp,
                     requires_ack=False,  # Changed from True to avoid blocking
                     priority=0,
-                    compression_type=CompressionType.ZLIB
+                    compression_type=CompressionType.NONE  # Use NONE to avoid compression issues
                 )
                 return self._send_cross_platform_message(cp_message, target_endpoint)
 
@@ -1393,9 +1405,20 @@ class MessageRouter:
             
             # Track compression time
             start_compression_time = time.time()
-            message_data, compression_type, compression_ratio = self.compression_manager.smart_compress(
-                message_data, data_type=data_type, prioritize_speed=True
-            )
+
+            # Use endpoint's compression setting if specified, otherwise use smart compression
+            if target_endpoint.compression and target_endpoint.compression != CompressionType.NONE:
+                # Use the compression algorithm specified by the endpoint
+                message_data, compression_ratio = self.compression_manager.compress(
+                    message_data, target_endpoint.compression
+                )
+                compression_type = target_endpoint.compression
+            else:
+                # Use smart compression
+                message_data, compression_type, compression_ratio = self.compression_manager.smart_compress(
+                    message_data, data_type=data_type, prioritize_speed=True
+                )
+
             compression_time = time.time() - start_compression_time
 
             # Track resource usage
@@ -1909,6 +1932,9 @@ class MessageRouter:
                     time.sleep(1.0)
                     continue
 
+                # Store socket for clean shutdown
+                self._listener_sockets[node_id] = conn
+
                 try:
                     while self._listener_running.get(node_id, False):
                         try:
@@ -1968,6 +1994,8 @@ class MessageRouter:
                         conn.close()
                     except Exception:
                         pass
+                    # Remove from listener sockets dictionary
+                    self._listener_sockets.pop(node_id, None)
                     time.sleep(1.0)
 
         t = threading.Thread(target=_run, daemon=True,
