@@ -13,8 +13,8 @@ from .mobility_predictor import MobilityPredictor
 from .template_manager import TemplateManager
 from .aggregation_engine import AsynchronousAggregator
 from .resource_classifier import ResourceClassifier
-from core.types import VehicleInfo, ModelUpdate, AggregationResult, FairnessMetrics
-from core.constants import ASYNC_AGGREGATION_INTERVAL
+from fhdp.core.types import VehicleInfo, ModelUpdate, AggregationResult, FairnessMetrics
+from fhdp.core.constants import ASYNC_AGGREGATION_INTERVAL
 
 class EdgeServer:
     """Main Edge Server implementation"""

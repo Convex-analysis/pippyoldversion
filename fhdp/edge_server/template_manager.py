@@ -12,11 +12,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import heapq
 
-from core.types import (
+from fhdp.core.types import (
     PipelineTemplate, Pipeline, VehicleInfo, ResourceClass, 
     TrainingConfig, MobilityPrediction
 )
-from core.constants import (
+from fhdp.core.constants import (
     TEMPLATE_CACHE_SIZE, MAX_PIPELINE_LENGTH, MIN_PIPELINE_PARTICIPANTS,
     TEMPLATE_LOOKUP_LATENCY_THRESHOLD, TEMPLATE_GENERATION_INTERVAL,
     MAX_TEMPLATE_MEMORY
@@ -70,22 +70,33 @@ class TemplateGenerator:
     
     def _generate_template_id(self, pipeline: Pipeline) -> str:
         """Generate unique template ID"""
-        content = f"{len(pipeline.vehicles)}_{pipeline.template_id}_{time.time()}"
+        content = f"{len(pipeline.vehicles)}_{len(pipeline.stages)}_{time.time()}"
         return hashlib.md5(content.encode()).hexdigest()[:16]
     
     def _extract_resource_pattern(self, pipeline: Pipeline) -> List[ResourceClass]:
         """Extract resource requirement pattern from pipeline"""
-        # This would use actual vehicle resource data in real implementation
-        # For now, generate based on pipeline length
-        base_pattern = [ResourceClass.MEDIUM] * len(pipeline.vehicles)
+        # TODO: In a real implementation, this should use actual vehicle resource data
+        # For now, use a more sophisticated pattern based on pipeline length and position
+        resource_pattern = []
+        n_vehicles = len(pipeline.vehicles)
         
-        # Add some variation based on position in pipeline
-        if len(base_pattern) > 0:
-            base_pattern[0] = ResourceClass.HIGH  # First vehicle needs more resources
-        if len(base_pattern) > 1:
-            base_pattern[-1] = ResourceClass.HIGH  # Last vehicle needs more resources
-            
-        return base_pattern
+        for i in range(n_vehicles):
+            if i == 0 or i == n_vehicles - 1:
+                # First and last vehicles typically need higher resources
+                resource_pattern.append(ResourceClass.HIGH)
+            elif i == 1 or i == n_vehicles - 2:
+                # Second and second-to-last vehicles need medium-high resources
+                resource_pattern.append(ResourceClass.MEDIUM)
+            else:
+                # Middle vehicles can vary based on position
+                # Front middle vehicles handle more intermediate results
+                if i < n_vehicles / 2:
+                    resource_pattern.append(ResourceClass.MEDIUM)
+                else:
+                    # Rear middle vehicles can use lower resources
+                    resource_pattern.append(ResourceClass.LOW)
+        
+        return resource_pattern
     
     def _infer_communication_pattern(self, pipeline: Pipeline) -> List[Tuple[int, int]]:
         """Infer communication pattern from pipeline structure"""
@@ -183,8 +194,13 @@ class TemplateMatcher:
         self.baskets: Dict[str, TemplateBasket] = {}
         self.resource_index = defaultdict(set)  # resource_signature -> basket_ids
         self.length_index = defaultdict(set)  # pipeline_length -> basket_ids
+        self.template_id_to_basket_id = {}  # template_id -> basket_id for fast lookup
         self.success_cache = {}  # LRU cache for successful matches
         self.cache_size = 1000
+        
+        # Cache statistics
+        self.cache_hits = 0
+        self.cache_lookups = 0
         
     def _create_resource_signature(self, resource_requirements: List[ResourceClass]) -> str:
         """Create hash signature for resource requirements"""
@@ -209,6 +225,9 @@ class TemplateMatcher:
         
         # Add template to basket
         self.baskets[basket_id].templates.append(template)
+        
+        # Update template to basket index
+        self.template_id_to_basket_id[template.template_id] = basket_id
         
         # Sort templates by expected duration (faster templates first)
         self.baskets[basket_id].templates.sort(key=lambda t: t.expected_duration)
@@ -235,8 +254,18 @@ class TemplateMatcher:
         candidates = []
         
         # Check cache first
-        cache_key = ''.join([r.value for r in vehicle_resources])
+        # Make cache key order-independent by counting resource classes
+        resource_counts = {}
+        for r in vehicle_resources:
+            resource_counts[r.value] = resource_counts.get(r.value, 0) + 1
+        # Create cache key from sorted resource counts
+        cache_key = ''.join([f"{k}:{v}," for k, v in sorted(resource_counts.items())])
+        
+        # Track cache statistics
+        self.cache_lookups += 1
+        
         if cache_key in self.success_cache:
+            self.cache_hits += 1
             cached_result = self.success_cache[cache_key]
             candidates.extend(cached_result)
             
@@ -333,15 +362,23 @@ class TemplateMatcher:
         
         # Apply basket success rate bonus
         signature = self._create_resource_signature(template.resource_requirements)
+        # Find the basket that contains this template
         for basket_id in self.resource_index[signature]:
             basket = self.baskets[basket_id]
-            score *= (1.0 + basket.avg_success_rate * 0.2)
+            if template in basket.templates:
+                score *= (1.0 + basket.avg_success_rate * 0.2)
+                break  # Apply bonus only once from the correct basket
         
         return score
     
     def update_basket_statistics(self, template_id: str, success: bool):
         """Update basket statistics after template usage"""
-        for basket in self.baskets.values():
+        # Use index for fast lookup
+        if template_id in self.template_id_to_basket_id:
+            basket_id = self.template_id_to_basket_id[template_id]
+            basket = self.baskets[basket_id]
+            
+            # Find the template in the basket
             for template in basket.templates:
                 if template.template_id == template_id:
                     basket.usage_count += 1
@@ -406,8 +443,23 @@ class TemplateManager:
         
         for template in new_templates:
             # Only add templates for patterns not well represented
+            # Create realistic vehicle resources based on template requirements
+            vehicles_with_resources = []
+            for i, resource_req in enumerate(template.resource_requirements):
+                # Assign resources based on required resource class
+                if resource_req == ResourceClass.HIGH:
+                    resources = {'cpu': 0.9, 'memory': 0.85, 'battery': 0.8}
+                elif resource_req == ResourceClass.MEDIUM:
+                    resources = {'cpu': 0.7, 'memory': 0.65, 'battery': 0.6}
+                else:  # LOW
+                    resources = {'cpu': 0.5, 'memory': 0.45, 'battery': 0.4}
+                
+                vehicle = VehicleInfo(str(i), (0, 0), 0, 0, resources)
+                vehicles_with_resources.append(vehicle)
+            
+            # Check if template is underrepresented
             candidates = self.matcher.find_best_template(
-                [VehicleInfo(str(i), (0, 0), 0, 0, {}) for i in range(len(template.resource_requirements))],
+                vehicles_with_resources,
                 max_candidates=1
             )
             
@@ -419,11 +471,18 @@ class TemplateManager:
         total_templates = sum(len(basket.templates) for basket in self.matcher.baskets.values())
         avg_success_rate = np.mean([basket.avg_success_rate for basket in self.matcher.baskets.values()])
         
+        # Calculate cache hit rate
+        cache_lookups = self.matcher.cache_lookups
+        cache_hits = self.matcher.cache_hits
+        cache_hit_rate = cache_hits / max(1, cache_lookups)
+        
         return {
             "total_baskets": len(self.matcher.baskets),
             "total_templates": total_templates,
             "avg_success_rate": avg_success_rate,
-            "cache_hit_rate": len(self.matcher.success_cache) / max(1, total_templates),
+            "cache_hit_rate": cache_hit_rate,
+            "cache_hits": cache_hits,
+            "cache_lookups": cache_lookups,
             "memory_usage": self._estimate_memory_usage()
         }
     

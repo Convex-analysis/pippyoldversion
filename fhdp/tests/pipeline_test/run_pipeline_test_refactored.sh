@@ -75,8 +75,24 @@ print_usage() {
 # Check Python installation
 check_python() {
 
-    if ! command -v $PYTHON_CMD &> /dev/null; then
+    if ! command -v "$PYTHON_CMD" &> /dev/null; then
         echo -e "${RED}Error: Python not found. Please install Python 3.8+${NC}"
+        exit 1
+    fi
+
+    # Check Python version (requires 3.8+)
+    PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    if [ -z "$PYTHON_VERSION" ]; then
+        echo -e "${RED}Error: Could not determine Python version${NC}"
+        exit 1
+    fi
+
+    # Parse major and minor versions
+    MAJOR_VERSION=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+    MINOR_VERSION=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+    if [ "$MAJOR_VERSION" -lt 3 ] || ([ "$MAJOR_VERSION" -eq 3 ] && [ "$MINOR_VERSION" -lt 8 ]); then
+        echo -e "${RED}Error: Python 3.8+ is required, found $PYTHON_VERSION${NC}"
         exit 1
     fi
 
@@ -86,15 +102,15 @@ check_python() {
 # Check PyTorch installation
 check_pytorch() {
 
-    if ! $PYTHON_CMD -c "import torch" &> /dev/null; then
-        echo -e "${YELLOW}Warning: PyTorch not found. Installing...${NC}"
+    if ! "$PYTHON_CMD" -c "import torch" &> /dev/null; then
+        echo -e "${RED}Error: PyTorch not found${NC}"
         echo "Please install PyTorch before running the test."
         echo "For Jetson devices, refer to: https://developer.nvidia.com/embedded/downloads"
         exit 1
     fi
 
     # Check CUDA availability
-    CUDA_AVAILABLE=$($PYTHON_CMD -c "import torch; print(torch.cuda.is_available())")
+    CUDA_AVAILABLE=$("$PYTHON_CMD" -c "import torch; print(torch.cuda.is_available())")
     echo -e "${GREEN}✓ PyTorch installed, CUDA available: $CUDA_AVAILABLE${NC}"
 }
 
@@ -102,6 +118,12 @@ check_pytorch() {
 run_server() {
     local port=${FHDP_PORT:-5001}
     local config=${FHDP_CONFIG:-""}
+
+    # Validate config file if provided
+    if [ -n "$config" ] && [ ! -f "$config" ]; then
+        echo -e "${RED}Error: Config file '$config' not found${NC}"
+        exit 1
+    fi
 
     echo -e "${BLUE}"
     echo "=================================="
@@ -116,24 +138,36 @@ run_server() {
     echo "Features: Length-prefix protocol, zlib compression, connection pooling"
     echo ""
 
-    local cmd="$PYTHON_CMD test_pipeline_training_refactored.py --mode server --host 0.0.0.0 --port $port"
+    local cmd_args=(
+        "$PYTHON_CMD" 
+        "test_pipeline_training_refactored.py" 
+        "--mode" "server" 
+        "--host" "0.0.0.0" 
+        "--port" "$port"
+    )
 
     if [ -n "$config" ]; then
-        cmd="$cmd --config $config"
+        cmd_args+=("--config" "$config")
     fi
 
-    echo "Executing: $cmd"
+    echo "Executing: ${cmd_args[*]}"
     echo ""
 
-    exec $cmd
+    exec "${cmd_args[@]}"
 }
 
 # Run vehicle mode
 run_vehicle() {
-    local mode=$1
-    local server_ip=$2
+    local mode="$1"
+    local server_ip="$2"
     local port=${FHDP_PORT:-5001}
     local config=${FHDP_CONFIG:-""}
+
+    # Validate config file if provided
+    if [ -n "$config" ] && [ ! -f "$config" ]; then
+        echo -e "${RED}Error: Config file '$config' not found${NC}"
+        exit 1
+    fi
 
     # Set vehicle parameters based on mode
     if [ "$mode" = "agx" ]; then
@@ -161,16 +195,24 @@ run_vehicle() {
     echo "Features: Length-prefix protocol, zlib compression, connection pooling"
     echo ""
 
-    local cmd="$PYTHON_CMD test_pipeline_training_refactored.py --mode vehicle --vehicle-id $vehicle_id --server-host $server_ip --server-port $port --resource-level $resource_level"
+    local cmd_args=(
+        "$PYTHON_CMD" 
+        "test_pipeline_training_refactored.py" 
+        "--mode" "vehicle" 
+        "--vehicle-id" "$vehicle_id" 
+        "--server-host" "$server_ip" 
+        "--server-port" "$port" 
+        "--resource-level" "$resource_level"
+    )
 
     if [ -n "$config" ]; then
-        cmd="$cmd --config $config"
+        cmd_args+=("--config" "$config")
     fi
 
-    echo "Executing: $cmd"
+    echo "Executing: ${cmd_args[*]}"
     echo ""
 
-    exec $cmd
+    exec "${cmd_args[@]}"
 }
 
 # Main execution
@@ -186,12 +228,20 @@ main() {
     MODE=$1
     SERVER_IP=${2:-""}
 
+    # Check if Python test script exists
+    if [ ! -f "test_pipeline_training_refactored.py" ]; then
+        echo -e "${RED}Error: test_pipeline_training_refactored.py not found${NC}"
+        echo "Please run this script from the same directory as the Python test file."
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Found Python test script${NC}"
+
     # Check dependencies
     check_python
     check_pytorch
 
     # Execute based on mode
-    case $MODE in
+    case "$MODE" in
         server)
             if [ -n "$SERVER_IP" ]; then
                 echo -e "${YELLOW}Warning: SERVER_IP ignored in server mode${NC}"
@@ -206,7 +256,7 @@ main() {
                 print_usage
                 exit 1
             fi
-            run_vehicle $MODE $SERVER_IP
+            run_vehicle "$MODE" "$SERVER_IP"
             ;;
         help|--help|-h)
             print_usage

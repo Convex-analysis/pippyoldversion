@@ -11,8 +11,8 @@ import time
 import math
 from dataclasses import dataclass
 
-from core.types import VehicleInfo, MobilityPrediction
-from core.constants import (
+from fhdp.core.types import VehicleInfo, MobilityPrediction
+from fhdp.core.constants import (
     DTMC_PREDICTION_HORIZON, 
     DTMC_TRANSITION_MEMORY,
     MOBILITY_UPDATE_INTERVAL,
