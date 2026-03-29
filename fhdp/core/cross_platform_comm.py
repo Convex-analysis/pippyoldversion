@@ -2450,6 +2450,14 @@ class PlatformBridge:
             )
             network_endpoint.protocol = optimal_protocol
 
+            # 诊断：打印协议协商结果
+            import sys
+            if '--mode vehicle' in sys.argv:
+                print(f"[DIAGNOSIS] Protocol negotiation result: {optimal_protocol}")
+                print(f"[DIAGNOSIS] Network conditions: {network_conditions}")
+                print(f"[DIAGNOSIS] Local platform: {self.local_capabilities.platform}, Remote: {remote_capabilities.platform}")
+
+
             # 修复：压缩策略不覆盖 endpoint，保持 ZLIB
             # （get_optimal_compression 已修复，但此处显式保持 ZLIB 更安全）
             network_endpoint.compression = CompressionType.ZLIB
