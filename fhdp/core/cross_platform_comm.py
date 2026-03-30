@@ -128,6 +128,8 @@ class SerializationManager:
         self.binary_available = False
         self.binary_dumps = None
         self.binary_loads = None
+        self.pickle_dumps = pickle.dumps
+        self.pickle_loads = pickle.loads
         
         if binary_serialization_available:
             if 'msgpack' in globals():
@@ -155,6 +157,8 @@ class SerializationManager:
             return self.json_loads(data)
         elif format == SerializationFormat.MSGPACK and self.binary_available:
             return self.binary_loads(data)
+        elif format == SerializationFormat.PICKLE:
+            return self.pickle_loads(data)
         else:
             # Try to detect format
             try:
@@ -167,6 +171,11 @@ class SerializationManager:
                         return self.binary_loads(data)
                     except:
                         pass
+                # Then try pickle
+                try:
+                    return self.pickle_loads(data)
+                except:
+                    pass
                 # Last resort: return as string
                 return data.decode('utf-8', errors='ignore')
 
@@ -369,6 +378,8 @@ class PipelineMessage:
     def _serialize_data(self, obj: Any) -> Any:
         """Specialized serialization for pipeline data"""
         try:
+            if self.serialization_format == SerializationFormat.PICKLE:
+                return obj
             if hasattr(obj, 'tolist'):  # numpy array or torch tensor
                 # Pipeline data often contains large tensors, so we need efficient serialization
                 import numpy as np
