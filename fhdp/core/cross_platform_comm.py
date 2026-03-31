@@ -103,6 +103,7 @@ class SerializationFormat(Enum):
     JSON = "json"
     MSGPACK = "msgpack"
     PROTOBUF = "protobuf"
+    PICKLE = "pickle"
 
 class SerializationManager:
     """Manages serialization/deserialization with automatic backend selection"""
@@ -145,14 +146,34 @@ class SerializationManager:
             return self.json_dumps(data).encode('utf-8')
         elif format == SerializationFormat.MSGPACK and self.binary_available:
             return self.binary_dumps(data, default=str)
+        elif format == SerializationFormat.PICKLE:
+            return self.pickle_dumps(data)
         else:
             # Fallback to JSON
             return self.json_dumps(data).encode('utf-8')
     
     def deserialize(self, data: bytes, format: Optional[SerializationFormat] = None) -> Any:
         """Deserialize data using the specified format"""
-        format = format or self.default_format
-        
+        if format is None:
+            # Try to detect format
+            try:
+                # First try JSON
+                return self.json_loads(data)
+            except Exception:
+                # Then try msgpack if available
+                if self.binary_available:
+                    try:
+                        return self.binary_loads(data)
+                    except Exception:
+                        pass
+                # Then try pickle
+                try:
+                    return self.pickle_loads(data)
+                except Exception:
+                    pass
+                # Last resort: return as string
+                return data.decode('utf-8', errors='ignore')
+
         if format == SerializationFormat.JSON:
             return self.json_loads(data)
         elif format == SerializationFormat.MSGPACK and self.binary_available:
@@ -160,24 +181,8 @@ class SerializationManager:
         elif format == SerializationFormat.PICKLE:
             return self.pickle_loads(data)
         else:
-            # Try to detect format
-            try:
-                # First try JSON
-                return self.json_loads(data)
-            except:
-                # Then try msgpack if available
-                if self.binary_available:
-                    try:
-                        return self.binary_loads(data)
-                    except:
-                        pass
-                # Then try pickle
-                try:
-                    return self.pickle_loads(data)
-                except:
-                    pass
-                # Last resort: return as string
-                return data.decode('utf-8', errors='ignore')
+            # Fallback to auto-detect
+            return self.deserialize(data, None)
 
 @dataclass
 class NetworkEndpoint:
@@ -1715,9 +1720,16 @@ class MessageRouter:
                 # 解析消息使用合适的序列化格式
                 try:
                     message_dict = self.serialization_manager.deserialize(decompressed)
+
+                    if not isinstance(message_dict, dict):
+                        logging.warning(
+                            f"_handle_tcp_connection({addr}): unexpected message type "
+                            f"{type(message_dict).__name__}"
+                        )
+                        continue
                     
                     # Handle batch messages
-                    if isinstance(message_dict, dict) and 'batch_id' in message_dict:
+                    if 'batch_id' in message_dict:
                         try:
                             batch_message = BatchMessage.from_dict(message_dict)
                             logging.info(f"Received batch message {batch_message.batch_id} with {batch_message.batch_size} messages")
