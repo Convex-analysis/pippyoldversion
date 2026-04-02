@@ -284,7 +284,10 @@ class CrossPlatformMessage:
         data = asdict(self)
         data['compression_type'] = self.compression_type.value
         data['serialization_format'] = self.serialization_format.value
-        data['payload'] = self._serialize_payload(data['payload'])
+        if self.serialization_format == SerializationFormat.PICKLE:
+            data['payload'] = data['payload']
+        else:
+            data['payload'] = self._serialize_payload(data['payload'])
         return data
 
     @classmethod

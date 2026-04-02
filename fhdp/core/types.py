@@ -64,6 +64,7 @@ class PipelineTemplate:
     communication_pattern: List[Tuple[int, int]]  # (from_stage, to_stage)
     training_config: TrainingConfig
     model_fragment_size: int = 0  # bytes per fragment
+    model_partition: Optional[Dict[str, Any]] = None  # split metadata (model_name, split_key, stages, etc.)
 
 @dataclass 
 class Pipeline:

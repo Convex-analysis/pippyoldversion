@@ -27,16 +27,19 @@ import uuid
 import argparse
 import threading
 import signal
+import shutil
+import tarfile
+import zipfile
+import urllib.request
 from queue import Queue, Empty
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
-from torchvision.datasets import CIFAR10
+from torchvision.datasets import CIFAR10, ImageFolder
 from torchvision import transforms
-import timm
 
 # ---- Resolve project root for imports ----
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +71,12 @@ from fhdp.core.pipeline_runtime import (
     OneFOneBSchedule,
     get_micro_batch_phase,
 )
+from fhdp.core import ActivationLEPState
+from fhdp.core.pipeline_model import (
+    get_pipeline_template,
+    serialize_template,
+    build_model_split_from_template_payload,
+)
 
 
 PIPELINE_ID = "proto_resnet18"
@@ -75,12 +84,21 @@ DEFAULT_STAGE0_ID = "agx"
 DEFAULT_STAGE1_ID = "orin"
 DEFAULT_NUM_CLASSES = 10
 DEFAULT_IMAGE_SIZE = 224
-DEFAULT_BATCH_SIZE = 4
+DEFAULT_BATCH_SIZE = 16
 DEFAULT_ROUND = 1
 DEFAULT_ROUNDS = 1
 DEFAULT_MICRO_BATCH = 0
 DEFAULT_MICRO_BATCHES = 1
 DEFAULT_DATA_DIR = os.path.join(script_dir, "data")
+DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
+DEFAULT_DATASET = "tinyimagenet"
+DEFAULT_TINY_IMAGENET_URL = "https://cs231n.stanford.edu/tiny-imagenet-200.zip"
+DEFAULT_TINY_IMAGENET_DIR = "tiny-imagenet-200"
+
+# ---- LEP / activation compression (Plan A: FP16 + residual) ----
+ENABLE_ACTIVATION_LEP = True
+LEP_FP16_DTYPE = torch.float16
+LEP_LOG_INTERVAL = 10
 
 
 # ----------------- Utilities -----------------
@@ -132,7 +150,6 @@ def _validate_pipeline_utils(rounds: int, micro_batches: int) -> None:
 def _build_cifar10_loader(
     batch_size: int,
     image_size: int,
-    num_classes: int,
     num_batches: int = 1,
     data_dir: str = DEFAULT_DATA_DIR,
     download: bool = False
@@ -154,18 +171,131 @@ def _build_cifar10_loader(
     return DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
 
-def _split_resnet18(num_classes: int) -> Tuple[nn.Module, nn.Module]:
-    model = timm.create_model("resnet18", pretrained=False, num_classes=num_classes)
-    # Stage0: stem + layer1 + layer2
-    stage0 = nn.Sequential(
-        model.conv1, model.bn1, model.act1, model.maxpool,
-        model.layer1, model.layer2
-    )
-    # Stage1: layer3 + layer4 + global_pool + fc
-    stage1 = nn.Sequential(
-        model.layer3, model.layer4, model.global_pool, model.fc
-    )
-    return stage0, stage1
+def _build_imagenet_loader(
+    batch_size: int,
+    image_size: int,
+    num_batches: int = 1,
+    data_dir: str = DEFAULT_DATA_DIR
+) -> DataLoader:
+    transform = transforms.Compose([
+        transforms.Resize(int(image_size * 256 / 224)),
+        transforms.CenterCrop(image_size),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    ])
+    train_dir = os.path.join(data_dir, "train")
+    dataset_root = train_dir if os.path.isdir(train_dir) else data_dir
+    if not os.path.isdir(dataset_root):
+        raise FileNotFoundError(
+            f"ImageNet dataset not found at {dataset_root}. "
+            "Expected a folder with train/val subdirectories or a train directory."
+        )
+    dataset = ImageFolder(root=dataset_root, transform=transform)
+    total_samples = batch_size * num_batches
+    if total_samples < len(dataset):
+        dataset = Subset(dataset, list(range(total_samples)))
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+
+def _download_file(url: str, dest_path: str) -> None:
+    tmp_path = dest_path + ".tmp"
+    with urllib.request.urlopen(url) as response, open(tmp_path, "wb") as handle:
+        shutil.copyfileobj(response, handle)
+    os.replace(tmp_path, dest_path)
+
+
+def _extract_archive(archive_path: str, dest_dir: str) -> None:
+    if zipfile.is_zipfile(archive_path):
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            archive.extractall(dest_dir)
+        return
+    if tarfile.is_tarfile(archive_path):
+        with tarfile.open(archive_path, "r:*") as archive:
+            archive.extractall(dest_dir)
+        return
+    raise ValueError(f"Unsupported archive format: {archive_path}")
+
+
+def _prepare_tiny_imagenet(data_dir: str, url: str, folder_name: str) -> str:
+    dataset_root = os.path.join(data_dir, folder_name)
+    train_dir = os.path.join(dataset_root, "train")
+    if os.path.isdir(train_dir):
+        return dataset_root
+
+    if not url:
+        raise ValueError("Tiny ImageNet url is required. Use --tiny-imagenet-url to specify a mirror.")
+
+    os.makedirs(data_dir, exist_ok=True)
+    filename = os.path.basename(url.split("?")[0]) or "tiny-imagenet-200.zip"
+    archive_path = os.path.join(data_dir, filename)
+
+    if not os.path.exists(archive_path):
+        print(f"[Data] Downloading Tiny ImageNet from {url} -> {archive_path}")
+        _download_file(url, archive_path)
+    else:
+        print(f"[Data] Using existing archive: {archive_path}")
+
+    print(f"[Data] Extracting Tiny ImageNet: {archive_path}")
+    _extract_archive(archive_path, data_dir)
+
+    default_root = os.path.join(data_dir, DEFAULT_TINY_IMAGENET_DIR)
+    if folder_name != DEFAULT_TINY_IMAGENET_DIR and os.path.isdir(default_root) and not os.path.isdir(dataset_root):
+        os.rename(default_root, dataset_root)
+
+    if not os.path.isdir(train_dir):
+        raise FileNotFoundError(
+            f"Tiny ImageNet dataset not found at {train_dir}. "
+            "Expected a folder with train/val subdirectories."
+        )
+
+    return dataset_root
+
+
+def _build_tiny_imagenet_loader(
+    batch_size: int,
+    image_size: int,
+    num_batches: int = 1,
+    data_dir: str = DEFAULT_DATA_DIR,
+    url: str = DEFAULT_TINY_IMAGENET_URL,
+    folder_name: str = DEFAULT_TINY_IMAGENET_DIR
+) -> DataLoader:
+    transform = transforms.Compose([
+        transforms.Resize((image_size, image_size)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    ])
+    dataset_root = _prepare_tiny_imagenet(data_dir, url, folder_name)
+    train_root = os.path.join(dataset_root, "train")
+    dataset = ImageFolder(root=train_root, transform=transform)
+    total_samples = batch_size * num_batches
+    if total_samples < len(dataset):
+        dataset = Subset(dataset, list(range(total_samples)))
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+
+def _build_data_loader(
+    dataset_name: str,
+    batch_size: int,
+    image_size: int,
+    num_batches: int = 1,
+    data_dir: str = DEFAULT_DATA_DIR,
+    download: bool = False,
+    tiny_imagenet_url: str = DEFAULT_TINY_IMAGENET_URL,
+    tiny_imagenet_dir: str = DEFAULT_TINY_IMAGENET_DIR
+) -> DataLoader:
+    dataset_key = (dataset_name or "cifar10").lower().replace("-", "")
+    if dataset_key == "imagenet":
+        return _build_imagenet_loader(batch_size, image_size, num_batches, data_dir)
+    if dataset_key == "tinyimagenet":
+        return _build_tiny_imagenet_loader(
+            batch_size,
+            image_size,
+            num_batches,
+            data_dir,
+            url=tiny_imagenet_url,
+            folder_name=tiny_imagenet_dir
+        )
+    return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download)
 
 
 def _build_capabilities(role: str) -> HardwareCapabilities:
@@ -220,7 +350,7 @@ def _build_capabilities(role: str) -> HardwareCapabilities:
 
 class PipelineProtoServer:
     def __init__(self, host: str, port: int, stage0_id: str, stage1_id: str,
-                 rounds: int, auto_exit: bool, micro_batches: int):
+                 rounds: int, auto_exit: bool, micro_batches: int, template_id: str):
         self.host = host
         self.port = port
         self.stage0_id = stage0_id
@@ -228,6 +358,7 @@ class PipelineProtoServer:
         self.rounds = max(1, int(rounds))
         self.auto_exit = auto_exit
         self.micro_batches = max(1, int(micro_batches))
+        self.template_id = template_id
         self.registered: Dict[str, Dict[str, Any]] = {}
         self.accepted = set()
         self.current_round = 0
@@ -345,6 +476,9 @@ class PipelineProtoServer:
             if host and port:
                 endpoints[vehicle_id] = {"host": host, "port": port}
 
+        template = get_pipeline_template(self.template_id, DEFAULT_TEMPLATE_ID)
+        template_payload = serialize_template(template)
+
         invite = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
             source_id="server",
@@ -352,10 +486,11 @@ class PipelineProtoServer:
             message_type="pipeline_invite",
             payload={
                 "pipeline_id": PIPELINE_ID,
-                "template_id": "fixed_agx_orin_v1",
+                "template_id": template.template_id,
+                "template": template_payload,
                 "vehicles": [self.stage0_id, self.stage1_id],
                 "stages": ["stage0", "stage1"],
-                "resource_requirements": ["HIGH", "MEDIUM"],
+                "resource_requirements": [r.value for r in template.resource_requirements],
                 "endpoints": endpoints
             },
             requires_ack=False
@@ -397,7 +532,11 @@ class PipelineProtoVehicle:
                  stage0_id: str, stage1_id: str, listen_host: str, listen_port: int,
                  advertise_host: Optional[str] = None, rounds: int = DEFAULT_ROUNDS,
                  auto_exit: bool = False, micro_batches: int = DEFAULT_MICRO_BATCHES,
-                 data_dir: str = DEFAULT_DATA_DIR, download: bool = False):
+                 data_dir: str = DEFAULT_DATA_DIR, download: bool = False,
+                 dataset: str = DEFAULT_DATASET, image_size: int = DEFAULT_IMAGE_SIZE,
+                 num_classes: int = DEFAULT_NUM_CLASSES,
+                 tiny_imagenet_url: str = DEFAULT_TINY_IMAGENET_URL,
+                 tiny_imagenet_dir: str = DEFAULT_TINY_IMAGENET_DIR):
         self.vehicle_id = vehicle_id
         self.role = role
         self.server_host = server_host
@@ -414,18 +553,24 @@ class PipelineProtoVehicle:
         self.micro_batches = max(1, int(micro_batches))
         self.data_dir = data_dir
         self.download = download
+        self.dataset = dataset
+        self.image_size = int(image_size)
+        self.num_classes = int(num_classes)
+        self.tiny_imagenet_url = tiny_imagenet_url
+        self.tiny_imagenet_dir = tiny_imagenet_dir
         self.device = _get_device()
+        self._timing_start = time.perf_counter()
+        self._invite_received_at: Optional[float] = None
 
         self.current_pipeline_id: Optional[str] = None
         self.current_stage: Optional[str] = None
+        self.current_template_id: Optional[str] = None
+        self.current_split_key: Optional[str] = None
 
-        self.stage0, self.stage1 = _split_resnet18(DEFAULT_NUM_CLASSES)
-        if role == "stage0":
-            self.model = self.stage0.to(self.device)
-        else:
-            self.model = self.stage1.to(self.device)
-
-        self.optimizer = optim.SGD(self.model.parameters(), lr=0.01, momentum=0.9)
+        self.stage0: Optional[nn.Module] = None
+        self.stage1: Optional[nn.Module] = None
+        self.model: Optional[nn.Module] = None
+        self.optimizer: Optional[optim.Optimizer] = None
         self.criterion = nn.CrossEntropyLoss()
 
         self.endpoint = NetworkEndpoint(
@@ -449,9 +594,57 @@ class PipelineProtoVehicle:
         self._activation_queue: Queue[PipelineMessage] = Queue()
         self._gradient_queue: Queue[PipelineMessage] = Queue()
 
+        self._lep_state = ActivationLEPState()
+
+    def _log_timing(self, event: str, invite_start: Optional[float] = None) -> None:
+        now = time.perf_counter()
+        elapsed_ms = (now - self._timing_start) * 1000.0
+        parts = [f"[TIMING][{self.role}]", event, f"elapsed_ms={elapsed_ms:.2f}"]
+        if invite_start is not None:
+            invite_elapsed_ms = (now - invite_start) * 1000.0
+            parts.append(f"invite_elapsed_ms={invite_elapsed_ms:.2f}")
+        print(" ".join(parts))
+
+    def _get_memory_stats(self) -> Dict[str, float]:
+        stats: Dict[str, float] = {}
+        try:
+            import resource
+
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            rss = float(usage.ru_maxrss)
+            if sys.platform == "darwin":
+                stats["rss_mb"] = rss / (1024.0 * 1024.0)
+            else:
+                stats["rss_mb"] = rss / 1024.0
+        except Exception:
+            pass
+
+        if torch.cuda.is_available():
+            stats["cuda_allocated_mb"] = torch.cuda.memory_allocated() / (1024.0 * 1024.0)
+            stats["cuda_reserved_mb"] = torch.cuda.memory_reserved() / (1024.0 * 1024.0)
+        return stats
+
+    def _log_resource(self, event: str) -> None:
+        stats = self._get_memory_stats()
+        parts = [f"[RESOURCE][{self.role}]", event]
+        for key, value in stats.items():
+            parts.append(f"{key}={value:.2f}MB")
+        print(" ".join(parts))
+
+    def _preload_model_if_needed(self) -> None:
+        if self.model is not None:
+            return
+        template_id = self.current_template_id or DEFAULT_TEMPLATE_ID
+        self._init_model_for_template({"template_id": template_id})
+        self._log_timing("B_preload_done")
+        self._log_resource("B_preload_done")
+
     def start(self):
         self._register_handlers()
         self._start_peer_listener()
+        self._log_timing("A_listener_ready")
+        self._log_resource("A_listener_ready")
+        self._preload_model_if_needed()
         self._connect_to_server()
         self._register_with_server()
         self._start_async_workers()
@@ -527,9 +720,44 @@ class PipelineProtoVehicle:
         )
         self.bridge.send_cross_platform_message(msg)
 
+    def _init_model_for_template(self, template_payload: Optional[Dict[str, Any]] = None) -> None:
+        if self.model is not None:
+            return
+        template_payload = template_payload or {}
+        if "template_id" not in template_payload and self.current_template_id:
+            template_payload = {**template_payload, "template_id": self.current_template_id}
+
+        template_id, split_key, stage0, stage1 = build_model_split_from_template_payload(
+            template_payload,
+            default_template_id=DEFAULT_TEMPLATE_ID,
+            num_classes=self.num_classes,
+        )
+
+        self.current_template_id = template_id
+        self.current_split_key = split_key
+
+        self.stage0, self.stage1 = stage0, stage1
+        assert self.stage0 is not None and self.stage1 is not None
+        if self.role == "stage0":
+            self.model = self.stage0.to(self.device)
+        else:
+            self.model = self.stage1.to(self.device)
+
+        assert self.model is not None
+        self.optimizer = optim.SGD(self.model.parameters(), lr=0.01, momentum=0.9)
+        print(f"[{self.role}] Initialized model split: template={template_id}, split={split_key}")
+
     def _handle_pipeline_invite(self, message: CrossPlatformMessage):
         payload = message.payload
         self.current_pipeline_id = payload.get("pipeline_id")
+        invite_ts = time.perf_counter()
+        self._invite_received_at = invite_ts
+
+        template_payload = payload.get("template") or {"template_id": payload.get("template_id")}
+        if self.model is None:
+            self._init_model_for_template(template_payload)
+        self._log_timing("C_invite_model_ready", invite_start=invite_ts)
+        self._log_resource("C_invite_model_ready")
 
         vehicles = payload.get("vehicles", [])
         stages = payload.get("stages", [])
@@ -599,6 +827,11 @@ class PipelineProtoVehicle:
         if self.role != "stage0":
             return
         payload = message.payload or {}
+        if self.model is None:
+            self._init_model_for_template()
+            if self.model is None:
+                print("[stage0] Model not initialized, skip round")
+                return
         round_num = payload.get("round", DEFAULT_ROUND)
         micro_batch = payload.get("micro_batch", DEFAULT_MICRO_BATCH)
         micro_batches = payload.get("micro_batches", self.micro_batches)
@@ -622,18 +855,22 @@ class PipelineProtoVehicle:
 
     def _run_stage0_round(self, round_num: int, micro_batch: int, micro_batches: int):
         total_micro_batches = max(1, int(micro_batches))
-        loader = _build_cifar10_loader(
+        loader = _build_data_loader(
+            self.dataset,
             DEFAULT_BATCH_SIZE * total_micro_batches,
-            DEFAULT_IMAGE_SIZE,
-            DEFAULT_NUM_CLASSES,
-            num_batches=1,
+            self.image_size,
+            num_batches=4,
             data_dir=self.data_dir,
-            download=self.download
+            download=self.download,
+            tiny_imagenet_url=self.tiny_imagenet_url,
+            tiny_imagenet_dir=self.tiny_imagenet_dir
         )
         images, labels = next(iter(loader))
         images = images.to(self.device)
         labels = labels.to(self.device)
 
+        assert self.model is not None
+        assert self.optimizer is not None
         self.model.train()
         self.optimizer.zero_grad()
 
@@ -661,13 +898,20 @@ class PipelineProtoVehicle:
             with self._lock:
                 self._activation_cache[seq_id] = activation
 
+            activation_payload, activation_info = self._lep_state.apply(
+                activation,
+                ENABLE_ACTIVATION_LEP,
+                LEP_FP16_DTYPE,
+            )
+
             pipeline_msg = PipelineMessage(
                 pipeline_id=PIPELINE_ID,
                 stage_id="stage0",
                 source_id=self.vehicle_id,
                 target_id=self.stage1_id,
                 data={
-                    "activation": activation.detach(),
+                    "activation": activation_payload,
+                    "activation_info": activation_info,
                     "labels": lbl_mb.detach(),
                     "round": round_num,
                     "micro_batch": micro_idx,
@@ -693,6 +937,21 @@ class PipelineProtoVehicle:
                 else:
                     print(f"[stage0] Sent activation steady (round {round_num}, micro {micro_idx + 1}/{total_micro_batches})")
 
+                if activation_info.get("lep_enabled") and self._lep_state.should_log(LEP_LOG_INTERVAL):
+                    reduction = self._lep_state.reduction_ratio()
+                    print(
+                        f"[stage0][LEP] steps={self._lep_state.steps} "
+                        f"reduction={reduction * 100.0:.2f}% "
+                        f"last_error_norm={activation_info.get('lep_error_norm'):.4f}"
+                    )
+
+        if ENABLE_ACTIVATION_LEP and self._lep_state.steps:
+            reduction = self._lep_state.reduction_ratio()
+            print(
+                f"[stage0][LEP] round={round_num} activation_bytes_sent={self._lep_state.bytes_sent} "
+                f"baseline_bytes={self._lep_state.bytes_baseline} reduction={reduction * 100.0:.2f}%"
+            )
+
         print(f"[stage0] 1F1B cooldown: waiting for gradients (round {round_num})")
         with self._lock:
             cond = self._round_cond.get(round_num)
@@ -716,12 +975,29 @@ class PipelineProtoVehicle:
             except Empty:
                 continue
 
+            if self.model is None:
+                self._init_model_for_template()
+                if self.model is None:
+                    print("[stage1] Model not initialized, skip activation")
+                    continue
+
             data = pipeline_msg.data
+            activation_info = data.get("activation_info", {})
             activation_data = self._unwrap_tensor_payload(data["activation"])
             labels_data = self._unwrap_tensor_payload(data["labels"])
+            if activation_info.get("lep_enabled"):
+                error_norm = activation_info.get("lep_error_norm")
+                error_norm_str = f"{error_norm:.4f}" if isinstance(error_norm, (int, float)) else "N/A"
+                print(
+                    f"[stage1][LEP] recv activation dtype={activation_info.get('lep_dtype')} "
+                    f"error_norm={error_norm_str}"
+                )
             activation = torch.tensor(activation_data, device=self.device, dtype=torch.float32)
             labels = torch.tensor(labels_data, device=self.device, dtype=torch.long)
             activation.requires_grad_(True)
+
+            assert self.model is not None
+            assert self.optimizer is not None
 
             round_num = data.get("round", DEFAULT_ROUND)
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
@@ -794,8 +1070,17 @@ class PipelineProtoVehicle:
             except Empty:
                 continue
 
+            if self.model is None:
+                self._init_model_for_template()
+                if self.model is None:
+                    print("[stage0] Model not initialized, skip gradient")
+                    continue
+
             data = pipeline_msg.data
             grad_data = self._unwrap_tensor_payload(data["grad"])
+
+            assert self.model is not None
+            assert self.optimizer is not None
             grad = torch.tensor(grad_data, device=self.device, dtype=torch.float32)
 
             round_num = data.get("round", DEFAULT_ROUND)
@@ -824,11 +1109,6 @@ class PipelineProtoVehicle:
                     state["done"] = True
                     print("[stage0] Applied all gradients and updated weights")
 
-                    if self.auto_exit:
-                        self.completed_rounds += 1
-                        if self.completed_rounds >= self.total_rounds:
-                            _request_shutdown()
-
                     round_done = CrossPlatformMessage(
                         message_id=str(uuid.uuid4()),
                         source_id=self.vehicle_id,
@@ -842,6 +1122,11 @@ class PipelineProtoVehicle:
                         requires_ack=False
                     )
                     self.bridge.send_cross_platform_message(round_done)
+
+                    if self.auto_exit:
+                        self.completed_rounds += 1
+                        if self.completed_rounds >= self.total_rounds:
+                            _request_shutdown()
 
                     cond = self._round_cond.get(round_num)
                     if cond:
@@ -877,7 +1162,7 @@ def signal_handler(signum, frame):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="FHDP Pipeline Prototype (ResNet-18)")
+    parser = argparse.ArgumentParser(description="FHDP Pipeline Prototype (ResNet/ViT, micro-batching + 1F1B)")
     parser.add_argument("--mode", required=True, choices=["server", "vehicle", "validate"], help="server, vehicle, or validate")
     parser.add_argument("--host", default="0.0.0.0", help="server host")
     parser.add_argument("--port", type=int, default=5000, help="server port")
@@ -887,16 +1172,43 @@ def main():
     parser.add_argument("--role", choices=["stage0", "stage1"], help="vehicle role")
     parser.add_argument("--stage0-id", default=DEFAULT_STAGE0_ID, help="stage0 vehicle id")
     parser.add_argument("--stage1-id", default=DEFAULT_STAGE1_ID, help="stage1 vehicle id")
+    parser.add_argument("--template-id", default=DEFAULT_TEMPLATE_ID, help="pipeline template id")
     parser.add_argument("--rounds", type=int, default=DEFAULT_ROUNDS, help="total training rounds")
     parser.add_argument("--micro-batches", type=int, default=DEFAULT_MICRO_BATCHES, help="micro-batches per round")
-    parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="CIFAR-10 data directory")
+    parser.add_argument(
+        "--dataset",
+        default=DEFAULT_DATASET,
+        choices=["cifar10", "imagenet", "tinyimagenet", "tiny-imagenet"],
+        help="dataset name"
+    )
+    parser.add_argument("--num-classes", type=int, default=DEFAULT_NUM_CLASSES, help="number of classes")
+    parser.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE, help="input image size")
+    parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="dataset root directory")
     parser.add_argument("--download", action="store_true", help="download CIFAR-10 if missing")
+    parser.add_argument(
+        "--tiny-imagenet-url",
+        default=DEFAULT_TINY_IMAGENET_URL,
+        help="Tiny ImageNet mirror URL (zip/tar.gz)"
+    )
+    parser.add_argument(
+        "--tiny-imagenet-dir",
+        default=DEFAULT_TINY_IMAGENET_DIR,
+        help="Tiny ImageNet folder name under --data-dir"
+    )
     parser.add_argument("--auto-exit", action="store_true", help="exit after completing all rounds")
     parser.add_argument("--listen-host", default="0.0.0.0", help="vehicle listen host for peer pipeline data")
     parser.add_argument("--listen-port", type=int, default=0, help="vehicle listen port for peer pipeline data")
     parser.add_argument("--advertise-host", default=None, help="host/IP to advertise to peers (default: auto-detect)")
 
     args = parser.parse_args()
+    dataset_key = (args.dataset or "").lower().replace("-", "")
+    if dataset_key == "imagenet" and args.num_classes == DEFAULT_NUM_CLASSES:
+        args.num_classes = 1000
+    if dataset_key == "tinyimagenet":
+        if args.num_classes == DEFAULT_NUM_CLASSES:
+            args.num_classes = 200
+        if args.image_size == DEFAULT_IMAGE_SIZE:
+            args.image_size = 224
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -912,7 +1224,8 @@ def main():
             args.stage1_id,
             args.rounds,
             args.auto_exit,
-            args.micro_batches
+            args.micro_batches,
+            args.template_id
         )
         server.start()
         while not shutdown_requested:
@@ -940,7 +1253,12 @@ def main():
             auto_exit=args.auto_exit,
             micro_batches=args.micro_batches,
             data_dir=args.data_dir,
-            download=args.download
+            download=args.download,
+            dataset=args.dataset,
+            image_size=args.image_size,
+            num_classes=args.num_classes,
+            tiny_imagenet_url=args.tiny_imagenet_url,
+            tiny_imagenet_dir=args.tiny_imagenet_dir
         )
         vehicle.start()
         try:
