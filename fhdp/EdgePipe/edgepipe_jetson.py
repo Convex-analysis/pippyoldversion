@@ -9,13 +9,13 @@ Fixed topology:
 
 Usage:
   # Server (coordination only)
-  python edgepipe_jetson.py --mode server --host 0.0.0.0 --port 5000
+  python -m fhdp.EdgePipe.edgepipe_jetson --mode server --host 0.0.0.0 --port 5000
 
   # Device0 (Jetson Orin)
-  python edgepipe_jetson.py --mode device --role device0 --device-id orin --server-host <server-ip> --server-port 5000
+  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device0 --device-id orin --server-host <server-ip> --server-port 5000
 
   # Device1 (Jetson Nano)
-  python edgepipe_jetson.py --mode device --role device1 --device-id nano --server-host <server-ip> --server-port 5000
+  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device1 --device-id nano --server-host <server-ip> --server-port 5000
 """
 
 import os
@@ -71,16 +71,16 @@ from fhdp.core.pipeline_model import (
     build_model_split_from_template_payload,
 )
 
-from .super_neuron import SuperNeuronNetwork
-from .partitioning import HybridPartitioning
-from .device_mapping import NeuronDeviceMapping
-from .pipeline_scheduler import PipelineScheduler
-from .performance_analysis import PerformanceAnalyzer
+from fhdp.EdgePipe.super_neuron import SuperNeuronNetwork
+from fhdp.EdgePipe.partitioning import HybridPartitioning
+from fhdp.EdgePipe.device_mapping import NeuronDeviceMapping
+from fhdp.EdgePipe.pipeline_scheduler import PipelineScheduler
+from fhdp.EdgePipe.performance_analysis import PerformanceAnalyzer
 
 # ---- Constants ----
 PIPELINE_ID = "edgepipe_jetson"
-DEFAULT_DEVICE0_ID = "orin"
-DEFAULT_DEVICE1_ID = "nano"
+DEFAULT_DEVICE0_ID = "agx"
+DEFAULT_DEVICE1_ID = "orin"
 DEFAULT_NUM_CLASSES = 10
 DEFAULT_IMAGE_SIZE = 224
 DEFAULT_BATCH_SIZE = 16
@@ -91,6 +91,8 @@ DEFAULT_MICRO_BATCHES = 1
 DEFAULT_DATA_DIR = os.path.join(script_dir, "data")
 DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
 DEFAULT_DATASET = "cifar10"
+DEFAULT_ROUND_TIMEOUT_SEC = 300
+DEFAULT_EVAL_BATCHES = 4
 
 # ---- LEP / activation compression ----
 ENABLE_ACTIVATION_LEP = True
@@ -152,7 +154,8 @@ def _build_cifar10_loader(
     image_size: int,
     num_batches: int = 1,
     data_dir: str = DEFAULT_DATA_DIR,
-    download: bool = False
+    download: bool = False,
+    train: bool = True
 ) -> DataLoader:
     transform = transforms.Compose([
         transforms.Resize((image_size, image_size)),
@@ -161,7 +164,7 @@ def _build_cifar10_loader(
     ])
     dataset = CIFAR10(
         root=data_dir,
-        train=True,
+        train=train,
         download=download,
         transform=transform
     )
@@ -181,6 +184,21 @@ def _build_data_loader(
 ) -> DataLoader:
     dataset_key = (dataset_name or "cifar10").lower().replace("-", "")
     return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download)
+
+
+def _build_eval_loader(
+    dataset_name: str,
+    batch_size: int,
+    image_size: int,
+    num_batches: int = 1,
+    data_dir: str = DEFAULT_DATA_DIR,
+    download: bool = False
+) -> Optional[DataLoader]:
+    dataset_key = (dataset_name or "cifar10").lower().replace("-", "")
+    if dataset_key != "cifar10":
+        print(f"[Eval] Dataset {dataset_name} not supported for eval, skip")
+        return None
+    return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download, train=False)
 
 
 def _build_capabilities(role: str) -> HardwareCapabilities:
@@ -468,7 +486,7 @@ class EdgePipeJetsonDevice:
                  auto_exit: bool = False, micro_batches: int = DEFAULT_MICRO_BATCHES,
                  data_dir: str = DEFAULT_DATA_DIR, download: bool = False,
                  dataset: str = DEFAULT_DATASET, image_size: int = DEFAULT_IMAGE_SIZE,
-                 num_classes: int = DEFAULT_NUM_CLASSES):
+                 num_classes: int = DEFAULT_NUM_CLASSES, eval_batches: int = DEFAULT_EVAL_BATCHES):
         self.device_id = device_id
         self.role = role
         self.server_host = server_host
@@ -488,6 +506,7 @@ class EdgePipeJetsonDevice:
         self.dataset = dataset
         self.image_size = int(image_size)
         self.num_classes = int(num_classes)
+        self.eval_batches = max(0, int(eval_batches))
         self.device = _get_device()
         self._timing_start = time.perf_counter()
         self._invite_received_at: Optional[float] = None
@@ -526,8 +545,11 @@ class EdgePipeJetsonDevice:
         self._lock = threading.Lock()
         self._round_state: Dict[int, Dict[str, Any]] = {}
         self._round_cond: Dict[int, threading.Condition] = {}
+        self._round_metrics: Dict[int, Dict[str, Any]] = {}
+        self._eval_state: Dict[int, Dict[str, Any]] = {}
         self._activation_queue: Queue[PipelineMessage] = Queue()
         self._gradient_queue: Queue[PipelineMessage] = Queue()
+        self._eval_queue: Queue[PipelineMessage] = Queue()
 
         self._lep_state = ActivationLEPState()
 
@@ -605,6 +627,8 @@ class EdgePipeJetsonDevice:
     def _start_async_workers(self):
         if self.role == "device1":
             threading.Thread(target=self._activation_worker, daemon=True).start()
+            if self.eval_batches > 0:
+                threading.Thread(target=self._eval_worker, daemon=True).start()
         if self.role == "device0":
             threading.Thread(target=self._gradient_worker, daemon=True).start()
 
@@ -615,13 +639,21 @@ class EdgePipeJetsonDevice:
 
     def _connect_to_server(self):
         remote_capabilities = _build_capabilities("server")
-        ok = self.bridge.connect_to_platform(
-            remote_node_id="server",
-            remote_capabilities=remote_capabilities,
-            network_endpoint=self.endpoint
-        )
+        endpoint = self.endpoint
+        endpoint_desc = f"{getattr(endpoint, 'host', None)}:{getattr(endpoint, 'port', None)}"
+        print(f"[{self.role}] Connecting to server {self.server_host}:{self.server_port} via {endpoint_desc}")
+        try:
+            ok = self.bridge.connect_to_platform(
+                remote_node_id="server",
+                remote_capabilities=remote_capabilities,
+                network_endpoint=self.endpoint
+            )
+        except Exception as exc:
+            print(f"[{self.role}] connect_to_platform failed: {exc}")
+            raise
         if not ok:
             raise ConnectionError("Failed to connect to server")
+        print(f"[{self.role}] Connected to server {self.server_host}:{self.server_port}")
 
     def _register_handlers(self):
         self.bridge.message_router.register_handler("pipeline_invite", self._handle_pipeline_invite)
@@ -653,7 +685,15 @@ class EdgePipeJetsonDevice:
             },
             requires_ack=False
         )
-        self.bridge.send_cross_platform_message(msg)
+        print(
+            f"[{self.role}] Sending register to server {self.server_host}:{self.server_port} advertise={advertise_host}:{self.listen_port} device_id={self.device_id}"
+        )
+        try:
+            self.bridge.send_cross_platform_message(msg)
+        except Exception as exc:
+            print(f"[{self.role}] send register failed: {exc}")
+            raise
+        print(f"[{self.role}] Register sent")
 
     def _init_model_for_template(self, template_payload: Optional[Dict[str, Any]] = None) -> None:
         if self.model is not None:
@@ -700,7 +740,8 @@ class EdgePipeJetsonDevice:
 
         vehicles = payload.get("vehicles", [])
         stages = payload.get("stages", [])
-        stage_map = {stages[i]: vehicles[i] for i in range(min(len(vehicles), len(stages)))}  # Fixed: use min() to avoid index out of range
+        stage_map = {stages[i]: vehicles[i] for i in range(min(len(vehicles), len(stages)))}
+        vehicle_map = {vehicles[i]: stages[i] for i in range(min(len(vehicles), len(stages)))}
         self.device0_id = stage_map.get("device0", self.device0_id)
         self.device1_id = stage_map.get("device1", self.device1_id)
 
@@ -727,9 +768,8 @@ class EdgePipeJetsonDevice:
                         f"Ensure {host}:{port} is reachable or use --advertise-host on peer."
                     )
 
-        if self.device_id in vehicles:
-            stage_index = vehicles.index(self.device_id)
-            self.current_stage = stages[stage_index]
+        if self.device_id in vehicle_map:
+            self.current_stage = vehicle_map.get(self.device_id, self.current_stage)
 
         accept = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
@@ -754,6 +794,13 @@ class EdgePipeJetsonDevice:
                 self.micro_batches,
                 self._handle_activation_sequence
             )
+            if self.eval_batches > 0:
+                self.sequence_registry.register_for_rounds(
+                    "eval",
+                    rounds,
+                    self.eval_batches,
+                    self._handle_eval_activation_sequence
+                )
         if self.role == "device0":
             self.sequence_registry.register_for_rounds(
                 "gradient",
@@ -792,6 +839,46 @@ class EdgePipeJetsonDevice:
                 return value["data"]
         return value
 
+    @staticmethod
+    def _to_tensor(value, device: str, dtype: torch.dtype) -> torch.Tensor:
+        if isinstance(value, torch.Tensor):
+            tensor = value
+            if tensor.dtype != dtype:
+                tensor = tensor.to(dtype=dtype)
+            if device:
+                tensor = tensor.to(device)
+            return tensor
+        return torch.as_tensor(value, device=device, dtype=dtype)
+
+    @staticmethod
+    def _estimate_payload_bytes(value) -> int:
+        if isinstance(value, torch.Tensor):
+            return value.numel() * value.element_size()
+        nbytes = getattr(value, "nbytes", None)
+        if isinstance(nbytes, int):
+            return nbytes
+        if isinstance(value, dict):
+            return sum(EdgePipeJetsonDevice._estimate_payload_bytes(v) for v in value.values())
+        if isinstance(value, (list, tuple)):
+            return sum(EdgePipeJetsonDevice._estimate_payload_bytes(v) for v in value)
+        return 0
+
+    def _get_round_metrics(self, round_num: int) -> Dict[str, Any]:
+        metrics = self._round_metrics.get(round_num)
+        if metrics is None:
+            metrics = {
+                "round_start": None,
+                "round_end": None,
+                "images": 0,
+                "activation_bytes_sent": 0,
+                "activation_bytes_recv": 0,
+                "grad_bytes_sent": 0,
+                "grad_bytes_recv": 0,
+                "wait_time_sec": 0.0,
+            }
+            self._round_metrics[round_num] = metrics
+        return metrics
+
     def _run_device0_round(self, round_num: int, micro_batch: int, micro_batches: int):
         total_micro_batches = max(1, int(micro_batches))
         loader = _build_data_loader(
@@ -805,6 +892,12 @@ class EdgePipeJetsonDevice:
         images, labels = next(iter(loader))
         images = images.to(self.device)
         labels = labels.to(self.device)
+
+        with self._lock:
+            metrics = self._get_round_metrics(round_num)
+            if metrics["round_start"] is None:
+                metrics["round_start"] = time.perf_counter()
+            metrics["images"] += int(images.size(0))
 
         assert self.model is not None
         assert self.optimizer is not None
@@ -865,6 +958,10 @@ class EdgePipeJetsonDevice:
 
             endpoint = self.bridge.message_router.routing_table.get(self.device1_id)
             if endpoint:
+                with self._lock:
+                    metrics = self._get_round_metrics(round_num)
+                    metrics["activation_bytes_sent"] += self._estimate_payload_bytes(activation_payload)
+                    metrics["activation_bytes_sent"] += self._estimate_payload_bytes(lbl_mb)
                 self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(pipeline_msg, endpoint)
                 phase = schedule.phase(micro_idx).value
                 if phase == "warmup":
@@ -890,6 +987,7 @@ class EdgePipeJetsonDevice:
             )
 
         print(f"[device0] 1F1B cooldown: waiting for gradients (round {round_num})")
+        wait_started = time.perf_counter()
         with self._lock:
             cond = self._round_cond.get(round_num)
             while not shutdown_requested and not self._round_state.get(round_num, {}).get("done"):
@@ -897,13 +995,100 @@ class EdgePipeJetsonDevice:
                     cond.wait(timeout=0.5)
                 else:
                     break
+                if time.perf_counter() - wait_started > DEFAULT_ROUND_TIMEOUT_SEC:
+                    print(f"[device0] Round {round_num} timeout waiting for gradients")
+                    break
             self._round_state.pop(round_num, None)
             self._round_cond.pop(round_num, None)
+        with self._lock:
+            metrics = self._get_round_metrics(round_num)
+            metrics["round_end"] = time.perf_counter()
+            metrics["wait_time_sec"] += max(0.0, time.perf_counter() - wait_started)
+            round_start = metrics.get("round_start")
+            round_end = metrics.get("round_end")
+            total_images = metrics.get("images", 0)
+            activation_bytes_sent = metrics.get("activation_bytes_sent", 0)
+            grad_bytes_recv = metrics.get("grad_bytes_recv", 0)
+            wait_time = metrics.get("wait_time_sec", 0.0)
+
+        if round_start and round_end and round_end > round_start:
+            round_time = round_end - round_start
+            throughput = total_images / round_time if round_time > 0 else 0.0
+            print(
+                f"[device0][METRICS] round={round_num} time_sec={round_time:.2f} "
+                f"throughput_img_s={throughput:.2f} images={total_images}"
+            )
+            print(
+                f"[device0][METRICS] comm_bytes_sent={activation_bytes_sent} "
+                f"comm_bytes_recv={grad_bytes_recv} wait_time_sec={wait_time:.2f}"
+            )
+
         print(f"[device0] 1F1B cooldown: gradients complete (round {round_num})")
+        if self.eval_batches > 0:
+            self._run_eval_round(round_num)
+
+    def _run_eval_round(self, round_num: int) -> None:
+        if self.role != "device0":
+            return
+        loader = _build_eval_loader(
+            self.dataset,
+            DEFAULT_BATCH_SIZE,
+            self.image_size,
+            num_batches=self.eval_batches,
+            data_dir=self.data_dir,
+            download=self.download
+        )
+        if loader is None:
+            return
+        total_batches = len(loader)
+        if total_batches == 0:
+            print(f"[device0][EVAL] No eval batches available (round {round_num})")
+            return
+
+        assert self.model is not None
+        self.model.eval()
+        print(f"[device0][EVAL] Sending eval activations (round {round_num}, batches={total_batches})")
+
+        for eval_idx, (images, labels) in enumerate(loader):
+            images = images.to(self.device)
+            labels = labels.to(self.device)
+            with torch.no_grad():
+                activation = self.model(images)
+
+            seq_id = self.sequence_id_factory.make(round_num, "eval", eval_idx)
+            pipeline_msg = PipelineMessage(
+                pipeline_id=PIPELINE_ID,
+                stage_id="device0",
+                source_id=self.device_id,
+                target_id=self.device1_id,
+                data={
+                    "activation": activation.detach(),
+                    "activation_info": {"lep_enabled": False},
+                    "labels": labels.detach(),
+                    "round": round_num,
+                    "eval": True,
+                    "eval_batch": eval_idx,
+                    "eval_batches": total_batches
+                },
+                data_type="eval_activation",
+                sequence_id=seq_id,
+                sequence_index=0,
+                total_sequence_length=1,
+                requires_ack=False,
+                compression_type=CompressionType.NONE,
+                serialization_format=SerializationFormat.PICKLE
+            )
+            endpoint = self.bridge.message_router.routing_table.get(self.device1_id)
+            if endpoint:
+                self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(pipeline_msg, endpoint)
 
     def _handle_activation_sequence(self, messages):
         pipeline_msg = messages[0]
         self._activation_queue.put(pipeline_msg)
+
+    def _handle_eval_activation_sequence(self, messages):
+        pipeline_msg = messages[0]
+        self._eval_queue.put(pipeline_msg)
 
     def _activation_worker(self):
         while not shutdown_requested:
@@ -922,6 +1107,10 @@ class EdgePipeJetsonDevice:
             activation_info = data.get("activation_info", {})
             activation_data = self._unwrap_tensor_payload(data["activation"])
             labels_data = self._unwrap_tensor_payload(data["labels"])
+            with self._lock:
+                metrics = self._get_round_metrics(data.get("round", DEFAULT_ROUND))
+                metrics["activation_bytes_recv"] += self._estimate_payload_bytes(activation_data)
+                metrics["activation_bytes_recv"] += self._estimate_payload_bytes(labels_data)
             if activation_info.get("lep_enabled"):
                 error_norm = activation_info.get("lep_error_norm")
                 error_norm_str = f"{error_norm:.4f}" if isinstance(error_norm, (int, float)) else "N/A"
@@ -929,8 +1118,8 @@ class EdgePipeJetsonDevice:
                     f"[device1][LEP] recv activation dtype={activation_info.get('lep_dtype')} "
                     f"error_norm={error_norm_str}"
                 )
-            activation = torch.tensor(activation_data, device=self.device, dtype=torch.float32)
-            labels = torch.tensor(labels_data, device=self.device, dtype=torch.long)
+            activation = self._to_tensor(activation_data, self.device, torch.float32)
+            labels = self._to_tensor(labels_data, self.device, torch.long)
             activation.requires_grad_(True)
 
             assert self.model is not None
@@ -977,6 +1166,9 @@ class EdgePipeJetsonDevice:
 
             endpoint = self.bridge.message_router.routing_table.get(self.device0_id)
             if endpoint:
+                with self._lock:
+                    metrics = self._get_round_metrics(round_num)
+                    metrics["grad_bytes_sent"] += self._estimate_payload_bytes(grad)
                 self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(grad_msg, endpoint)
                 print(
                     f"[device1] Sent gradient {phase} (loss={loss.item():.4f}, micro {micro_batch + 1}/{micro_batches})"
@@ -991,10 +1183,69 @@ class EdgePipeJetsonDevice:
                     if state["received"] >= state["expected"]:
                         self.optimizer.step()
                         self._round_state.pop(round_num, None)
+                        metrics = self._get_round_metrics(round_num)
+                        comm_sent = metrics.get("grad_bytes_sent", 0)
+                        comm_recv = metrics.get("activation_bytes_recv", 0)
+                        print(
+                            f"[device1][METRICS] round={round_num} comm_bytes_sent={comm_sent} "
+                            f"comm_bytes_recv={comm_recv}"
+                        )
                         if self.auto_exit:
                             self.completed_rounds += 1
                             if self.completed_rounds >= self.total_rounds:
                                 _request_shutdown()
+
+    def _eval_worker(self):
+        while not shutdown_requested:
+            try:
+                pipeline_msg = self._eval_queue.get(timeout=0.5)
+            except Empty:
+                continue
+
+            if self.model is None:
+                self._init_model_for_template()
+                if self.model is None:
+                    print("[device1] Model not initialized, skip eval")
+                    continue
+
+            data = pipeline_msg.data
+            round_num = data.get("round", DEFAULT_ROUND)
+            activation_data = self._unwrap_tensor_payload(data["activation"])
+            labels_data = self._unwrap_tensor_payload(data["labels"])
+            activation = self._to_tensor(activation_data, self.device, torch.float32)
+            labels = self._to_tensor(labels_data, self.device, torch.long)
+
+            with torch.no_grad():
+                outputs = self.model(activation)
+                preds = outputs.argmax(dim=1)
+                correct = int((preds == labels).sum().item())
+                total = int(labels.numel())
+
+            with self._lock:
+                state = self._eval_state.get(round_num)
+                if state is None:
+                    state = {
+                        "correct": 0,
+                        "total": 0,
+                        "received": 0,
+                        "expected": int(data.get("eval_batches", self.eval_batches))
+                    }
+                    self._eval_state[round_num] = state
+                state["correct"] += correct
+                state["total"] += total
+                state["received"] += 1
+                done = state["received"] >= state["expected"]
+
+            self.sequence_registry.unregister_sequence(pipeline_msg.sequence_id)
+
+            if done:
+                accuracy = state["correct"] / max(1, state["total"])
+                print(
+                    f"[device1][EVAL] round={round_num} accuracy={accuracy:.4f} "
+                    f"correct={state['correct']} total={state['total']}"
+                )
+                with self._lock:
+                    self._eval_state.pop(round_num, None)
 
     def _handle_gradient_sequence(self, messages):
         pipeline_msg = messages[0]
@@ -1018,7 +1269,11 @@ class EdgePipeJetsonDevice:
 
             assert self.model is not None
             assert self.optimizer is not None
-            grad = torch.tensor(grad_data, device=self.device, dtype=torch.float32)
+            grad = self._to_tensor(grad_data, self.device, torch.float32)
+
+            with self._lock:
+                metrics = self._get_round_metrics(data.get("round", DEFAULT_ROUND))
+                metrics["grad_bytes_recv"] += self._estimate_payload_bytes(grad_data)
 
             round_num = data.get("round", DEFAULT_ROUND)
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
@@ -1121,6 +1376,7 @@ def main():
     parser.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE, help="input image size")
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="dataset root directory")
     parser.add_argument("--download", action="store_true", help="download CIFAR-10 if missing")
+    parser.add_argument("--eval-batches", type=int, default=DEFAULT_EVAL_BATCHES, help="eval batches per round (0 to disable)")
     parser.add_argument("--auto-exit", action="store_true", help="exit after completing all rounds")
     parser.add_argument("--listen-host", default="0.0.0.0", help="device listen host for peer pipeline data")
     parser.add_argument("--listen-port", type=int, default=0, help="device listen port for peer pipeline data")
@@ -1174,7 +1430,8 @@ def main():
             download=args.download,
             dataset=args.dataset,
             image_size=args.image_size,
-            num_classes=args.num_classes
+            num_classes=args.num_classes,
+            eval_batches=args.eval_batches
         )
         device.start()
         try:

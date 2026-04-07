@@ -91,9 +91,10 @@ DEFAULT_MICRO_BATCH = 0
 DEFAULT_MICRO_BATCHES = 1
 DEFAULT_DATA_DIR = os.path.join(script_dir, "data")
 DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
-DEFAULT_DATASET = "tinyimagenet"
+DEFAULT_DATASET = "cifar10"
 DEFAULT_TINY_IMAGENET_URL = "https://cs231n.stanford.edu/tiny-imagenet-200.zip"
 DEFAULT_TINY_IMAGENET_DIR = "tiny-imagenet-200"
+DEFAULT_EVAL_BATCHES = 4
 
 # ---- LEP / activation compression (Plan A: FP16 + residual) ----
 ENABLE_ACTIVATION_LEP = True
@@ -152,7 +153,8 @@ def _build_cifar10_loader(
     image_size: int,
     num_batches: int = 1,
     data_dir: str = DEFAULT_DATA_DIR,
-    download: bool = False
+    download: bool = False,
+    train: bool = True
 ) -> DataLoader:
     transform = transforms.Compose([
         transforms.Resize((image_size, image_size)),
@@ -161,7 +163,7 @@ def _build_cifar10_loader(
     ])
     dataset = CIFAR10(
         root=data_dir,
-        train=True,
+        train=train,
         download=download,
         transform=transform
     )
@@ -296,6 +298,21 @@ def _build_data_loader(
             folder_name=tiny_imagenet_dir
         )
     return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download)
+
+
+def _build_eval_loader(
+    dataset_name: str,
+    batch_size: int,
+    image_size: int,
+    num_batches: int = 1,
+    data_dir: str = DEFAULT_DATA_DIR,
+    download: bool = False
+) -> Optional[DataLoader]:
+    dataset_key = (dataset_name or "cifar10").lower().replace("-", "")
+    if dataset_key != "cifar10":
+        print(f"[Eval] Dataset {dataset_name} not supported for eval, skip")
+        return None
+    return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download, train=False)
 
 
 def _build_capabilities(role: str) -> HardwareCapabilities:
@@ -536,7 +553,8 @@ class PipelineProtoVehicle:
                  dataset: str = DEFAULT_DATASET, image_size: int = DEFAULT_IMAGE_SIZE,
                  num_classes: int = DEFAULT_NUM_CLASSES,
                  tiny_imagenet_url: str = DEFAULT_TINY_IMAGENET_URL,
-                 tiny_imagenet_dir: str = DEFAULT_TINY_IMAGENET_DIR):
+                 tiny_imagenet_dir: str = DEFAULT_TINY_IMAGENET_DIR,
+                 eval_batches: int = DEFAULT_EVAL_BATCHES):
         self.vehicle_id = vehicle_id
         self.role = role
         self.server_host = server_host
@@ -558,6 +576,7 @@ class PipelineProtoVehicle:
         self.num_classes = int(num_classes)
         self.tiny_imagenet_url = tiny_imagenet_url
         self.tiny_imagenet_dir = tiny_imagenet_dir
+        self.eval_batches = max(0, int(eval_batches))
         self.device = _get_device()
         self._timing_start = time.perf_counter()
         self._invite_received_at: Optional[float] = None
@@ -591,8 +610,10 @@ class PipelineProtoVehicle:
         self._lock = threading.Lock()
         self._round_state: Dict[int, Dict[str, Any]] = {}
         self._round_cond: Dict[int, threading.Condition] = {}
+        self._eval_state: Dict[int, Dict[str, Any]] = {}
         self._activation_queue: Queue[PipelineMessage] = Queue()
         self._gradient_queue: Queue[PipelineMessage] = Queue()
+        self._eval_queue: Queue[PipelineMessage] = Queue()
 
         self._lep_state = ActivationLEPState()
 
@@ -670,6 +691,8 @@ class PipelineProtoVehicle:
     def _start_async_workers(self):
         if self.role == "stage1":
             threading.Thread(target=self._activation_worker, daemon=True).start()
+            if self.eval_batches > 0:
+                threading.Thread(target=self._eval_worker, daemon=True).start()
         if self.role == "stage0":
             threading.Thread(target=self._gradient_worker, daemon=True).start()
 
@@ -815,6 +838,13 @@ class PipelineProtoVehicle:
                 self.micro_batches,
                 self._handle_activation_sequence
             )
+            if self.eval_batches > 0:
+                self.sequence_registry.register_for_rounds(
+                    "eval",
+                    rounds,
+                    self.eval_batches,
+                    self._handle_eval_activation_sequence
+                )
         if self.role == "stage0":
             self.sequence_registry.register_for_rounds(
                 "gradient",
@@ -963,10 +993,71 @@ class PipelineProtoVehicle:
             self._round_state.pop(round_num, None)
             self._round_cond.pop(round_num, None)
         print(f"[stage0] 1F1B cooldown: gradients complete (round {round_num})")
+        if self.eval_batches > 0:
+            self._run_eval_round(round_num)
+
+    def _run_eval_round(self, round_num: int) -> None:
+        if self.role != "stage0":
+            return
+        loader = _build_eval_loader(
+            self.dataset,
+            DEFAULT_BATCH_SIZE,
+            self.image_size,
+            num_batches=self.eval_batches,
+            data_dir=self.data_dir,
+            download=self.download
+        )
+        if loader is None:
+            return
+        total_batches = len(loader)
+        if total_batches == 0:
+            print(f"[stage0][EVAL] No eval batches available (round {round_num})")
+            return
+
+        assert self.model is not None
+        self.model.eval()
+        print(f"[stage0][EVAL] Sending eval activations (round {round_num}, batches={total_batches})")
+
+        for eval_idx, (images, labels) in enumerate(loader):
+            images = images.to(self.device)
+            labels = labels.to(self.device)
+            with torch.no_grad():
+                activation = self.model(images)
+
+            seq_id = self.sequence_id_factory.make(round_num, "eval", eval_idx)
+            pipeline_msg = PipelineMessage(
+                pipeline_id=PIPELINE_ID,
+                stage_id="stage0",
+                source_id=self.vehicle_id,
+                target_id=self.stage1_id,
+                data={
+                    "activation": activation.detach(),
+                    "activation_info": {"lep_enabled": False},
+                    "labels": labels.detach(),
+                    "round": round_num,
+                    "eval": True,
+                    "eval_batch": eval_idx,
+                    "eval_batches": total_batches
+                },
+                data_type="eval_activation",
+                sequence_id=seq_id,
+                sequence_index=0,
+                total_sequence_length=1,
+                requires_ack=False,
+                compression_type=CompressionType.NONE,
+                serialization_format=SerializationFormat.PICKLE
+            )
+            endpoint = self.bridge.message_router.routing_table.get(self.stage1_id)
+            if endpoint:
+                self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(pipeline_msg, endpoint)
 
     def _handle_activation_sequence(self, messages):
         pipeline_msg = messages[0]
         self._activation_queue.put(pipeline_msg)
+
+    def _handle_eval_activation_sequence(self, messages):
+        pipeline_msg = messages[0]
+        self._eval_queue.put(pipeline_msg)
 
     def _activation_worker(self):
         while not shutdown_requested:
@@ -1058,6 +1149,58 @@ class PipelineProtoVehicle:
                             self.completed_rounds += 1
                             if self.completed_rounds >= self.total_rounds:
                                 _request_shutdown()
+
+    def _eval_worker(self):
+        while not shutdown_requested:
+            try:
+                pipeline_msg = self._eval_queue.get(timeout=0.5)
+            except Empty:
+                continue
+
+            if self.model is None:
+                self._init_model_for_template()
+                if self.model is None:
+                    print("[stage1] Model not initialized, skip eval")
+                    continue
+
+            data = pipeline_msg.data
+            round_num = data.get("round", DEFAULT_ROUND)
+            activation_data = self._unwrap_tensor_payload(data["activation"])
+            labels_data = self._unwrap_tensor_payload(data["labels"])
+            activation = torch.tensor(activation_data, device=self.device, dtype=torch.float32)
+            labels = torch.tensor(labels_data, device=self.device, dtype=torch.long)
+
+            with torch.no_grad():
+                outputs = self.model(activation)
+                preds = outputs.argmax(dim=1)
+                correct = int((preds == labels).sum().item())
+                total = int(labels.numel())
+
+            with self._lock:
+                state = self._eval_state.get(round_num)
+                if state is None:
+                    state = {
+                        "correct": 0,
+                        "total": 0,
+                        "received": 0,
+                        "expected": int(data.get("eval_batches", self.eval_batches))
+                    }
+                    self._eval_state[round_num] = state
+                state["correct"] += correct
+                state["total"] += total
+                state["received"] += 1
+                done = state["received"] >= state["expected"]
+
+            self.sequence_registry.unregister_sequence(pipeline_msg.sequence_id)
+
+            if done:
+                accuracy = state["correct"] / max(1, state["total"])
+                print(
+                    f"[stage1][EVAL] round={round_num} accuracy={accuracy:.4f} "
+                    f"correct={state['correct']} total={state['total']}"
+                )
+                with self._lock:
+                    self._eval_state.pop(round_num, None)
 
     def _handle_gradient_sequence(self, messages):
         pipeline_msg = messages[0]
@@ -1185,6 +1328,7 @@ def main():
     parser.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE, help="input image size")
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="dataset root directory")
     parser.add_argument("--download", action="store_true", help="download CIFAR-10 if missing")
+    parser.add_argument("--eval-batches", type=int, default=DEFAULT_EVAL_BATCHES, help="eval batches per round (0 to disable)")
     parser.add_argument(
         "--tiny-imagenet-url",
         default=DEFAULT_TINY_IMAGENET_URL,
@@ -1258,7 +1402,8 @@ def main():
             image_size=args.image_size,
             num_classes=args.num_classes,
             tiny_imagenet_url=args.tiny_imagenet_url,
-            tiny_imagenet_dir=args.tiny_imagenet_dir
+            tiny_imagenet_dir=args.tiny_imagenet_dir,
+            eval_batches=args.eval_batches
         )
         vehicle.start()
         try:
