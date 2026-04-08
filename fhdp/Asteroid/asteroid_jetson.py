@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-EdgePipe Jetson Implementation (Two Jetson devices)
+Asteroid Jetson Implementation (Two Jetson devices)
 
 Fixed topology:
-- Device0 (Jetson Orin)  : handles super neurons covering early layers
-- Device1 (Jetson Nano) : handles super neurons covering later layers
+- Device0 (Jetson Orin)  : handles early pipeline stages
+- Device1 (Jetson Nano) : handles later pipeline stages
 - Server                : coordinate only (no compute)
 
 Usage:
   # Server (coordination only)
-  python -m fhdp.EdgePipe.edgepipe_jetson --mode server --host 0.0.0.0 --port 5000
+  python -m fhdp.Asteroid.asteroid_jetson --mode server --host 0.0.0.0 --port 5000
 
   # Device0 (Jetson Orin)
-  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device0 --device-id orin --server-host <server-ip> --server-port 5000
+  python -m fhdp.Asteroid.asteroid_jetson --mode device --role device0 --device-id orin --server-host <server-ip> --server-port 5000
 
   # Device1 (Jetson Nano)
-  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device1 --device-id nano --server-host <server-ip> --server-port 5000
+  python -m fhdp.Asteroid.asteroid_jetson --mode device --role device1 --device-id nano --server-host <server-ip> --server-port 5000
 """
 
 import os
@@ -38,8 +38,8 @@ from torchvision import transforms
 # ---- Resolve project root for imports ----
 script_dir = os.path.dirname(os.path.abspath(__file__))
 possible_roots = [
-    os.path.abspath(os.path.join(script_dir, '..')),      # fhdp/EdgePipe -> fhdp/
-    os.path.abspath(os.path.join(script_dir, '../..')),   # fhdp/EdgePipe -> project root
+    os.path.abspath(os.path.join(script_dir, '..')),      # fhdp/Asteroid -> fhdp/
+    os.path.abspath(os.path.join(script_dir, '../..')),   # fhdp/Asteroid -> project root
 ]
 project_root = None
 for root in possible_roots:
@@ -71,14 +71,15 @@ from fhdp.core.pipeline_model import (
     build_model_split_from_template_payload,
 )
 
-from fhdp.EdgePipe.super_neuron import SuperNeuronNetwork
-from fhdp.EdgePipe.partitioning import HybridPartitioning
-from fhdp.EdgePipe.device_mapping import NeuronDeviceMapping
-from fhdp.EdgePipe.pipeline_scheduler import PipelineScheduler
-from fhdp.EdgePipe.performance_analysis import PerformanceAnalyzer
+from fhdp.Asteroid.profiler import AsteroidProfiler
+from fhdp.Asteroid.planner import AsteroidPlanner
+from fhdp.Asteroid.worker import AsteroidWorker
+from fhdp.Asteroid.fault_tolerance import FaultToleranceManager
+from fhdp.Asteroid.scheduler import MicroBatchScheduler
+from fhdp.Asteroid.memory_model import MemoryModel
 
 # ---- Constants ----
-PIPELINE_ID = "edgepipe_jetson"
+PIPELINE_ID = "asteroid_jetson"
 DEFAULT_DEVICE0_ID = "agx"
 DEFAULT_DEVICE1_ID = "orin"
 DEFAULT_NUM_CLASSES = 10
@@ -99,7 +100,7 @@ ENABLE_ACTIVATION_LEP = True
 LEP_FP16_DTYPE = torch.float16
 LEP_LOG_INTERVAL = 10
 
-# ---- EdgePipe Configuration ----
+# ---- Asteroid Configuration ----
 DEFAULT_TOTAL_LAYERS = 6  # 1 input layer + 5 hidden layers
 DEFAULT_NEURONS_PER_LAYER = [784, 128, 128, 128, 128, 10]  # MNIST-like model
 
@@ -114,7 +115,7 @@ def _resolve_advertise_host(listen_host: str, advertise_host: Optional[str], ser
         return advertise_host
     if listen_host and listen_host not in {"0.0.0.0", "::"}:
         return listen_host
-    return EdgePipeJetsonDevice._get_local_ip(server_host)
+    return AsteroidJetsonDevice._get_local_ip(server_host)
 
 
 def _probe_endpoint(host: str, port: int, timeout: float = 2.0, label: str = "peer") -> bool:
@@ -248,9 +249,9 @@ def _build_capabilities(role: str) -> HardwareCapabilities:
         accelerated_compute=True
     )
 
-# ----------------- EdgePipe Server -----------------
+# ----------------- Asteroid Server -----------------
 
-class EdgePipeJetsonServer:
+class AsteroidJetsonServer:
     def __init__(self, host: str, port: int, device0_id: str, device1_id: str,
                  rounds: int, auto_exit: bool, micro_batches: int, template_id: str):
         self.host = host
@@ -275,39 +276,71 @@ class EdgePipeJetsonServer:
         self.bridge = PlatformBridge(_build_capabilities("server"), node_id="server")
         self.shutdown = False
 
-        # EdgePipe specific configuration
+        # Asteroid specific configuration
         self.total_layers = DEFAULT_TOTAL_LAYERS
         self.neurons_per_layer = DEFAULT_NEURONS_PER_LAYER
         self.total_devices = 2
+        self.global_batch_size = 2048
+        self.num_stages = 2
 
-        # Initialize EdgePipe components
-        self.partitioning = HybridPartitioning(self.total_layers, self.total_devices)
-        self.super_neuron_network = self.partitioning.perform_partitioning(self.neurons_per_layer)
-        
-        # Create device network (PRR matrix)
-        # Simulate good connectivity between devices
-        self.device_network = torch.eye(self.total_devices).numpy()
-        # Set high PRR between devices
-        self.device_network[0][1] = 0.95
-        self.device_network[1][0] = 0.95
+        # Initialize Asteroid components
+        # Create a simple model for profiling
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.features = nn.Sequential(
+                    nn.Linear(784, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, 10)
+                )
+            def forward(self, x):
+                return self.features(x)
 
-        # Optimize neuron to device mapping
-        self.mapping = NeuronDeviceMapping(self.super_neuron_network, self.device_network)
-        self.best_mapping = self.mapping.optimize_mapping(generations=1000)
+        model = SimpleModel()
+        input_shape = (32, 784)  # (batch_size, input_size)
 
-        # Create pipeline scheduler
-        self.scheduler = PipelineScheduler(self.super_neuron_network)
+        # Create profiler
+        self.profiler = AsteroidProfiler()
+        profiler_results = self.profiler.profile_model(model, input_shape)
+        bandwidth_matrix = self.profiler.profile_bandwidth([device0_id, device1_id])
 
-        # Create performance analyzer
-        self.analyzer = PerformanceAnalyzer(self.super_neuron_network)
+        # Add compute capabilities to profiler results
+        self.profiler.profiling_results['compute_capabilities'] = {
+            device0_id: 1.5,  # Orin is faster than Nano
+            device1_id: 1.0
+        }
 
-        print("[Server] EdgePipe initialized:")
+        # Device specifications
+        device_specs = {
+            device0_id: {"memory": 8 * 1024 * 1024 * 1024, "compute_capability": 1.5},
+            device1_id: {"memory": 2 * 1024 * 1024 * 1024, "compute_capability": 1.0}
+        }
+
+        # Create planner
+        self.planner = AsteroidPlanner(self.profiler.profiling_results, device_specs)
+        self.plan = self.planner.generate_plan(model, input_shape, self.global_batch_size, self.num_stages)
+
+        # Create fault tolerance manager
+        self.ft_manager = FaultToleranceManager([device0_id, device1_id])
+
+        print("[Server] Asteroid initialized:")
         print(f"  Total layers: {self.total_layers}")
-        print(f"  Neurons per layer: {self.neurons_per_layer}")
-        print(f"  Total devices: {self.total_devices}")
-        print(f"  M_layers: {self.partitioning.M_layers}")
-        print(f"  Best mapping: {self.best_mapping}")
-        print(f"  Performance summary: {self.analyzer.get_performance_summary(self.micro_batches)}")
+        print(f"  Global batch size: {self.global_batch_size}")
+        print(f"  Number of stages: {self.num_stages}")
+        print(f"  Total latency: {self.plan['total_latency']:.4f} seconds")
+        print("  Stages:")
+        for i, stage in enumerate(self.plan['stages']):
+            print(f"    Stage {i}:")
+            print(f"      Layers: {len(stage['layers'])} layers")
+            print(f"      Devices: {stage['devices']}")
+            print(f"      K_p: {stage['K_p']}")
+            print(f"      Micro-batch size: {stage['micro_batch_size']}")
 
     def start(self):
         self._register_handlers()
@@ -376,12 +409,7 @@ class EdgePipeJetsonServer:
                 "accepted": list(self.accepted),
                 "current_round": self.current_round,
                 "total_rounds": self.rounds,
-                "edgepipe_config": {
-                    "total_layers": self.total_layers,
-                    "neurons_per_layer": self.neurons_per_layer,
-                    "M_layers": self.partitioning.M_layers,
-                    "best_mapping": self.best_mapping
-                }
+                "asteroid_plan": self.plan
             },
             requires_ack=False
         )
@@ -421,14 +449,11 @@ class EdgePipeJetsonServer:
         template = get_pipeline_template(self.template_id, DEFAULT_TEMPLATE_ID)
         template_payload = serialize_template(template)
 
-        # Get EdgePipe configuration
-        edgepipe_config = {
-            "total_layers": self.total_layers,
-            "neurons_per_layer": self.neurons_per_layer,
-            "M_layers": self.partitioning.M_layers,
-            "layer_groups": self.partitioning.layer_groups,
-            "device_allocation": self.partitioning.device_allocation,
-            "best_mapping": self.best_mapping
+        # Get Asteroid configuration
+        asteroid_config = {
+            "global_batch_size": self.global_batch_size,
+            "num_stages": self.num_stages,
+            "plan": self.plan
         }
 
         invite = CrossPlatformMessage(
@@ -444,7 +469,7 @@ class EdgePipeJetsonServer:
                 "stages": ["device0", "device1"],
                 "resource_requirements": [r.value for r in template.resource_requirements],
                 "endpoints": endpoints,
-                "edgepipe_config": edgepipe_config
+                "asteroid_config": asteroid_config
             },
             requires_ack=False
         )
@@ -477,9 +502,9 @@ class EdgePipeJetsonServer:
         self.bridge.send_cross_platform_message(control)
         print(f"[Server] Sent start_round to {self.device0_id} (round {self.current_round}/{self.rounds})")
 
-# ----------------- EdgePipe Device -----------------
+# ----------------- Asteroid Device -----------------
 
-class EdgePipeJetsonDevice:
+class AsteroidJetsonDevice:
     def __init__(self, device_id: str, role: str, server_host: str, server_port: int,
                  device0_id: str, device1_id: str, listen_host: str, listen_port: int,
                  advertise_host: Optional[str] = None, rounds: int = DEFAULT_ROUNDS,
@@ -516,10 +541,9 @@ class EdgePipeJetsonDevice:
         self.current_template_id: Optional[str] = None
         self.current_split_key: Optional[str] = None
 
-        # EdgePipe specific configuration
-        self.edgepipe_config = None
-        self.super_neuron_network = None
-        self.assigned_super_neurons = []
+        # Asteroid specific configuration
+        self.asteroid_config = None
+        self.plan = None
 
         self.stage0: Optional[nn.Module] = None
         self.stage1: Optional[nn.Module] = None
@@ -728,9 +752,10 @@ class EdgePipeJetsonDevice:
         invite_ts = time.perf_counter()
         self._invite_received_at = invite_ts
 
-        # Get EdgePipe configuration
-        self.edgepipe_config = payload.get("edgepipe_config", {})
-        print(f"[{self.role}] EdgePipe config received: {self.edgepipe_config}")
+        # Get Asteroid configuration
+        self.asteroid_config = payload.get("asteroid_config", {})
+        self.plan = self.asteroid_config.get("plan", {})
+        print(f"[{self.role}] Asteroid config received: {self.asteroid_config}")
 
         template_payload = payload.get("template") or {"template_id": payload.get("template_id")}
         if self.model is None:
@@ -740,8 +765,8 @@ class EdgePipeJetsonDevice:
 
         vehicles = payload.get("vehicles", [])
         stages = payload.get("stages", [])
-        stage_map = {stages[i]: vehicles[i] for i in range(min(len(vehicles), len(stages)))}
-        vehicle_map = {vehicles[i]: stages[i] for i in range(min(len(vehicles), len(stages)))}
+        stage_map = {stages[i]: vehicles[i] for i in range(min(len(vehicles), len(stages)))}  # Fixed: use min() to avoid index out of range
+        vehicle_map = {vehicles[i]: stages[i] for i in range(min(len(vehicles), len(stages)))}  # Fixed: use min() to avoid index out of range
         self.device0_id = stage_map.get("device0", self.device0_id)
         self.device1_id = stage_map.get("device1", self.device1_id)
 
@@ -858,9 +883,9 @@ class EdgePipeJetsonDevice:
         if isinstance(nbytes, int):
             return nbytes
         if isinstance(value, dict):
-            return sum(EdgePipeJetsonDevice._estimate_payload_bytes(v) for v in value.values())
+            return sum(AsteroidJetsonDevice._estimate_payload_bytes(v) for v in value.values())
         if isinstance(value, (list, tuple)):
-            return sum(EdgePipeJetsonDevice._estimate_payload_bytes(v) for v in value)
+            return sum(AsteroidJetsonDevice._estimate_payload_bytes(v) for v in value)
         return 0
 
     def _get_round_metrics(self, round_num: int) -> Dict[str, Any]:
@@ -1271,10 +1296,6 @@ class EdgePipeJetsonDevice:
             assert self.optimizer is not None
             grad = self._to_tensor(grad_data, self.device, torch.float32)
 
-            with self._lock:
-                metrics = self._get_round_metrics(data.get("round", DEFAULT_ROUND))
-                metrics["grad_bytes_recv"] += self._estimate_payload_bytes(grad_data)
-
             round_num = data.get("round", DEFAULT_ROUND)
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
             micro_batches = data.get("micro_batches", self.micro_batches)
@@ -1353,7 +1374,7 @@ def signal_handler(signum, frame):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="EdgePipe Jetson Implementation (Two Jetson devices)")
+    parser = argparse.ArgumentParser(description="Asteroid Jetson Implementation (Two Jetson devices)")
     parser.add_argument("--mode", required=True, choices=["server", "device", "validate"], help="server, device, or validate")
     parser.add_argument("--host", default="0.0.0.0", help="server host")
     parser.add_argument("--port", type=int, default=5000, help="server port")
@@ -1376,7 +1397,6 @@ def main():
     parser.add_argument("--image-size", type=int, default=DEFAULT_IMAGE_SIZE, help="input image size")
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="dataset root directory")
     parser.add_argument("--download", action="store_true", help="download CIFAR-10 if missing")
-    parser.add_argument("--eval-batches", type=int, default=DEFAULT_EVAL_BATCHES, help="eval batches per round (0 to disable)")
     parser.add_argument("--auto-exit", action="store_true", help="exit after completing all rounds")
     parser.add_argument("--listen-host", default="0.0.0.0", help="device listen host for peer pipeline data")
     parser.add_argument("--listen-port", type=int, default=0, help="device listen port for peer pipeline data")
@@ -1391,7 +1411,7 @@ def main():
         return
 
     if args.mode == "server":
-        server = EdgePipeJetsonServer(
+        server = AsteroidJetsonServer(
             args.host,
             args.port,
             args.device0_id,
@@ -1413,7 +1433,7 @@ def main():
         if args.listen_port == 0:
             args.listen_port = 6000 if args.role == "device0" else 6001
 
-        device = EdgePipeJetsonDevice(
+        device = AsteroidJetsonDevice(
             args.device_id,
             args.role,
             args.server_host,
@@ -1430,8 +1450,7 @@ def main():
             download=args.download,
             dataset=args.dataset,
             image_size=args.image_size,
-            num_classes=args.num_classes,
-            eval_batches=args.eval_batches
+            num_classes=args.num_classes
         )
         device.start()
         try:

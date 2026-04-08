@@ -77,19 +77,63 @@ python -m fhdp.EdgePipe.example
 
 ### Usage
 
-#### 1. Start the Server (coordination only)
+#### Using Run Scripts (Recommended)
+
+We provide convenient run scripts for both Linux/macOS and Windows environments to simplify the deployment process.
+
+##### Linux/macOS (run_edgepipe_jetson.sh)
+
+```bash
+# Start server
+./run_edgepipe_jetson.sh server
+
+# Start device0 (Jetson Orin)
+./run_edgepipe_jetson.sh device0 --server-host <server-ip>
+
+# Start device1 (Jetson Nano)
+./run_edgepipe_jetson.sh device1 --server-host <server-ip>
+
+# Check system status
+./run_edgepipe_jetson.sh status
+
+# Clean up processes
+./run_edgepipe_jetson.sh cleanup
+```
+
+##### Windows (run_edgepipe_jetson.bat)
+
+```batch
+:: Start server
+run_edgepipe_jetson.bat server
+
+:: Start device0 (Jetson Orin)
+run_edgepipe_jetson.bat device0 --server-host <server-ip>
+
+:: Start device1 (Jetson Nano)
+run_edgepipe_jetson.bat device1 --server-host <server-ip>
+
+:: Check system status
+run_edgepipe_jetson.bat status
+
+:: Clean up processes
+run_edgepipe_jetson.bat cleanup
+```
+
+#### Direct Command Usage
+
+##### 1. Start the Server (coordination only)
 
 ```bash
 python -m fhdp.EdgePipe.edgepipe_jetson --mode server --host 0.0.0.0 --port 5000
 ```
 
-#### 2. Start Device 0 (Jetson Orin)
+##### 2. Start Device 0 (Jetson Orin)
 
 ```bash
 python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device0 --device-id orin --server-host <server-ip> --server-port 5000
 ```
 
-#### 3. Start Device 1 (Jetson Nano)
+##### 3. Start Device 1 (Jetson Nano)
 
 ```bash
 python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device1 --device-id nano --server-host <server-ip> --server-port 5000
