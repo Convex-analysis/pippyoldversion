@@ -3,19 +3,19 @@
 EdgePipe Jetson Implementation (Two Jetson devices)
 
 Fixed topology:
-- Device0 (Jetson Orin)  : handles super neurons covering early layers
-- Device1 (Jetson Nano) : handles super neurons covering later layers
-- Server                : coordinate only (no compute)
+- Device0 (stronger Jetson) : handles super neurons covering early layers
+- Device1 (weaker Jetson)  : handles super neurons covering later layers
+- Server                   : coordinate only (no compute)
 
 Usage:
   # Server (coordination only)
   python -m fhdp.EdgePipe.edgepipe_jetson --mode server --host 0.0.0.0 --port 5000
 
-  # Device0 (Jetson Orin)
-  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device0 --device-id orin --server-host <server-ip> --server-port 5000
+  # Device0
+  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device0 --device-id agx --server-host <server-ip> --server-port 5000
 
-  # Device1 (Jetson Nano)
-  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device1 --device-id nano --server-host <server-ip> --server-port 5000
+  # Device1
+  python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device1 --device-id orin --server-host <server-ip> --server-port 5000
 """
 
 import os
@@ -201,7 +201,18 @@ def _build_eval_loader(
     return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download, train=False)
 
 
-def _build_capabilities(role: str) -> HardwareCapabilities:
+def _resolve_platform_from_device_id(device_id: Optional[str], role: str) -> HardwarePlatform:
+    name = (device_id or "").lower()
+    if "agx" in name or "xavier" in name:
+        return HardwarePlatform.JETSON_XAVIER
+    if "orin" in name:
+        return HardwarePlatform.JETSON_ORIN
+    if "nano" in name:
+        return HardwarePlatform.JETSON_NANO
+    return HardwarePlatform.JETSON_ORIN if role == "device0" else HardwarePlatform.JETSON_NANO
+
+
+def _build_capabilities(role: str, device_id: Optional[str] = None) -> HardwareCapabilities:
     if role == "server":
         return HardwareCapabilities(
             platform=HardwarePlatform.X86_LINUX,
@@ -217,7 +228,24 @@ def _build_capabilities(role: str) -> HardwareCapabilities:
             thermal_limit=95.0,
             accelerated_compute=True
         )
-    if role == "device0":
+
+    platform = _resolve_platform_from_device_id(device_id, role)
+    if platform == HardwarePlatform.JETSON_XAVIER:
+        return HardwareCapabilities(
+            platform=HardwarePlatform.JETSON_XAVIER,
+            compute_capability=ComputeCapability.EDGE_AI,
+            cpu_cores=8,
+            cpu_freq=2.0,
+            memory_total=32.0,
+            gpu_memory=16.0,
+            npu_memory=2.0,
+            storage_speed='emmc',
+            network_speed=10000.0,
+            power_profile='high_performance',
+            thermal_limit=90.0,
+            accelerated_compute=True
+        )
+    if platform == HardwarePlatform.JETSON_ORIN:
         return HardwareCapabilities(
             platform=HardwarePlatform.JETSON_ORIN,
             compute_capability=ComputeCapability.EDGE_AI,
@@ -232,7 +260,6 @@ def _build_capabilities(role: str) -> HardwareCapabilities:
             thermal_limit=85.0,
             accelerated_compute=True
         )
-    # device1
     return HardwareCapabilities(
         platform=HardwarePlatform.JETSON_NANO,
         compute_capability=ComputeCapability.EDGE_AI,
@@ -533,7 +560,7 @@ class EdgePipeJetsonDevice:
             protocol=TransportProtocol.TCP,
             compression=CompressionType.NONE
         )
-        self.bridge = PlatformBridge(_build_capabilities(role), node_id=device_id)
+        self.bridge = PlatformBridge(_build_capabilities(role, device_id=device_id), node_id=device_id)
 
         self.sequence_id_factory = SequenceIdFactory(PIPELINE_ID)
         self.sequence_registry = SequenceHandlerRegistry(
