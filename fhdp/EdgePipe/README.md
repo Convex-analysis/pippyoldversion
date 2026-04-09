@@ -160,6 +160,9 @@ python -m fhdp.EdgePipe.edgepipe_jetson --mode device --role device1 --device-id
 | --image-size | Input image size | 224 |
 | --data-dir | Dataset root directory | ./data |
 | --download | Download CIFAR-10 if missing | False |
+| --eval-batches | Eval batches per round (0 to disable) | 4 |
+| --save-every | Save checkpoint every N rounds (0 to disable) | 1 |
+| --save-dir | Checkpoint output directory | logs/checkpoints/edgepipe_jetson |
 | --auto-exit | Exit after completing all rounds | False |
 | --listen-host | Device listen host for peer pipeline data | 0.0.0.0 |
 | --listen-port | Device listen port for peer pipeline data | 6000 (device0), 6001 (device1) |

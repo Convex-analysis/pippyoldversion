@@ -83,9 +83,9 @@ DEFAULT_DEVICE0_ID = "agx"
 DEFAULT_DEVICE1_ID = "orin"
 DEFAULT_NUM_CLASSES = 10
 DEFAULT_IMAGE_SIZE = 224
-DEFAULT_BATCH_SIZE = 64
+DEFAULT_BATCH_SIZE = 12
 DEFAULT_ROUND = 10
-DEFAULT_ROUNDS = 1
+DEFAULT_ROUNDS = 10
 DEFAULT_MICRO_BATCH = 4
 DEFAULT_MICRO_BATCHES = 4
 DEFAULT_DATA_DIR = os.path.join(script_dir, "data")
@@ -93,6 +93,8 @@ DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
 DEFAULT_DATASET = "cifar10"
 DEFAULT_ROUND_TIMEOUT_SEC = 300
 DEFAULT_EVAL_BATCHES = 4
+DEFAULT_SAVE_EVERY = 1
+DEFAULT_CHECKPOINT_DIR = os.path.join(project_root or script_dir, "logs", "checkpoints", "edgepipe_jetson")
 
 # ---- LEP / activation compression ----
 ENABLE_ACTIVATION_LEP = True
@@ -513,7 +515,8 @@ class EdgePipeJetsonDevice:
                  auto_exit: bool = False, micro_batches: int = DEFAULT_MICRO_BATCHES,
                  data_dir: str = DEFAULT_DATA_DIR, download: bool = False,
                  dataset: str = DEFAULT_DATASET, image_size: int = DEFAULT_IMAGE_SIZE,
-                 num_classes: int = DEFAULT_NUM_CLASSES, eval_batches: int = DEFAULT_EVAL_BATCHES):
+                 num_classes: int = DEFAULT_NUM_CLASSES, eval_batches: int = DEFAULT_EVAL_BATCHES,
+                 save_every: int = DEFAULT_SAVE_EVERY, save_dir: str = DEFAULT_CHECKPOINT_DIR):
         self.device_id = device_id
         self.role = role
         self.server_host = server_host
@@ -534,6 +537,8 @@ class EdgePipeJetsonDevice:
         self.image_size = int(image_size)
         self.num_classes = int(num_classes)
         self.eval_batches = max(0, int(eval_batches))
+        self.save_every = max(0, int(save_every))
+        self.save_dir = save_dir
         self.device = _get_device()
         self._timing_start = time.perf_counter()
         self._invite_received_at: Optional[float] = None
@@ -614,6 +619,31 @@ class EdgePipeJetsonDevice:
         for key, value in stats.items():
             parts.append(f"{key}={value:.2f}MB")
         print(" ".join(parts))
+
+    def _should_save_round(self, round_num: int) -> bool:
+        return self.save_every > 0 and round_num % self.save_every == 0
+
+    def _save_checkpoint(self, round_num: int) -> None:
+        if not self._should_save_round(round_num):
+            return
+        if self.model is None:
+            return
+        os.makedirs(self.save_dir, exist_ok=True)
+        ckpt_path = os.path.join(
+            self.save_dir,
+            f"{PIPELINE_ID}_{self.role}_round{round_num}.pth"
+        )
+        payload = {
+            "pipeline_id": PIPELINE_ID,
+            "round": round_num,
+            "role": self.role,
+            "device_id": self.device_id,
+            "template_id": self.current_template_id,
+            "split_key": self.current_split_key,
+            "model_state": self.model.state_dict()
+        }
+        torch.save(payload, ckpt_path)
+        print(f"[{self.role}] Saved checkpoint: {ckpt_path}")
 
     def _preload_model_if_needed(self) -> None:
         if self.model is not None:
@@ -1209,6 +1239,7 @@ class EdgePipeJetsonDevice:
                     state["received"] += 1
                     if state["received"] >= state["expected"]:
                         self.optimizer.step()
+                        self._save_checkpoint(round_num)
                         self._round_state.pop(round_num, None)
                         metrics = self._get_round_metrics(round_num)
                         comm_sent = metrics.get("grad_bytes_sent", 0)
@@ -1325,6 +1356,7 @@ class EdgePipeJetsonDevice:
                 state["received"] += 1
                 if state["received"] >= state["expected"]:
                     self.optimizer.step()
+                    self._save_checkpoint(round_num)
                     state["done"] = True
                     print("[device0] Applied all gradients and updated weights")
 
@@ -1404,6 +1436,8 @@ def main():
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="dataset root directory")
     parser.add_argument("--download", action="store_true", help="download CIFAR-10 if missing")
     parser.add_argument("--eval-batches", type=int, default=DEFAULT_EVAL_BATCHES, help="eval batches per round (0 to disable)")
+    parser.add_argument("--save-every", type=int, default=DEFAULT_SAVE_EVERY, help="save checkpoint every N rounds (0 to disable)")
+    parser.add_argument("--save-dir", default=DEFAULT_CHECKPOINT_DIR, help="checkpoint output directory")
     parser.add_argument("--auto-exit", action="store_true", help="exit after completing all rounds")
     parser.add_argument("--listen-host", default="0.0.0.0", help="device listen host for peer pipeline data")
     parser.add_argument("--listen-port", type=int, default=0, help="device listen port for peer pipeline data")
@@ -1458,7 +1492,9 @@ def main():
             dataset=args.dataset,
             image_size=args.image_size,
             num_classes=args.num_classes,
-            eval_batches=args.eval_batches
+            eval_batches=args.eval_batches,
+            save_every=args.save_every,
+            save_dir=args.save_dir
         )
         device.start()
         try:
