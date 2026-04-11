@@ -97,7 +97,7 @@ DEFAULT_SAVE_EVERY = 1
 DEFAULT_CHECKPOINT_DIR = os.path.join(project_root or script_dir, "logs", "checkpoints", "edgepipe_jetson")
 
 # ---- LEP / activation compression ----
-ENABLE_ACTIVATION_LEP = True
+ENABLE_ACTIVATION_LEP = False
 LEP_FP16_DTYPE = torch.float16
 LEP_LOG_INTERVAL = 10
 

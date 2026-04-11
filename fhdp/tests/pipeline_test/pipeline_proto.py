@@ -84,17 +84,19 @@ DEFAULT_STAGE0_ID = "agx"
 DEFAULT_STAGE1_ID = "orin"
 DEFAULT_NUM_CLASSES = 10
 DEFAULT_IMAGE_SIZE = 224
-DEFAULT_BATCH_SIZE = 16
-DEFAULT_ROUND = 1
-DEFAULT_ROUNDS = 1
-DEFAULT_MICRO_BATCH = 0
-DEFAULT_MICRO_BATCHES = 1
+DEFAULT_BATCH_SIZE = 12
+DEFAULT_ROUND = 10
+DEFAULT_ROUNDS = 10
+DEFAULT_MICRO_BATCH = 4
+DEFAULT_MICRO_BATCHES = 4
 DEFAULT_DATA_DIR = os.path.join(script_dir, "data")
 DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
 DEFAULT_DATASET = "cifar10"
 DEFAULT_TINY_IMAGENET_URL = "https://cs231n.stanford.edu/tiny-imagenet-200.zip"
 DEFAULT_TINY_IMAGENET_DIR = "tiny-imagenet-200"
 DEFAULT_EVAL_BATCHES = 4
+DEFAULT_SAVE_EVERY = 1
+DEFAULT_CHECKPOINT_DIR = os.path.join(project_root or script_dir, "logs", "checkpoints", "pipeline_proto")
 
 # ---- LEP / activation compression (Plan A: FP16 + residual) ----
 ENABLE_ACTIVATION_LEP = True
@@ -554,7 +556,8 @@ class PipelineProtoVehicle:
                  num_classes: int = DEFAULT_NUM_CLASSES,
                  tiny_imagenet_url: str = DEFAULT_TINY_IMAGENET_URL,
                  tiny_imagenet_dir: str = DEFAULT_TINY_IMAGENET_DIR,
-                 eval_batches: int = DEFAULT_EVAL_BATCHES):
+                 eval_batches: int = DEFAULT_EVAL_BATCHES,
+                 save_every: int = DEFAULT_SAVE_EVERY, save_dir: str = DEFAULT_CHECKPOINT_DIR):
         self.vehicle_id = vehicle_id
         self.role = role
         self.server_host = server_host
@@ -577,6 +580,8 @@ class PipelineProtoVehicle:
         self.tiny_imagenet_url = tiny_imagenet_url
         self.tiny_imagenet_dir = tiny_imagenet_dir
         self.eval_batches = max(0, int(eval_batches))
+        self.save_every = max(0, int(save_every))
+        self.save_dir = save_dir
         self.device = _get_device()
         self._timing_start = time.perf_counter()
         self._invite_received_at: Optional[float] = None
@@ -651,6 +656,31 @@ class PipelineProtoVehicle:
         for key, value in stats.items():
             parts.append(f"{key}={value:.2f}MB")
         print(" ".join(parts))
+
+    def _should_save_round(self, round_num: int) -> bool:
+        return self.save_every > 0 and round_num % self.save_every == 0
+
+    def _save_checkpoint(self, round_num: int) -> None:
+        if not self._should_save_round(round_num):
+            return
+        if self.model is None:
+            return
+        os.makedirs(self.save_dir, exist_ok=True)
+        ckpt_path = os.path.join(
+            self.save_dir,
+            f"{PIPELINE_ID}_{self.role}_round{round_num}.pth"
+        )
+        payload = {
+            "pipeline_id": PIPELINE_ID,
+            "round": round_num,
+            "role": self.role,
+            "device_id": self.vehicle_id,
+            "template_id": self.current_template_id,
+            "split_key": self.current_split_key,
+            "model_state": self.model.state_dict()
+        }
+        torch.save(payload, ckpt_path)
+        print(f"[{self.role}] Saved checkpoint: {ckpt_path}")
 
     def _preload_model_if_needed(self) -> None:
         if self.model is not None:
@@ -883,6 +913,28 @@ class PipelineProtoVehicle:
                 return value["data"]
         return value
 
+    @staticmethod
+    def _to_tensor(value, device: str, dtype: torch.dtype) -> torch.Tensor:
+        if isinstance(value, torch.Tensor):
+            tensor = value.detach()
+            if tensor.dtype != dtype:
+                tensor = tensor.to(dtype=dtype)
+            if device:
+                tensor = tensor.to(device)
+            return tensor
+        return torch.as_tensor(value, device=device, dtype=dtype)
+
+    @staticmethod
+    def _pack_tensor_for_send(value):
+        if isinstance(value, torch.Tensor):
+            return value.detach().to("cpu")
+        if isinstance(value, dict):
+            return {k: PipelineProtoVehicle._pack_tensor_for_send(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            packed = [PipelineProtoVehicle._pack_tensor_for_send(v) for v in value]
+            return tuple(packed) if isinstance(value, tuple) else packed
+        return value
+
     def _run_stage0_round(self, round_num: int, micro_batch: int, micro_batches: int):
         total_micro_batches = max(1, int(micro_batches))
         loader = _build_data_loader(
@@ -898,6 +950,8 @@ class PipelineProtoVehicle:
         images, labels = next(iter(loader))
         images = images.to(self.device)
         labels = labels.to(self.device)
+        round_start = time.perf_counter()
+        total_images = int(images.size(0))
 
         assert self.model is not None
         assert self.optimizer is not None
@@ -933,6 +987,8 @@ class PipelineProtoVehicle:
                 ENABLE_ACTIVATION_LEP,
                 LEP_FP16_DTYPE,
             )
+            activation_payload = self._pack_tensor_for_send(activation_payload)
+            labels_payload = self._pack_tensor_for_send(lbl_mb)
 
             pipeline_msg = PipelineMessage(
                 pipeline_id=PIPELINE_ID,
@@ -942,7 +998,7 @@ class PipelineProtoVehicle:
                 data={
                     "activation": activation_payload,
                     "activation_info": activation_info,
-                    "labels": lbl_mb.detach(),
+                    "labels": labels_payload,
                     "round": round_num,
                     "micro_batch": micro_idx,
                     "micro_batches": total_micro_batches
@@ -983,6 +1039,7 @@ class PipelineProtoVehicle:
             )
 
         print(f"[stage0] 1F1B cooldown: waiting for gradients (round {round_num})")
+        wait_started = time.perf_counter()
         with self._lock:
             cond = self._round_cond.get(round_num)
             while not shutdown_requested and not self._round_state.get(round_num, {}).get("done"):
@@ -992,6 +1049,20 @@ class PipelineProtoVehicle:
                     break
             self._round_state.pop(round_num, None)
             self._round_cond.pop(round_num, None)
+        round_end = time.perf_counter()
+        wait_time = max(0.0, round_end - wait_started)
+        round_time = round_end - round_start
+        if round_time > 0:
+            throughput = total_images / round_time
+            wait_ratio = (wait_time / round_time) * 100.0
+            print(
+                f"[stage0][METRICS] round={round_num} time_sec={round_time:.2f} "
+                f"throughput_img_s={throughput:.2f} images={total_images}"
+            )
+            print(
+                f"[stage0][METRICS] network_wait_ratio={wait_ratio:.2f}% "
+                f"wait_time_sec={wait_time:.2f}"
+            )
         print(f"[stage0] 1F1B cooldown: gradients complete (round {round_num})")
         if self.eval_batches > 0:
             self._run_eval_round(round_num)
@@ -1024,6 +1095,9 @@ class PipelineProtoVehicle:
             with torch.no_grad():
                 activation = self.model(images)
 
+            activation_payload = self._pack_tensor_for_send(activation)
+            labels_payload = self._pack_tensor_for_send(labels)
+
             seq_id = self.sequence_id_factory.make(round_num, "eval", eval_idx)
             pipeline_msg = PipelineMessage(
                 pipeline_id=PIPELINE_ID,
@@ -1031,9 +1105,9 @@ class PipelineProtoVehicle:
                 source_id=self.vehicle_id,
                 target_id=self.stage1_id,
                 data={
-                    "activation": activation.detach(),
+                    "activation": activation_payload,
                     "activation_info": {"lep_enabled": False},
-                    "labels": labels.detach(),
+                    "labels": labels_payload,
                     "round": round_num,
                     "eval": True,
                     "eval_batch": eval_idx,
@@ -1109,13 +1183,14 @@ class PipelineProtoVehicle:
             grad = activation.grad.detach()
             seq_id = self.sequence_id_factory.make(round_num, "gradient", micro_batch)
 
+            grad_payload = self._pack_tensor_for_send(grad)
             grad_msg = PipelineMessage(
                 pipeline_id=PIPELINE_ID,
                 stage_id="stage1",
                 source_id=self.vehicle_id,
                 target_id=self.stage0_id,
                 data={
-                    "grad": grad,
+                    "grad": grad_payload,
                     "round": round_num,
                     "micro_batch": micro_batch,
                     "micro_batches": micro_batches
@@ -1144,6 +1219,7 @@ class PipelineProtoVehicle:
                     state["received"] += 1
                     if state["received"] >= state["expected"]:
                         self.optimizer.step()
+                        self._save_checkpoint(round_num)
                         self._round_state.pop(round_num, None)
                         if self.auto_exit:
                             self.completed_rounds += 1
@@ -1167,8 +1243,8 @@ class PipelineProtoVehicle:
             round_num = data.get("round", DEFAULT_ROUND)
             activation_data = self._unwrap_tensor_payload(data["activation"])
             labels_data = self._unwrap_tensor_payload(data["labels"])
-            activation = torch.tensor(activation_data, device=self.device, dtype=torch.float32)
-            labels = torch.tensor(labels_data, device=self.device, dtype=torch.long)
+            activation = self._to_tensor(activation_data, self.device, torch.float32)
+            labels = self._to_tensor(labels_data, self.device, torch.long)
 
             with torch.no_grad():
                 outputs = self.model(activation)
@@ -1224,7 +1300,7 @@ class PipelineProtoVehicle:
 
             assert self.model is not None
             assert self.optimizer is not None
-            grad = torch.tensor(grad_data, device=self.device, dtype=torch.float32)
+            grad = self._to_tensor(grad_data, self.device, torch.float32)
 
             round_num = data.get("round", DEFAULT_ROUND)
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
@@ -1249,6 +1325,7 @@ class PipelineProtoVehicle:
                 state["received"] += 1
                 if state["received"] >= state["expected"]:
                     self.optimizer.step()
+                    self._save_checkpoint(round_num)
                     state["done"] = True
                     print("[stage0] Applied all gradients and updated weights")
 
@@ -1329,6 +1406,8 @@ def main():
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="dataset root directory")
     parser.add_argument("--download", action="store_true", help="download CIFAR-10 if missing")
     parser.add_argument("--eval-batches", type=int, default=DEFAULT_EVAL_BATCHES, help="eval batches per round (0 to disable)")
+    parser.add_argument("--save-every", type=int, default=DEFAULT_SAVE_EVERY, help="save checkpoint every N rounds (0 to disable)")
+    parser.add_argument("--save-dir", default=DEFAULT_CHECKPOINT_DIR, help="checkpoint output directory")
     parser.add_argument(
         "--tiny-imagenet-url",
         default=DEFAULT_TINY_IMAGENET_URL,
@@ -1403,7 +1482,9 @@ def main():
             num_classes=args.num_classes,
             tiny_imagenet_url=args.tiny_imagenet_url,
             tiny_imagenet_dir=args.tiny_imagenet_dir,
-            eval_batches=args.eval_batches
+            eval_batches=args.eval_batches,
+            save_every=args.save_every,
+            save_dir=args.save_dir
         )
         vehicle.start()
         try:
