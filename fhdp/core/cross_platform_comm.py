@@ -108,9 +108,10 @@ class SerializationFormat(Enum):
 class SerializationManager:
     """Manages serialization/deserialization with automatic backend selection"""
     
-    def __init__(self, default_format: SerializationFormat = SerializationFormat.JSON):
+    def __init__(self, default_format: SerializationFormat = SerializationFormat.PICKLE):
         self.default_format = default_format
         self._setup_serializers()
+        self._setup_zero_copy_serializers()
     
     def _setup_serializers(self):
         # Setup JSON serializers
@@ -138,9 +139,126 @@ class SerializationManager:
                 self.binary_loads = msgpack.unpackb
                 self.binary_available = True
     
+    def _setup_zero_copy_serializers(self):
+        """Setup zero-copy serializers for tensors"""
+        self.zero_copy_available = False
+        try:
+            import numpy as np
+            self.np_available = True
+            self.zero_copy_available = True
+        except ImportError:
+            self.np_available = False
+            self.zero_copy_available = False
+    
+    def serialize_tensor_zero_copy(self, tensor: torch.Tensor) -> bytes:
+        """Zero-copy serialization for tensors"""
+        if not self.zero_copy_available:
+            return self.pickle_dumps(tensor)
+        
+        try:
+            # Convert tensor to numpy array (zero-copy if possible)
+            array = tensor.detach().cpu().numpy()
+            # Store shape and dtype information
+            shape = array.shape
+            dtype = str(array.dtype)
+            # Convert to bytes
+            data = array.tobytes()
+            # Create header with shape and dtype
+            header = f"{shape}:{dtype}:"
+            header_bytes = header.encode('utf-8')
+            # Combine header and data
+            return header_bytes + data
+        except Exception as e:
+            logging.warning(f"Zero-copy serialization failed: {e}, falling back to pickle")
+            return self.pickle_dumps(tensor)
+    
+    def deserialize_tensor_zero_copy(self, data: bytes) -> torch.Tensor:
+        """Zero-copy deserialization for tensors"""
+        if not self.zero_copy_available:
+            return self.pickle_loads(data)
+        
+        try:
+            # Find header delimiter
+            delimiter = b':' 
+            parts = data.split(delimiter, 2)
+            if len(parts) != 3:
+                return self.pickle_loads(data)
+            
+            # Parse shape
+            shape_str = parts[0].decode('utf-8')
+            shape = tuple(map(int, shape_str.strip('()').split(',')))
+            
+            # Parse dtype
+            dtype_str = parts[1].decode('utf-8')
+            
+            # Get data
+            tensor_data = parts[2]
+            
+            # Convert back to numpy array
+            import numpy as np
+            array = np.frombuffer(tensor_data, dtype=dtype_str)
+            array = array.reshape(shape)
+            
+            # Convert to tensor
+            return torch.from_numpy(array)
+        except Exception as e:
+            logging.warning(f"Zero-copy deserialization failed: {e}, falling back to pickle")
+            return self.pickle_loads(data)
+    
+    def serialize_batch(self, messages: List[Any], format: Optional[SerializationFormat] = None) -> bytes:
+        """Serialize multiple messages in a batch"""
+        format = format or self.default_format
+        
+        if format == SerializationFormat.PICKLE:
+            return self.pickle_dumps(messages)
+        elif format == SerializationFormat.MSGPACK and self.binary_available:
+            return self.binary_dumps(messages, default=str)
+        else:
+            return self.json_dumps(messages).encode('utf-8')
+    
+    def deserialize_batch(self, data: bytes, format: Optional[SerializationFormat] = None) -> List[Any]:
+        """Deserialize multiple messages from a batch"""
+        if format is None:
+            # Try to detect format
+            try:
+                # First try JSON
+                return self.json_loads(data)
+            except Exception:
+                # Then try msgpack if available
+                if self.binary_available:
+                    try:
+                        return self.binary_loads(data)
+                    except Exception:
+                        pass
+                # Then try pickle
+                try:
+                    return self.pickle_loads(data)
+                except Exception:
+                    pass
+                # Last resort: return as list with one item
+                return [data.decode('utf-8', errors='ignore')]
+        
+        if format == SerializationFormat.JSON:
+            return self.json_loads(data)
+        elif format == SerializationFormat.MSGPACK and self.binary_available:
+            return self.binary_loads(data)
+        elif format == SerializationFormat.PICKLE:
+            return self.pickle_loads(data)
+        else:
+            # Fallback to auto-detect
+            return self.deserialize_batch(data, None)
+    
     def serialize(self, data: Any, format: Optional[SerializationFormat] = None) -> bytes:
         """Serialize data using the specified format"""
         format = format or self.default_format
+        
+        # Check if data is a torch tensor and use zero-copy serialization if possible
+        try:
+            import torch
+            if isinstance(data, torch.Tensor):
+                return self.serialize_tensor_zero_copy(data)
+        except ImportError:
+            pass
         
         if format == SerializationFormat.JSON:
             return self.json_dumps(data).encode('utf-8')
@@ -157,7 +275,19 @@ class SerializationManager:
         if format is None:
             # Try to detect format
             try:
-                # First try JSON
+                # First check if it's a zero-copy serialized tensor
+                try:
+                    import torch
+                    # Check if data starts with a shape tuple followed by dtype
+                    if b':' in data:
+                        first_part = data.split(b':', 1)[0]
+                        if first_part.startswith(b'('):
+                            # This might be a zero-copy serialized tensor
+                            return self.deserialize_tensor_zero_copy(data)
+                except ImportError:
+                    pass
+                
+                # Then try JSON
                 return self.json_loads(data)
             except Exception:
                 # Then try msgpack if available
@@ -193,7 +323,7 @@ class NetworkEndpoint:
     ssl_enabled: bool = False
     ssl_context: Optional[ssl.SSLContext] = None
     compression: CompressionType = CompressionType.ZLIB
-    serialization_format: SerializationFormat = SerializationFormat.JSON
+    serialization_format: SerializationFormat = SerializationFormat.PICKLE
 
 @dataclass
 class MessageMetrics:
@@ -250,7 +380,7 @@ class CrossPlatformMessage:
     requires_ack: bool = True
     priority: int = 0
     compression_type: CompressionType = CompressionType.ZLIB
-    serialization_format: SerializationFormat = SerializationFormat.JSON
+    serialization_format: SerializationFormat = SerializationFormat.PICKLE
 
     def _serialize_payload(self, obj: Any) -> Any:
         """递归序列化 payload，处理 Tensor 等不可 JSON 序列化的对象"""
@@ -284,9 +414,8 @@ class CrossPlatformMessage:
         data = asdict(self)
         data['compression_type'] = self.compression_type.value
         data['serialization_format'] = self.serialization_format.value
-        if self.serialization_format == SerializationFormat.PICKLE:
-            data['payload'] = data['payload']
-        else:
+        # Only serialize payload if not using Pickle (Pickle handles tensors directly)
+        if self.serialization_format != SerializationFormat.PICKLE:
             data['payload'] = self._serialize_payload(data['payload'])
         return data
 
@@ -319,7 +448,7 @@ class BatchMessage:
     timestamp: float = field(default_factory=time.time)
     batch_size: int = field(default=0)
     compression_type: CompressionType = CompressionType.ZLIB
-    serialization_format: SerializationFormat = SerializationFormat.JSON
+    serialization_format: SerializationFormat = SerializationFormat.PICKLE
     
     def __post_init__(self):
         if self.batch_size == 0:
@@ -371,7 +500,7 @@ class PipelineMessage:
     timestamp: float = field(default_factory=time.time)
     requires_ack: bool = True
     compression_type: CompressionType = CompressionType.ZLIB
-    serialization_format: SerializationFormat = SerializationFormat.JSON
+    serialization_format: SerializationFormat = SerializationFormat.PICKLE
     
     def __post_init__(self):
         # Add pipeline-specific metadata
@@ -387,7 +516,9 @@ class PipelineMessage:
         """Specialized serialization for pipeline data"""
         try:
             if self.serialization_format == SerializationFormat.PICKLE:
+                # For Pickle, we can directly return the object, including tensors
                 return obj
+            # For non-Pickle formats, we need to convert tensors to serializable formats
             if hasattr(obj, 'tolist'):  # numpy array or torch tensor
                 # Pipeline data often contains large tensors, so we need efficient serialization
                 import numpy as np
@@ -397,7 +528,7 @@ class PipelineMessage:
                         '__tensor_metadata__': True,
                         'shape': obj.shape,
                         'dtype': str(obj.dtype),
-                        'data': obj.tolist()  # Still convert to list for now
+                        'data': obj.tolist()  # Convert to list for non-Pickle formats
                     }
                 return obj.tolist()
             elif isinstance(obj, dict):
@@ -418,7 +549,9 @@ class PipelineMessage:
         data = asdict(self)
         data['compression_type'] = self.compression_type.value
         data['serialization_format'] = self.serialization_format.value
-        data['data'] = self._serialize_data(data['data'])
+        # Only serialize data if not using Pickle (Pickle handles tensors directly)
+        if self.serialization_format != SerializationFormat.PICKLE:
+            data['data'] = self._serialize_data(data['data'])
         return data
     
     @classmethod
@@ -527,16 +660,27 @@ class PipelineCommunicationManager:
             msg_len = len(serialized_data).to_bytes(4, byteorder='big')
             conn.sendall(msg_len + serialized_data)
             
-            # Send ACK if requested
+            # Non-blocking ACK handling if requested
             if cp_message.requires_ack:
-                with recv_lock:
-                    ack_len_data = self.message_router._recv_exact(conn, 4)
-                    if not ack_len_data:
-                        return False
-                    ack_length = int.from_bytes(ack_len_data, byteorder='big')
-                    ack_data = self.message_router._recv_exact(conn, ack_length)
-                    if not ack_data:
-                        return False
+                # Start a thread to handle ACK to avoid blocking the main thread
+                def handle_ack():
+                    try:
+                        with recv_lock:
+                            ack_len_data = self.message_router._recv_exact(conn, 4, timeout=2.0)
+                            if not ack_len_data:
+                                logging.warning(f"Failed to receive ACK for pipeline message {cp_message.message_id}")
+                            else:
+                                ack_length = int.from_bytes(ack_len_data, byteorder='big')
+                                ack_data = self.message_router._recv_exact(conn, ack_length, timeout=2.0)
+                                if not ack_data:
+                                    logging.warning(f"Failed to receive ACK data for pipeline message {cp_message.message_id}")
+                    except Exception as e:
+                        logging.warning(f"Error handling ACK: {e}")
+                
+                # Start ACK handling thread
+                import threading
+                ack_thread = threading.Thread(target=handle_ack, daemon=True)
+                ack_thread.start()
             
             # Update connection usage stats
             self.message_router.connection_pool.release_connection(target_endpoint, pipeline_id=pipeline_id)
@@ -596,16 +740,27 @@ class PipelineCommunicationManager:
             msg_len = len(batch_data).to_bytes(4, byteorder='big')
             conn.sendall(msg_len + batch_data)
             
-            # Send ACK if requested
+            # Non-blocking ACK handling if requested
             if any(msg.requires_ack for msg in cp_messages):
-                with recv_lock:
-                    ack_len_data = self.message_router._recv_exact(conn, 4)
-                    if not ack_len_data:
-                        return False
-                    ack_length = int.from_bytes(ack_len_data, byteorder='big')
-                    ack_data = self.message_router._recv_exact(conn, ack_length)
-                    if not ack_data:
-                        return False
+                # Start a thread to handle ACK to avoid blocking the main thread
+                def handle_ack():
+                    try:
+                        with recv_lock:
+                            ack_len_data = self.message_router._recv_exact(conn, 4, timeout=2.0)
+                            if not ack_len_data:
+                                logging.warning(f"Failed to receive ACK for pipeline batch")
+                            else:
+                                ack_length = int.from_bytes(ack_len_data, byteorder='big')
+                                ack_data = self.message_router._recv_exact(conn, ack_length, timeout=2.0)
+                                if not ack_data:
+                                    logging.warning(f"Failed to receive ACK data for pipeline batch")
+                    except Exception as e:
+                        logging.warning(f"Error handling ACK for pipeline batch: {e}")
+                
+                # Start ACK handling thread
+                import threading
+                ack_thread = threading.Thread(target=handle_ack, daemon=True)
+                ack_thread.start()
             
             # Update connection usage stats
             if pipeline_id:
@@ -1593,10 +1748,17 @@ class MessageRouter:
             self.connection_pool.release_connection(endpoint)
 
     @staticmethod
-    def _recv_exact(conn: socket.socket, n: int) -> Optional[bytes]:
+    def _recv_exact(conn: socket.socket, n: int, timeout: Optional[float] = None) -> Optional[bytes]:
         """
         优化的零拷贝接收：使用 bytearray + recv_into 预分配，
         避免频繁的 bytes 对象分配和拼接。
+        
+        Args:
+            conn: Socket connection
+            n: Number of bytes to receive
+            timeout: Optional timeout in seconds for the entire recv operation
+                    If None, use the socket's current timeout setting
+                    Default: 30.0 seconds if no timeout is set
         """
         buf = bytearray(n)
         view = memoryview(buf)
@@ -1606,7 +1768,9 @@ class MessageRouter:
         original_timeout = conn.gettimeout()
         try:
             # Set a timeout for the entire recv operation
-            if original_timeout is None:
+            if timeout is not None:
+                conn.settimeout(timeout)
+            elif original_timeout is None:
                 conn.settimeout(30.0)  # Default 30s timeout if none set
                 
             while offset < n:

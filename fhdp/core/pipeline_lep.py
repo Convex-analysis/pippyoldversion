@@ -30,16 +30,23 @@ class ActivationLEPState:
         if not enabled:
             return payload, info
 
+        # Get the device from the activation tensor to perform operations on the same device
+        device = activation.device
+
         with torch.no_grad():
+            # Ensure residual is on the same device as activation
             residual = self.residual
-            if residual is not None and residual.shape != payload.shape:
-                residual = None
+            if residual is not None:
+                if residual.shape != payload.shape:
+                    residual = None
+                else:
+                    residual = residual.to(device, non_blocking=True)
             if residual is not None:
                 payload = payload + residual
 
-            quantized = payload.to(fp16_dtype)
-            dequantized = quantized.to(torch.float32)
-            self.residual = payload - dequantized
+            quantized = payload.to(fp16_dtype, non_blocking=True)
+            dequantized = quantized.to(torch.float32, non_blocking=True)
+            self.residual = (payload - dequantized).detach()
             payload = quantized
 
             info = {

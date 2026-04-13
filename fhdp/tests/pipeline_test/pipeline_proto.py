@@ -920,14 +920,15 @@ class PipelineProtoVehicle:
             if tensor.dtype != dtype:
                 tensor = tensor.to(dtype=dtype)
             if device:
-                tensor = tensor.to(device)
+                tensor = tensor.to(device, non_blocking=True)
             return tensor
-        return torch.as_tensor(value, device=device, dtype=dtype)
+        return torch.as_tensor(value, dtype=dtype).to(device, non_blocking=True)
 
     @staticmethod
     def _pack_tensor_for_send(value):
         if isinstance(value, torch.Tensor):
-            return value.detach().to("cpu")
+            # Use contiguous memory for more efficient transfer
+            return value.detach().contiguous().to("cpu")
         if isinstance(value, dict):
             return {k: PipelineProtoVehicle._pack_tensor_for_send(v) for k, v in value.items()}
         if isinstance(value, (list, tuple)):
@@ -1157,8 +1158,8 @@ class PipelineProtoVehicle:
                     f"[stage1][LEP] recv activation dtype={activation_info.get('lep_dtype')} "
                     f"error_norm={error_norm_str}"
                 )
-            activation = torch.tensor(activation_data, device=self.device, dtype=torch.float32)
-            labels = torch.tensor(labels_data, device=self.device, dtype=torch.long)
+            activation = torch.as_tensor(activation_data, dtype=torch.float32).to(self.device, non_blocking=True)
+            labels = torch.as_tensor(labels_data, dtype=torch.long).to(self.device, non_blocking=True)
             activation.requires_grad_(True)
 
             assert self.model is not None
