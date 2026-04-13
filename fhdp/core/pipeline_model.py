@@ -86,6 +86,19 @@ def _split_vit_b16_2stage_v1(num_classes: int) -> Tuple[nn.Module, nn.Module]:
     return stage0, stage1
 
 
+def build_vit_b16_split_by_ratio(
+    num_classes: int,
+    ratio: float
+) -> Tuple[int, nn.Module, nn.Module]:
+    model = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=num_classes)
+    total_blocks = len(model.blocks)
+    split_idx = int(round(total_blocks * ratio))
+    split_idx = max(1, min(total_blocks - 1, split_idx))
+    stage0 = _ViTStage0(model, split_idx)
+    stage1 = _ViTStage1(model, split_idx)
+    return split_idx, stage0, stage1
+
+
 MODEL_SPLIT_REGISTRY: Dict[str, ModelSplitFn] = {
     "resnet18_2stage_v1": _split_resnet18_2stage_v1,
     "resnet18_2stage_v2": _split_resnet18_2stage_v2,

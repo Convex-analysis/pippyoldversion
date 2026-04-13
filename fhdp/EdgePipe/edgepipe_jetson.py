@@ -58,7 +58,7 @@ from fhdp.core.cross_platform_comm import (
     HardwareCapabilities, HardwarePlatform, PipelineMessage
 )
 from fhdp.core.hardware_adapter import ComputeCapability
-from fhdp.core.pipeline_runtime import (
+from fhdp.EdgePipe.runtime import (
     SequenceIdFactory,
     SequenceHandlerRegistry,
     OneFOneBSchedule,
@@ -69,6 +69,7 @@ from fhdp.core.pipeline_model import (
     get_pipeline_template,
     serialize_template,
     build_model_split_from_template_payload,
+    build_vit_b16_split_by_ratio,
 )
 
 from fhdp.EdgePipe.super_neuron import SuperNeuronNetwork
@@ -93,7 +94,7 @@ DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
 DEFAULT_DATASET = "cifar10"
 DEFAULT_ROUND_TIMEOUT_SEC = 300
 DEFAULT_EVAL_BATCHES = 4
-DEFAULT_SAVE_EVERY = 1
+DEFAULT_SAVE_EVERY = 10
 DEFAULT_CHECKPOINT_DIR = os.path.join(project_root or script_dir, "logs", "checkpoints", "edgepipe_jetson")
 
 # ---- LEP / activation compression ----
@@ -407,8 +408,11 @@ class EdgePipeJetsonServer:
                 "total_rounds": self.rounds,
                 "edgepipe_config": {
                     "total_layers": self.total_layers,
+                    "total_devices": self.total_devices,
                     "neurons_per_layer": self.neurons_per_layer,
                     "M_layers": self.partitioning.M_layers,
+                    "layer_groups": self.partitioning.layer_groups,
+                    "device_allocation": self.partitioning.device_allocation,
                     "best_mapping": self.best_mapping
                 }
             },
@@ -453,6 +457,7 @@ class EdgePipeJetsonServer:
         # Get EdgePipe configuration
         edgepipe_config = {
             "total_layers": self.total_layers,
+            "total_devices": self.total_devices,
             "neurons_per_layer": self.neurons_per_layer,
             "M_layers": self.partitioning.M_layers,
             "layer_groups": self.partitioning.layer_groups,
@@ -516,7 +521,8 @@ class EdgePipeJetsonDevice:
                  data_dir: str = DEFAULT_DATA_DIR, download: bool = False,
                  dataset: str = DEFAULT_DATASET, image_size: int = DEFAULT_IMAGE_SIZE,
                  num_classes: int = DEFAULT_NUM_CLASSES, eval_batches: int = DEFAULT_EVAL_BATCHES,
-                 save_every: int = DEFAULT_SAVE_EVERY, save_dir: str = DEFAULT_CHECKPOINT_DIR):
+                 save_every: int = DEFAULT_SAVE_EVERY, save_dir: str = DEFAULT_CHECKPOINT_DIR,
+                 preload_model: bool = True, use_edgepipe_split: bool = True):
         self.device_id = device_id
         self.role = role
         self.server_host = server_host
@@ -539,6 +545,8 @@ class EdgePipeJetsonDevice:
         self.eval_batches = max(0, int(eval_batches))
         self.save_every = max(0, int(save_every))
         self.save_dir = save_dir
+        self.preload_model = bool(preload_model)
+        self.use_edgepipe_split = bool(use_edgepipe_split)
         self.device = _get_device()
         self._timing_start = time.perf_counter()
         self._invite_received_at: Optional[float] = None
@@ -658,7 +666,8 @@ class EdgePipeJetsonDevice:
         self._start_peer_listener()
         self._log_timing("A_listener_ready")
         self._log_resource("A_listener_ready")
-        self._preload_model_if_needed()
+        if self.preload_model:
+            self._preload_model_if_needed()
         self._connect_to_server()
         self._register_with_server()
         self._start_async_workers()
@@ -752,6 +761,76 @@ class EdgePipeJetsonDevice:
             raise
         print(f"[{self.role}] Register sent")
 
+    def _resolve_edgepipe_split_ratio(self) -> Optional[float]:
+        config = self.edgepipe_config or {}
+        total_layers = config.get("total_layers")
+        neurons_per_layer = config.get("neurons_per_layer")
+        device_allocation = config.get("device_allocation")
+        best_mapping = config.get("best_mapping")
+        total_devices = config.get("total_devices")
+
+        if not isinstance(total_layers, int) or total_layers <= 1:
+            return None
+        if not isinstance(neurons_per_layer, list) or len(neurons_per_layer) != total_layers:
+            return None
+        if not isinstance(device_allocation, list) or not device_allocation:
+            return None
+        if not isinstance(best_mapping, list) or not best_mapping:
+            return None
+        if not isinstance(total_devices, int):
+            total_devices = sum(int(x) for x in device_allocation)
+        if total_devices < 2:
+            return None
+
+        try:
+            partitioning = HybridPartitioning(total_layers, total_devices)
+            sn_network = partitioning.perform_partitioning(neurons_per_layer)
+        except Exception:
+            return None
+
+        super_neurons = sn_network.get_super_neurons()
+        if len(best_mapping) != len(super_neurons):
+            return None
+
+        try:
+            for idx, sn in enumerate(super_neurons):
+                sn.set_device(int(best_mapping[idx]))
+        except Exception:
+            return None
+
+        layer_devices = []
+        for layer in range(total_layers):
+            sns = sn_network.get_super_neurons_by_layer(layer)
+            device_set = {sn.get_device() for sn in sns if sn.get_device() is not None}
+            if len(device_set) != 1:
+                layer_devices = []
+                break
+            layer_devices.append(next(iter(device_set)))
+
+        if layer_devices:
+            if layer_devices[0] != 0:
+                return None
+            change_idx = None
+            current = layer_devices[0]
+            for i, dev in enumerate(layer_devices):
+                if dev != current:
+                    if change_idx is None:
+                        change_idx = i
+                        current = dev
+                    else:
+                        return None
+            if change_idx is None or current != 1:
+                return None
+            ratio = change_idx / float(total_layers)
+            if 0.0 < ratio < 1.0:
+                return ratio
+            return None
+
+        device0_count = sum(1 for dev in best_mapping if int(dev) == 0)
+        if 0 < device0_count < len(best_mapping):
+            return device0_count / float(len(best_mapping))
+        return None
+
     def _init_model_for_template(self, template_payload: Optional[Dict[str, Any]] = None) -> None:
         if self.model is not None:
             return
@@ -764,6 +843,15 @@ class EdgePipeJetsonDevice:
             default_template_id=DEFAULT_TEMPLATE_ID,
             num_classes=self.num_classes,
         )
+
+        if self.use_edgepipe_split:
+            ratio = self._resolve_edgepipe_split_ratio()
+            if ratio is not None and template_id.startswith("vit_b16"):
+                split_idx, stage0, stage1 = build_vit_b16_split_by_ratio(self.num_classes, ratio)
+                split_key = f"{template_id}_edgepipe_{split_idx}"
+                print(f"[{self.role}] EdgePipe split enabled: ratio={ratio:.3f} split_idx={split_idx}")
+            elif ratio is not None:
+                print(f"[{self.role}] EdgePipe split ratio={ratio:.3f} not applied to template {template_id}")
 
         self.current_template_id = template_id
         self.current_split_key = split_key
@@ -1439,6 +1527,12 @@ def main():
     parser.add_argument("--save-every", type=int, default=DEFAULT_SAVE_EVERY, help="save checkpoint every N rounds (0 to disable)")
     parser.add_argument("--save-dir", default=DEFAULT_CHECKPOINT_DIR, help="checkpoint output directory")
     parser.add_argument("--auto-exit", action="store_true", help="exit after completing all rounds")
+    parser.add_argument("--preload-model", dest="preload_model", action="store_true", help="preload model on device before connect")
+    parser.add_argument("--no-preload-model", dest="preload_model", action="store_false", help="disable model preload on device")
+    parser.set_defaults(preload_model=True)
+    parser.add_argument("--edgepipe-split", dest="edgepipe_split", action="store_true", help="use EdgePipe partition result to split model")
+    parser.add_argument("--no-edgepipe-split", dest="edgepipe_split", action="store_false", help="disable EdgePipe-driven model split")
+    parser.set_defaults(edgepipe_split=True)
     parser.add_argument("--listen-host", default="0.0.0.0", help="device listen host for peer pipeline data")
     parser.add_argument("--listen-port", type=int, default=0, help="device listen port for peer pipeline data")
     parser.add_argument("--advertise-host", default=None, help="host/IP to advertise to peers (default: auto-detect)")
@@ -1494,7 +1588,9 @@ def main():
             num_classes=args.num_classes,
             eval_batches=args.eval_batches,
             save_every=args.save_every,
-            save_dir=args.save_dir
+            save_dir=args.save_dir,
+            preload_model=args.preload_model,
+            use_edgepipe_split=args.edgepipe_split
         )
         device.start()
         try:

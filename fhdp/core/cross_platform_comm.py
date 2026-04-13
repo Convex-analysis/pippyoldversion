@@ -73,6 +73,8 @@ import queue
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 
+import torch
+
 from .hardware_adapter import HardwarePlatform, HardwareCapabilities, NetworkInterface
 from .types import CommunicationBundle, CommunicationProtocol
 import sys
@@ -1771,7 +1773,7 @@ class MessageRouter:
             if timeout is not None:
                 conn.settimeout(timeout)
             elif original_timeout is None:
-                conn.settimeout(30.0)  # Default 30s timeout if none set
+                conn.settimeout(60.0)  # Default 60s timeout if none set
                 
             while offset < n:
                 try:
