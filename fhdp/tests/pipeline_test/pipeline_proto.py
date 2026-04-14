@@ -73,8 +73,9 @@ import shutil
 import tarfile
 import zipfile
 import urllib.request
+from collections import OrderedDict
 from queue import Queue, Empty
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -121,13 +122,20 @@ DEFAULT_DATASET = "cifar10"
 DEFAULT_TINY_IMAGENET_URL = "https://cs231n.stanford.edu/tiny-imagenet-200.zip"
 DEFAULT_TINY_IMAGENET_DIR = "tiny-imagenet-200"
 DEFAULT_EVAL_BATCHES = 4
-DEFAULT_SAVE_EVERY = 1
+DEFAULT_SAVE_EVERY = 10
 DEFAULT_CHECKPOINT_DIR = os.path.join(project_root or script_dir, "logs", "checkpoints", "pipeline_proto")
 
 # ---- LEP / activation compression (Plan A: FP16 + residual) ----
 ENABLE_ACTIVATION_LEP = True
 LEP_FP16_DTYPE = torch.float16
 LEP_LOG_INTERVAL = 10
+
+# ---- Tensor packing / transfer optimizations ----
+PACK_TENSOR_FASTPATH = False
+PACK_TENSOR_USE_PINNED = False
+PACK_TENSOR_ZERO_COPY = False
+PINNED_BUFFER_CACHE_SIZE = 8
+PINNED_BUFFER_MAX_BYTES = 256 * 1024 * 1024
 
 
 # ----------------- Utilities -----------------
@@ -625,6 +633,9 @@ class PipelineProtoServer:
 # ----------------- Vehicle -----------------
 
 class PipelineProtoVehicle:
+    _pinned_buffer_cache: "OrderedDict[Tuple[torch.dtype, Tuple[int, ...]], torch.Tensor]" = OrderedDict()
+    _pinned_buffer_lock = threading.Lock()
+
     def __init__(self, vehicle_id: str, role: str, server_host: str, server_port: int,
                  stage0_id: str, stage1_id: str, listen_host: str, listen_port: int,
                  advertise_host: Optional[str] = None, rounds: int = DEFAULT_ROUNDS,
@@ -693,6 +704,7 @@ class PipelineProtoVehicle:
         self._lock = threading.Lock()
         self._round_state: Dict[int, Dict[str, Any]] = {}
         self._round_cond: Dict[int, threading.Condition] = {}
+        self._round_metrics: Dict[int, Dict[str, Any]] = {}
         self._eval_state: Dict[int, Dict[str, Any]] = {}
         self._activation_queue: Queue[PipelineMessage] = Queue()
         self._gradient_queue: Queue[PipelineMessage] = Queue()
@@ -739,6 +751,33 @@ class PipelineProtoVehicle:
         for key, value in stats.items():
             parts.append(f"{key}={value:.2f}MB")
         print(" ".join(parts))
+
+    def _get_round_metrics(self, round_num: int) -> Dict[str, Any]:
+        metrics = self._round_metrics.get(round_num)
+        if metrics is None:
+            metrics = {
+                "activation_bytes_sent": 0,
+                "activation_bytes_recv": 0,
+                "grad_bytes_sent": 0,
+                "grad_bytes_recv": 0,
+            }
+            self._round_metrics[round_num] = metrics
+        return metrics
+
+    @staticmethod
+    def _estimate_payload_bytes(value) -> int:
+        if isinstance(value, torch.Tensor):
+            return value.numel() * value.element_size()
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return len(value)
+        nbytes = getattr(value, "nbytes", None)
+        if isinstance(nbytes, int):
+            return nbytes
+        if isinstance(value, dict):
+            return sum(PipelineProtoVehicle._estimate_payload_bytes(v) for v in value.values())
+        if isinstance(value, (list, tuple)):
+            return sum(PipelineProtoVehicle._estimate_payload_bytes(v) for v in value)
+        return 0
 
     def _should_save_round(self, round_num: int) -> bool:
         return self.save_every > 0 and round_num % self.save_every == 0
@@ -1044,13 +1083,53 @@ class PipelineProtoVehicle:
     def _handle_status(self, message: CrossPlatformMessage):
         print(f"[{self.role}] Server status: {message.payload}")
 
-    @staticmethod
-    def _unwrap_tensor_payload(value):
+    def _unwrap_tensor_payload(self, value):
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            data = bytes(value)
+            try:
+                result = self.bridge.message_router.serialization_manager.deserialize_tensor_zero_copy(data)
+            except Exception:
+                result = None
+            if isinstance(result, (bytes, bytearray, memoryview)) or result is None:
+                try:
+                    return self.bridge.message_router.serialization_manager.pickle_loads(data)
+                except Exception:
+                    return value
+            return result
         if isinstance(value, dict):
+            if value.get("__tensor_zero_copy__") and "data" in value:
+                data = value.get("data")
+                if data is None:
+                    return value
+                try:
+                    result = self.bridge.message_router.serialization_manager.deserialize_tensor_zero_copy(data)
+                except Exception:
+                    result = None
+                if isinstance(result, (bytes, bytearray, memoryview)) or result is None:
+                    try:
+                        return self.bridge.message_router.serialization_manager.pickle_loads(data)
+                    except Exception:
+                        return data
+                return result
             if value.get("__tensor_metadata__") and "data" in value:
                 return value["data"]
-            if "data" in value:
+            if "data" in value and value.get("__tensor_bytes__"):
                 return value["data"]
+        return value
+
+    def _decode_tensor_payload(self, value):
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            data = bytes(value)
+            try:
+                result = self.bridge.message_router.serialization_manager.deserialize_tensor_zero_copy(data)
+            except Exception:
+                result = None
+            if isinstance(result, (bytes, bytearray, memoryview)) or result is None:
+                try:
+                    return self.bridge.message_router.serialization_manager.pickle_loads(data)
+                except Exception:
+                    return value
+            return result
         return value
 
     @staticmethod
@@ -1064,9 +1143,68 @@ class PipelineProtoVehicle:
             return tensor
         return torch.as_tensor(value, dtype=dtype).to(device, non_blocking=True)
 
-    @staticmethod
-    def _pack_tensor_for_send(value, non_blocking: bool = True):
+    def _get_pinned_buffer(self, shape, dtype: torch.dtype) -> Optional[torch.Tensor]:
+        if not PACK_TENSOR_USE_PINNED or not torch.cuda.is_available():
+            return None
+        shape_tuple = tuple(shape) if shape is not None else ()
+        numel = 1
+        for dim in shape_tuple:
+            numel *= int(dim)
+        elem_size = torch.tensor([], dtype=dtype).element_size()
+        bytes_needed = numel * elem_size
+        if bytes_needed > PINNED_BUFFER_MAX_BYTES:
+            return None
+        key = (dtype, shape_tuple)
+        with self._pinned_buffer_lock:
+            buffer = self._pinned_buffer_cache.pop(key, None)
+            if buffer is None or buffer.numel() != numel or buffer.dtype != dtype:
+                buffer = torch.empty(shape_tuple, dtype=dtype, device="cpu", pin_memory=True)
+            self._pinned_buffer_cache[key] = buffer
+            while len(self._pinned_buffer_cache) > PINNED_BUFFER_CACHE_SIZE:
+                self._pinned_buffer_cache.popitem(last=False)
+        return buffer
+
+    def _copy_tensor_to_cpu(self, tensor: torch.Tensor) -> torch.Tensor:
+        if tensor.device.type == "cpu":
+            return tensor
+        src = tensor.detach()
+        if not src.is_contiguous():
+            src = src.contiguous()
+        buffer = self._get_pinned_buffer(src.shape, src.dtype)
+        if buffer is not None:
+            buffer.copy_(src, non_blocking=True)
+            torch.cuda.current_stream().synchronize()
+            return buffer
+        return src.to("cpu", non_blocking=True).contiguous()
+
+    def _pack_tensor_zero_copy(self, tensor: torch.Tensor):
+        if not PACK_TENSOR_ZERO_COPY:
+            return tensor
+        try:
+            serialized = self.bridge.message_router.serialization_manager.serialize_tensor_zero_copy(tensor)
+            return {
+                "__tensor_zero_copy__": True,
+                "data": serialized,
+                "shape": tuple(tensor.shape),
+                "dtype": str(tensor.dtype)
+            }
+        except Exception:
+            return tensor
+
+    def _pack_tensor_for_send(self, value, non_blocking: bool = True):
         if isinstance(value, torch.Tensor):
+            tensor = value.detach()
+            if PACK_TENSOR_FASTPATH:
+                if tensor.device.type == "cpu" and tensor.is_contiguous():
+                    return self._pack_tensor_zero_copy(tensor)
+                if tensor.device.type == "cuda":
+                    if not tensor.is_contiguous():
+                        tensor = tensor.contiguous()
+                    return self._pack_tensor_zero_copy(tensor)
+            cpu_tensor = self._copy_tensor_to_cpu(tensor)
+            if not cpu_tensor.is_contiguous():
+                cpu_tensor = cpu_tensor.contiguous()
+            return self._pack_tensor_zero_copy(cpu_tensor)
             tensor = value.detach()
             if tensor.is_cuda:
                 if non_blocking:
@@ -1075,9 +1213,9 @@ class PipelineProtoVehicle:
                     tensor = tensor.contiguous().to("cpu", non_blocking=False)
             return tensor
         if isinstance(value, dict):
-            return {k: PipelineProtoVehicle._pack_tensor_for_send(v, non_blocking) for k, v in value.items()}
+            return {k: self._pack_tensor_for_send(v) for k, v in value.items()}
         if isinstance(value, (list, tuple)):
-            packed = [PipelineProtoVehicle._pack_tensor_for_send(v, non_blocking) for v in value]
+            packed = [self._pack_tensor_for_send(v) for v in value]
             return tuple(packed) if isinstance(value, tuple) else packed
         return value
 
@@ -1173,6 +1311,10 @@ class PipelineProtoVehicle:
 
             endpoint = self.bridge.message_router.routing_table.get(self.stage1_id)
             if endpoint:
+                with self._lock:
+                    metrics = self._get_round_metrics(round_num)
+                    metrics["activation_bytes_sent"] += self._estimate_payload_bytes(activation_payload)
+                    metrics["activation_bytes_sent"] += self._estimate_payload_bytes(labels_payload)
                 self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(pipeline_msg, endpoint)
                 phase = schedule.phase(micro_idx).value
                 if phase == "warmup":
@@ -1222,6 +1364,16 @@ class PipelineProtoVehicle:
                 f"[stage0][METRICS] network_wait_ratio={wait_ratio:.2f}% "
                 f"wait_time_sec={wait_time:.2f}"
             )
+            with self._lock:
+                metrics = self._get_round_metrics(round_num)
+                comm_sent = metrics.get("activation_bytes_sent", 0)
+                comm_recv = metrics.get("grad_bytes_recv", 0)
+            print(
+                f"[stage0][METRICS] comm_bytes_sent={comm_sent} "
+                f"comm_bytes_recv={comm_recv}"
+            )
+            with self._lock:
+                self._round_metrics.pop(round_num, None)
         print(f"[stage0] 1F1B cooldown: gradients complete (round {round_num})")
         if self.eval_batches > 0:
             self._run_eval_round(round_num)
@@ -1282,6 +1434,10 @@ class PipelineProtoVehicle:
             )
             endpoint = self.bridge.message_router.routing_table.get(self.stage1_id)
             if endpoint:
+                with self._lock:
+                    metrics = self._get_round_metrics(round_num)
+                    metrics["activation_bytes_sent"] += self._estimate_payload_bytes(activation_payload)
+                    metrics["activation_bytes_sent"] += self._estimate_payload_bytes(labels_payload)
                 self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(pipeline_msg, endpoint)
 
     def _handle_activation_sequence(self, messages):
@@ -1306,9 +1462,16 @@ class PipelineProtoVehicle:
                     continue
 
             data = pipeline_msg.data
+            round_num = data.get("round", DEFAULT_ROUND)
             activation_info = data.get("activation_info", {})
             activation_data = self._unwrap_tensor_payload(data["activation"])
             labels_data = self._unwrap_tensor_payload(data["labels"])
+            activation_data = self._decode_tensor_payload(activation_data)
+            labels_data = self._decode_tensor_payload(labels_data)
+            with self._lock:
+                metrics = self._get_round_metrics(round_num)
+                metrics["activation_bytes_recv"] += self._estimate_payload_bytes(activation_data)
+                metrics["activation_bytes_recv"] += self._estimate_payload_bytes(labels_data)
             if activation_info.get("lep_enabled"):
                 error_norm = activation_info.get("lep_error_norm")
                 error_norm_str = f"{error_norm:.4f}" if isinstance(error_norm, (int, float)) else "N/A"
@@ -1323,7 +1486,6 @@ class PipelineProtoVehicle:
             assert self.model is not None
             assert self.optimizer is not None
 
-            round_num = data.get("round", DEFAULT_ROUND)
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
             micro_batches = data.get("micro_batches", self.micro_batches)
 
@@ -1365,6 +1527,9 @@ class PipelineProtoVehicle:
 
             endpoint = self.bridge.message_router.routing_table.get(self.stage0_id)
             if endpoint:
+                with self._lock:
+                    metrics = self._get_round_metrics(round_num)
+                    metrics["grad_bytes_sent"] += self._estimate_payload_bytes(grad_payload)
                 self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(grad_msg, endpoint)
                 print(
                     f"[stage1] Sent gradient {phase} (loss={loss.item():.4f}, micro {micro_batch + 1}/{micro_batches})"
@@ -1380,6 +1545,14 @@ class PipelineProtoVehicle:
                         self.optimizer.step()
                         self._save_checkpoint(round_num)
                         self._round_state.pop(round_num, None)
+                        metrics = self._get_round_metrics(round_num)
+                        comm_sent = metrics.get("grad_bytes_sent", 0)
+                        comm_recv = metrics.get("activation_bytes_recv", 0)
+                        print(
+                            f"[stage1][METRICS] round={round_num} comm_bytes_sent={comm_sent} "
+                            f"comm_bytes_recv={comm_recv}"
+                        )
+                        self._round_metrics.pop(round_num, None)
                         if self.auto_exit:
                             self.completed_rounds += 1
                             if self.completed_rounds >= self.total_rounds:
@@ -1402,6 +1575,10 @@ class PipelineProtoVehicle:
             round_num = data.get("round", DEFAULT_ROUND)
             activation_data = self._unwrap_tensor_payload(data["activation"])
             labels_data = self._unwrap_tensor_payload(data["labels"])
+            with self._lock:
+                metrics = self._get_round_metrics(round_num)
+                metrics["activation_bytes_recv"] += self._estimate_payload_bytes(activation_data)
+                metrics["activation_bytes_recv"] += self._estimate_payload_bytes(labels_data)
             activation = self._to_tensor(activation_data, self.device, torch.float32)
             labels = self._to_tensor(labels_data, self.device, torch.long)
 
@@ -1455,13 +1632,16 @@ class PipelineProtoVehicle:
                     continue
 
             data = pipeline_msg.data
+            round_num = data.get("round", DEFAULT_ROUND)
             grad_data = self._unwrap_tensor_payload(data["grad"])
+            with self._lock:
+                metrics = self._get_round_metrics(round_num)
+                metrics["grad_bytes_recv"] += self._estimate_payload_bytes(grad_data)
 
             assert self.model is not None
             assert self.optimizer is not None
             grad = self._to_tensor(grad_data, self.device, torch.float32)
 
-            round_num = data.get("round", DEFAULT_ROUND)
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
             micro_batches = data.get("micro_batches", self.micro_batches)
             activation_seq_id = self.sequence_id_factory.make(round_num, "activation", micro_batch)
