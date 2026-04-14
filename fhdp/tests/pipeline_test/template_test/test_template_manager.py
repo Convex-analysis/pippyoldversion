@@ -313,7 +313,10 @@ class TestTemplateMatching(unittest.TestCase):
                 resources={
                     'cpu': 0.7 + (i % 3) * 0.1,
                     'memory': 0.6 + (i % 3) * 0.15,
-                    'battery': 0.8 - (i % 3) * 0.1
+                    'battery': 0.8 - (i % 3) * 0.1,
+                    'memory_gb': 8 + (i % 3) * 8,
+                    'compute_score': 0.4 + (i % 3) * 0.2,
+                    'gpu_type': "orin" if i % 3 == 0 else ("xavier" if i % 3 == 1 else "nano")
                 }
             )
             for i in range(10)
@@ -367,6 +370,34 @@ class TestTemplateMatching(unittest.TestCase):
         
         # Cached lookup should be faster
         self.assertLess(second_time, first_time)
+
+    def test_resource_classification_with_gpu_type(self):
+        """Test resource classification using gpu_type and memory_gb"""
+        vehicle_high = VehicleInfo(
+            vehicle_id="v_high",
+            position=(0.0, 0.0),
+            velocity=0.0,
+            direction=0.0,
+            resources={
+                "gpu_type": "orin",
+                "memory_gb": 29.9,
+                "compute_score": 0.93
+            }
+        )
+        vehicle_medium = VehicleInfo(
+            vehicle_id="v_medium",
+            position=(0.0, 0.0),
+            velocity=0.0,
+            direction=0.0,
+            resources={
+                "gpu_type": "orin",
+                "memory_gb": 7.3,
+                "compute_score": 0.23
+            }
+        )
+
+        self.assertEqual(self.matcher._classify_vehicle_resource(vehicle_high), ResourceClass.HIGH)
+        self.assertEqual(self.matcher._classify_vehicle_resource(vehicle_medium), ResourceClass.MEDIUM)
     
     def test_basket_organization(self):
         """Test basket-based organization"""
@@ -380,14 +411,11 @@ class TestTemplateMatching(unittest.TestCase):
         total_templates = sum(len(basket.templates) for basket in self.matcher.baskets.values())
         self.assertEqual(total_templates, 50)
         
-        # Check that same-signature templates are in same basket
+        # Check that templates in each basket share memory tier and length
         for basket in self.matcher.baskets.values():
-            if len(basket.templates) > 1:
-                # All templates in basket should have same signature
-                first_sig = basket.resource_signature
-                for template in basket.templates:
-                    sig = self.matcher._create_resource_signature(template.resource_requirements)
-                    self.assertEqual(sig, first_sig)
+            for template in basket.templates:
+                self.assertEqual(basket.memory_tier, self.matcher._template_memory_tier(template))
+                self.assertEqual(basket.pipeline_length, len(template.resource_requirements))
 
 
 class TestModelPartitioning(unittest.TestCase):
@@ -502,7 +530,10 @@ class TestTemplateManagerIntegration(unittest.TestCase):
                 resources={
                     'cpu': 0.8 if i < 3 else 0.6,
                     'memory': 0.7 if i < 3 else 0.5,
-                    'battery': 0.8
+                    'battery': 0.8,
+                    'memory_gb': 16 if i < 3 else 8,
+                    'compute_score': 0.8 if i < 3 else 0.5,
+                    'gpu_type': "orin" if i < 3 else "xavier"
                 }
             )
             for i in range(5)
@@ -572,8 +603,15 @@ class TestPerformanceMetrics(unittest.TestCase):
         """Test that template lookup latency is <5ms"""
         manager = TemplateManager()
         vehicles = [
-            VehicleInfo(f"v{i}", (0, 0), 0, 0, 
-                      {'cpu': 0.7, 'memory': 0.6, 'battery': 0.8})
+            VehicleInfo(f"v{i}", (0, 0), 0, 0,
+                      {
+                          'cpu': 0.7,
+                          'memory': 0.6,
+                          'battery': 0.8,
+                          'memory_gb': 16,
+                          'compute_score': 0.8,
+                          'gpu_type': "orin"
+                      })
             for i in range(5)
         ]
         
@@ -596,7 +634,14 @@ class TestPerformanceMetrics(unittest.TestCase):
         manager = TemplateManager()
         vehicles = [
             VehicleInfo(f"v{i}", (i*100, 0), 10.0, 0.0,
-                      {'cpu': 0.8, 'memory': 0.7, 'battery': 0.9})
+                      {
+                          'cpu': 0.8,
+                          'memory': 0.7,
+                          'battery': 0.9,
+                          'memory_gb': 16,
+                          'compute_score': 0.8,
+                          'gpu_type': "orin"
+                      })
             for i in range(3)
         ]
         

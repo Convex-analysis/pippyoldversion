@@ -251,19 +251,44 @@ class FairnessManager:
 class ResourceClassifier:
     """Main resource classification service"""
     
-    def __init__(self):
+    def __init__(self, simulate_mode: bool = True):
         self.monitor = ResourceMonitor()
         self.fairness_manager = FairnessManager()
         self.profiles: Dict[str, ResourceProfile] = {}
         self.classification_cache: Dict[str, Tuple[ResourceClass, float]] = {}
         self.cache_timeout = 5.0  # seconds
+        self.simulate_mode = simulate_mode
+        
+    def _simulate_resource_class(self, vehicle_info: VehicleInfo) -> ResourceClass:
+        resources = vehicle_info.resources or {}
+        explicit = resources.get("resource_class") or resources.get("simulated_resource_class")
+        if isinstance(explicit, ResourceClass):
+            return explicit
+        if isinstance(explicit, str):
+            try:
+                return ResourceClass(explicit)
+            except ValueError:
+                pass
+        memory_gb = resources.get("memory_gb", resources.get("memory", 0))
+        compute_score = resources.get("compute_score", 0.5)
+        try:
+            memory_gb = float(memory_gb)
+        except (TypeError, ValueError):
+            memory_gb = 0.0
+        if memory_gb >= 16 or compute_score >= 0.8:
+            return ResourceClass.HIGH
+        if memory_gb >= 8 or compute_score >= 0.5:
+            return ResourceClass.MEDIUM
+        return ResourceClass.LOW
         
     def classify_vehicle(self, vehicle_info: VehicleInfo) -> ResourceClass:
         """Classify vehicle based on current resources"""
+        if self.simulate_mode:
+            return self._simulate_resource_class(vehicle_info)
+        
         current_metrics = self.monitor.get_current_resources(vehicle_info.vehicle_id)
         
         if not current_metrics:
-            # Use vehicle resources if no monitoring data
             current_metrics = ResourceMetrics(
                 cpu_usage=1.0 - vehicle_info.resources.get('cpu', 0.5),
                 memory_usage=1.0 - vehicle_info.resources.get('memory', 0.5),
@@ -272,15 +297,11 @@ class ResourceClassifier:
                 thermal_state=vehicle_info.resources.get('thermal', 0.5)
             )
         
-        # Classification logic
         cpu_available = 1.0 - current_metrics.cpu_usage
         memory_available = 1.0 - current_metrics.memory_usage
         battery_available = current_metrics.battery_level
         
-        # Add stability factor
         stability = self.monitor.get_resource_stability(vehicle_info.vehicle_id)
-        
-        # Adjust thresholds based on stability
         stability_bonus = stability * 0.1
         
         if (cpu_available >= HIGH_RESOURCE_CPU - stability_bonus and 

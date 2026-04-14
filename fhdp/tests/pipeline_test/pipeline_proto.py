@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 FHDP Pipeline Prototype (ResNet-18, micro-batching + 1F1B schedule)
 
@@ -21,50 +20,10 @@ Usage:
   python pipeline_proto.py --mode vehicle --role stage1 --vehicle-id orin --server-host <server-ip> --server-port 5000
 """
 
-# ---- Resolve project root for imports (MUST BE FIRST) ----
 import os
 import sys
-
-script_dir = os.path.dirname(os.path.abspath(__file__))
-possible_roots = [
-    os.path.abspath(os.path.join(script_dir, '..')),      # fhdp/tests/pipeline_test -> fhdp/
-    os.path.abspath(os.path.join(script_dir, '../..')),   # fhdp/tests/pipeline_test -> project root
-    os.path.abspath(os.path.join(script_dir, '../../..')),
-    os.path.abspath(os.path.join(script_dir, '../../../..')),
-]
-project_root = None
-for root in possible_roots:
-    if os.path.exists(os.path.join(root, 'fhdp')):
-        project_root = root
-        break
-    if os.path.exists(os.path.join(root, 'core')):  # root is fhdp package dir
-        project_root = os.path.dirname(root)
-        break
-
-# If still not found, try to find by walking up
-if project_root is None:
-    current = script_dir
-    for _ in range(5):
-        if os.path.exists(os.path.join(current, 'fhdp')):
-            project_root = current
-            break
-        if os.path.exists(os.path.join(current, 'setup.py')):
-            project_root = current
-            break
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
-
-if project_root:
-    sys.path.insert(0, project_root)
-else:
-    # Last resort: add script_dir's parent directories
-    sys.path.insert(0, os.path.abspath(os.path.join(script_dir, '../..')))
-    sys.path.insert(0, os.path.abspath(os.path.join(script_dir, '..')))
-
-# Now import the rest
 import time
+import traceback
 import uuid
 import argparse
 import threading
@@ -84,6 +43,24 @@ from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import CIFAR10, ImageFolder
 from torchvision import transforms
 
+# ---- Resolve project root for imports ----
+script_dir = os.path.dirname(os.path.abspath(__file__))
+possible_roots = [
+    os.path.abspath(os.path.join(script_dir, '..')),      # fhdp/tests/pipeline_test -> fhdp/
+    os.path.abspath(os.path.join(script_dir, '../..')),   # fhdp/tests/pipeline_test -> project root
+    os.path.abspath(os.path.join(script_dir, '../../..'))
+]
+project_root = None
+for root in possible_roots:
+    if os.path.exists(os.path.join(root, 'fhdp')):
+        project_root = root
+        break
+    if os.path.exists(os.path.join(root, 'core')):  # root is fhdp package dir
+        project_root = os.path.dirname(root)
+        break
+if project_root:
+    sys.path.insert(0, project_root)
+
 from fhdp.core.cross_platform_comm import (
     NetworkEndpoint, CrossPlatformMessage, PlatformBridge,
     TransportProtocol, CompressionType, SerializationFormat,
@@ -97,13 +74,13 @@ from fhdp.core.pipeline_runtime import (
     get_micro_batch_phase,
 )
 from fhdp.core import ActivationLEPState
+from fhdp.core.types import VehicleInfo
 from fhdp.core.pipeline_model import (
     get_pipeline_template,
     serialize_template,
     build_model_split_from_template_payload,
 )
-from fhdp.edge_server.template_manager import TemplateManager, TemplateGenerator, TemplateMatcher
-from fhdp.core.types import VehicleInfo, ResourceClass
+from fhdp.edge_server.template_manager import TemplateManager
 
 
 PIPELINE_ID = "proto_resnet18"
@@ -112,18 +89,21 @@ DEFAULT_STAGE1_ID = "orin"
 DEFAULT_NUM_CLASSES = 10
 DEFAULT_IMAGE_SIZE = 224
 DEFAULT_BATCH_SIZE = 12
-DEFAULT_ROUND = 10
-DEFAULT_ROUNDS = 10
+DEFAULT_ROUND = 5
+DEFAULT_ROUNDS = 5
 DEFAULT_MICRO_BATCH = 4
-DEFAULT_MICRO_BATCHES = 4
+DEFAULT_MICRO_BATCHES = 8
 DEFAULT_DATA_DIR = os.path.join(script_dir, "data")
 DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
+AUTO_TEMPLATE_TOKEN = "auto"
 DEFAULT_DATASET = "cifar10"
 DEFAULT_TINY_IMAGENET_URL = "https://cs231n.stanford.edu/tiny-imagenet-200.zip"
 DEFAULT_TINY_IMAGENET_DIR = "tiny-imagenet-200"
 DEFAULT_EVAL_BATCHES = 4
 DEFAULT_SAVE_EVERY = 10
 DEFAULT_CHECKPOINT_DIR = os.path.join(project_root or script_dir, "logs", "checkpoints", "pipeline_proto")
+PIPELINE_TIMING_SYNC = os.getenv("PIPELINE_TIMING_SYNC", "0") == "1"
+PIPELINE_STEP_TIMEOUT_SEC = float(os.getenv("PIPELINE_STEP_TIMEOUT_SEC", "60"))
 
 # ---- LEP / activation compression (Plan A: FP16 + residual) ----
 ENABLE_ACTIVATION_LEP = True
@@ -131,7 +111,7 @@ LEP_FP16_DTYPE = torch.float16
 LEP_LOG_INTERVAL = 10
 
 # ---- Tensor packing / transfer optimizations ----
-PACK_TENSOR_FASTPATH = False
+PACK_TENSOR_FASTPATH = True
 PACK_TENSOR_USE_PINNED = False
 PACK_TENSOR_ZERO_COPY = False
 PINNED_BUFFER_CACHE_SIZE = 8
@@ -416,9 +396,6 @@ class PipelineProtoServer:
         self.accepted = set()
         self.current_round = 0
         self.completed_rounds = set()
-        
-        # Initialize template manager
-        self.template_manager = TemplateManager()
 
         self.endpoint = NetworkEndpoint(
             host=host,
@@ -427,6 +404,7 @@ class PipelineProtoServer:
             compression=CompressionType.NONE
         )
         self.bridge = PlatformBridge(_build_capabilities("server"), node_id="server")
+        self.template_manager = TemplateManager()
         self.shutdown = False
 
     def start(self):
@@ -527,7 +505,6 @@ class PipelineProtoServer:
     def _send_pipeline_invite(self):
         endpoints = {}
         vehicles_info = []
-        
         for vehicle_id in [self.stage0_id, self.stage1_id]:
             info = self.registered.get(vehicle_id, {})
             host = info.get("host")
@@ -548,11 +525,16 @@ class PipelineProtoServer:
                 print(f"[Server] Vehicle {vehicle_id} resources: gpu_type={resources.get('gpu_type', 'N/A')}, "
                       f"memory_gb={resources.get('memory_gb', 'N/A')}, compute_score={resources.get('compute_score', 'N/A')}")
 
-        # Use template manager to find best template
-        template = self.template_manager.find_template_for_vehicles(vehicles_info)
-        if not template:
-            # If no suitable template found, use default template
-            template = get_pipeline_template(self.template_id, DEFAULT_TEMPLATE_ID)
+        # Use template manager to find best template (unless template-id is explicitly set)
+        template = None
+        template_id = (self.template_id or "").strip()
+        if template_id and template_id.lower() != AUTO_TEMPLATE_TOKEN:
+            template = get_pipeline_template(template_id, DEFAULT_TEMPLATE_ID)
+        else:
+            template = self.template_manager.find_template_for_vehicles(vehicles_info)
+            if not template:
+                # If no suitable template found, use default template
+                template = get_pipeline_template(DEFAULT_TEMPLATE_ID, DEFAULT_TEMPLATE_ID)
         
         template_payload = serialize_template(template)
         
@@ -760,6 +742,14 @@ class PipelineProtoVehicle:
                 "activation_bytes_recv": 0,
                 "grad_bytes_sent": 0,
                 "grad_bytes_recv": 0,
+                "activation_send_ts": {},
+                "grad_latency_ms": [],
+                "stage1_decode_ms": [],
+                "stage1_compute_ms": [],
+                "stage1_send_ms": [],
+                "stage1_e2e_ms": [],
+                "stage0_apply_ms": [],
+                "stage0_step_ms": [],
             }
             self._round_metrics[round_num] = metrics
         return metrics
@@ -893,34 +883,17 @@ class PipelineProtoVehicle:
             
             # Compute score based on GPU type
             gpu_name_lower = gpu_name.lower()
-            if "agx" in gpu_name_lower and "orin" in gpu_name_lower:
-                # AGX Orin 64GB - highest performance
-                resources["compute_score"] = 0.95
-            elif "orin" in gpu_name_lower:
-                # Orin NX (16GB) or Orin Nano (8GB)
-                if gpu_memory >= 16:
-                    resources["compute_score"] = 0.85
-                else:
-                    resources["compute_score"] = 0.75  # Orin Nano 8GB
-            elif "agx" in gpu_name_lower and "xavier" in gpu_name_lower:
-                # AGX Xavier
-                resources["compute_score"] = 0.7
-            elif "xavier" in gpu_name_lower:
-                # Xavier NX
-                resources["compute_score"] = 0.6
-            elif "nano" in gpu_name_lower:
-                # Jetson Nano
-                resources["compute_score"] = 0.3
-            else:
-                # Estimate based on memory
-                resources["compute_score"] = min(1.0, gpu_memory / 64.0)
+            # Estimate based on memory
+            resources["compute_score"] = min(1.0, gpu_memory / 32.0)
         
         msg = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
             source_id=self.vehicle_id,
             target_id="server",
             message_type="register",
-            payload={"resources": resources},
+            payload={
+                "resources": resources
+            },
             metadata={
                 "client_host": advertise_host,
                 "client_port": self.listen_port
@@ -1191,7 +1164,7 @@ class PipelineProtoVehicle:
         except Exception:
             return tensor
 
-    def _pack_tensor_for_send(self, value, non_blocking: bool = True):
+    def _pack_tensor_for_send(self, value):
         if isinstance(value, torch.Tensor):
             tensor = value.detach()
             if PACK_TENSOR_FASTPATH:
@@ -1315,6 +1288,7 @@ class PipelineProtoVehicle:
                     metrics = self._get_round_metrics(round_num)
                     metrics["activation_bytes_sent"] += self._estimate_payload_bytes(activation_payload)
                     metrics["activation_bytes_sent"] += self._estimate_payload_bytes(labels_payload)
+                    metrics["activation_send_ts"][micro_idx] = time.perf_counter()
                 self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(pipeline_msg, endpoint)
                 phase = schedule.phase(micro_idx).value
                 if phase == "warmup":
@@ -1341,9 +1315,18 @@ class PipelineProtoVehicle:
 
         print(f"[stage0] 1F1B cooldown: waiting for gradients (round {round_num})")
         wait_started = time.perf_counter()
+        last_wait_log = wait_started
         with self._lock:
             cond = self._round_cond.get(round_num)
             while not shutdown_requested and not self._round_state.get(round_num, {}).get("done"):
+                now = time.perf_counter()
+                if now - last_wait_log >= 5.0:
+                    state = self._round_state.get(round_num, {})
+                    print(
+                        f"[stage0][WAIT] round={round_num} received={state.get('received', 0)}/"
+                        f"{state.get('expected', '?')}"
+                    )
+                    last_wait_log = now
                 if cond:
                     cond.wait(timeout=0.5)
                 else:
@@ -1368,9 +1351,19 @@ class PipelineProtoVehicle:
                 metrics = self._get_round_metrics(round_num)
                 comm_sent = metrics.get("activation_bytes_sent", 0)
                 comm_recv = metrics.get("grad_bytes_recv", 0)
+                grad_latency_list = metrics.get("grad_latency_ms", [])
+                apply_ms_list = metrics.get("stage0_apply_ms", [])
+                step_ms_list = metrics.get("stage0_step_ms", [])
+                avg_grad_latency = sum(grad_latency_list) / max(1, len(grad_latency_list))
+                avg_apply_ms = sum(apply_ms_list) / max(1, len(apply_ms_list))
+                avg_step_ms = sum(step_ms_list) / max(1, len(step_ms_list))
             print(
                 f"[stage0][METRICS] comm_bytes_sent={comm_sent} "
                 f"comm_bytes_recv={comm_recv}"
+            )
+            print(
+                f"[stage0][METRICS] round={round_num} avg_grad_latency_ms={avg_grad_latency:.2f} "
+                f"avg_apply_ms={avg_apply_ms:.2f} avg_step_ms={avg_step_ms:.2f}"
             )
             with self._lock:
                 self._round_metrics.pop(round_num, None)
@@ -1464,14 +1457,19 @@ class PipelineProtoVehicle:
             data = pipeline_msg.data
             round_num = data.get("round", DEFAULT_ROUND)
             activation_info = data.get("activation_info", {})
+            t_start = time.perf_counter()
+            decode_start = t_start
             activation_data = self._unwrap_tensor_payload(data["activation"])
             labels_data = self._unwrap_tensor_payload(data["labels"])
             activation_data = self._decode_tensor_payload(activation_data)
             labels_data = self._decode_tensor_payload(labels_data)
+            decode_end = time.perf_counter()
+            decode_ms = (decode_end - decode_start) * 1000.0
             with self._lock:
                 metrics = self._get_round_metrics(round_num)
                 metrics["activation_bytes_recv"] += self._estimate_payload_bytes(activation_data)
                 metrics["activation_bytes_recv"] += self._estimate_payload_bytes(labels_data)
+                metrics["stage1_decode_ms"].append(decode_ms)
             if activation_info.get("lep_enabled"):
                 error_norm = activation_info.get("lep_error_norm")
                 error_norm_str = f"{error_norm:.4f}" if isinstance(error_norm, (int, float)) else "N/A"
@@ -1497,9 +1495,12 @@ class PipelineProtoVehicle:
 
             phase = get_micro_batch_phase(micro_batch, micro_batches).value
 
+            compute_start = time.perf_counter()
             outputs = self.model(activation)
             loss = self.criterion(outputs, labels)
             loss.backward()
+            compute_end = time.perf_counter()
+            compute_ms = (compute_end - compute_start) * 1000.0
 
             grad = activation.grad.detach()
             seq_id = self.sequence_id_factory.make(round_num, "gradient", micro_batch)
@@ -1527,12 +1528,25 @@ class PipelineProtoVehicle:
 
             endpoint = self.bridge.message_router.routing_table.get(self.stage0_id)
             if endpoint:
+                send_start = time.perf_counter()
                 with self._lock:
                     metrics = self._get_round_metrics(round_num)
                     metrics["grad_bytes_sent"] += self._estimate_payload_bytes(grad_payload)
                 self.bridge.message_router.pipeline_comm_manager.send_pipeline_data(grad_msg, endpoint)
+                send_end = time.perf_counter()
+                send_ms = (send_end - send_start) * 1000.0
+                e2e_ms = (send_end - t_start) * 1000.0
+                with self._lock:
+                    metrics = self._get_round_metrics(round_num)
+                    metrics["stage1_compute_ms"].append(compute_ms)
+                    metrics["stage1_send_ms"].append(send_ms)
+                    metrics["stage1_e2e_ms"].append(e2e_ms)
                 print(
                     f"[stage1] Sent gradient {phase} (loss={loss.item():.4f}, micro {micro_batch + 1}/{micro_batches})"
+                )
+                print(
+                    f"[stage1][TIMING] round={round_num} micro={micro_batch + 1}/{micro_batches} "
+                    f"decode_ms={decode_ms:.2f} compute_ms={compute_ms:.2f} send_ms={send_ms:.2f} e2e_ms={e2e_ms:.2f}"
                 )
 
             self.sequence_registry.unregister_sequence(pipeline_msg.sequence_id)
@@ -1548,9 +1562,22 @@ class PipelineProtoVehicle:
                         metrics = self._get_round_metrics(round_num)
                         comm_sent = metrics.get("grad_bytes_sent", 0)
                         comm_recv = metrics.get("activation_bytes_recv", 0)
+                        decode_ms_list = metrics.get("stage1_decode_ms", [])
+                        compute_ms_list = metrics.get("stage1_compute_ms", [])
+                        send_ms_list = metrics.get("stage1_send_ms", [])
+                        e2e_ms_list = metrics.get("stage1_e2e_ms", [])
+                        avg_decode = sum(decode_ms_list) / max(1, len(decode_ms_list))
+                        avg_compute = sum(compute_ms_list) / max(1, len(compute_ms_list))
+                        avg_send = sum(send_ms_list) / max(1, len(send_ms_list))
+                        avg_e2e = sum(e2e_ms_list) / max(1, len(e2e_ms_list))
                         print(
                             f"[stage1][METRICS] round={round_num} comm_bytes_sent={comm_sent} "
                             f"comm_bytes_recv={comm_recv}"
+                        )
+                        print(
+                            f"[stage1][METRICS] round={round_num} "
+                            f"avg_decode_ms={avg_decode:.2f} avg_compute_ms={avg_compute:.2f} "
+                            f"avg_send_ms={avg_send:.2f} avg_e2e_ms={avg_e2e:.2f}"
                         )
                         self._round_metrics.pop(round_num, None)
                         if self.auto_exit:
@@ -1633,6 +1660,7 @@ class PipelineProtoVehicle:
 
             data = pipeline_msg.data
             round_num = data.get("round", DEFAULT_ROUND)
+            t_grad_recv = time.perf_counter()
             grad_data = self._unwrap_tensor_payload(data["grad"])
             with self._lock:
                 metrics = self._get_round_metrics(round_num)
@@ -1644,6 +1672,19 @@ class PipelineProtoVehicle:
 
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
             micro_batches = data.get("micro_batches", self.micro_batches)
+            with self._lock:
+                metrics = self._get_round_metrics(round_num)
+                send_ts = metrics.get("activation_send_ts", {}).pop(micro_batch, None)
+                if send_ts is not None:
+                    latency_ms = (t_grad_recv - send_ts) * 1000.0
+                    metrics["grad_latency_ms"].append(latency_ms)
+                else:
+                    latency_ms = None
+            if latency_ms is not None:
+                print(
+                    f"[stage0][LATENCY] round={round_num} micro={micro_batch + 1}/{micro_batches} "
+                    f"grad_latency_ms={latency_ms:.2f}"
+                )
             activation_seq_id = self.sequence_id_factory.make(round_num, "activation", micro_batch)
             with self._lock:
                 activation = self._activation_cache.pop(activation_seq_id, None)
@@ -1652,8 +1693,22 @@ class PipelineProtoVehicle:
                 print("[stage0] Missing activation for gradient")
                 continue
 
+            if PIPELINE_TIMING_SYNC and torch.cuda.is_available():
+                torch.cuda.synchronize()
+            apply_start = time.perf_counter()
             activation.backward(grad)
+            if PIPELINE_TIMING_SYNC and torch.cuda.is_available():
+                torch.cuda.synchronize()
+            apply_end = time.perf_counter()
+            apply_ms = (apply_end - apply_start) * 1000.0
+            with self._lock:
+                metrics = self._get_round_metrics(round_num)
+                metrics["stage0_apply_ms"].append(apply_ms)
             print("[stage0] Applied gradient for micro-batch")
+            print(
+                f"[stage0][TIMING] round={round_num} micro={micro_batch + 1}/{micro_batches} "
+                f"apply_ms={apply_ms:.2f}"
+            )
 
             self.sequence_registry.unregister_sequence(pipeline_msg.sequence_id)
 
@@ -1662,11 +1717,11 @@ class PipelineProtoVehicle:
                     self._round_state[round_num] = {"expected": int(micro_batches), "received": 0}
                 state = self._round_state[round_num]
                 state["received"] += 1
-                if state["received"] >= state["expected"]:
-                    self.optimizer.step()
-                    self._save_checkpoint(round_num)
+                received = state["received"]
+                expected = state["expected"]
+                if received >= expected and not state.get("step_started"):
+                    state["step_started"] = True
                     state["done"] = True
-                    print("[stage0] Applied all gradients and updated weights")
 
                     round_done = CrossPlatformMessage(
                         message_id=str(uuid.uuid4()),
@@ -1690,6 +1745,51 @@ class PipelineProtoVehicle:
                     cond = self._round_cond.get(round_num)
                     if cond:
                         cond.notify_all()
+
+                    print(
+                        f"[stage0][DEBUG] round={round_num} all gradients received "
+                        f"({received}/{expected}), starting optimizer step"
+                    )
+
+                    step_done = threading.Event()
+
+                    def _run_step():
+                        try:
+                            if PIPELINE_TIMING_SYNC and torch.cuda.is_available():
+                                torch.cuda.synchronize()
+                            step_start = time.perf_counter()
+                            self.optimizer.step()
+                            if PIPELINE_TIMING_SYNC and torch.cuda.is_available():
+                                torch.cuda.synchronize()
+                            step_end = time.perf_counter()
+                            step_ms = (step_end - step_start) * 1000.0
+                            with self._lock:
+                                metrics = self._round_metrics.get(round_num)
+                                if metrics is not None:
+                                    metrics["stage0_step_ms"].append(step_ms)
+                            self._save_checkpoint(round_num)
+                            print("[stage0] Applied all gradients and updated weights")
+                            print(f"[stage0][TIMING] round={round_num} optimizer_step_ms={step_ms:.2f}")
+                        except Exception:
+                            print(f"[stage0][ERROR] optimizer step failed (round {round_num})")
+                            traceback.print_exc()
+                        finally:
+                            step_done.set()
+
+                    def _step_watchdog():
+                        if PIPELINE_STEP_TIMEOUT_SEC <= 0:
+                            return
+                        time.sleep(PIPELINE_STEP_TIMEOUT_SEC)
+                        if not step_done.is_set():
+                            print(
+                                f"[stage0][ERROR] optimizer step timeout after "
+                                f"{PIPELINE_STEP_TIMEOUT_SEC:.0f}s (round {round_num})"
+                            )
+                            _request_shutdown()
+
+                    if PIPELINE_STEP_TIMEOUT_SEC > 0:
+                        threading.Thread(target=_step_watchdog, daemon=True).start()
+                    threading.Thread(target=_run_step, daemon=True).start()
 
     @staticmethod
     def _get_local_ip(remote_host: Optional[str] = None) -> str:
@@ -1731,7 +1831,11 @@ def main():
     parser.add_argument("--role", choices=["stage0", "stage1"], help="vehicle role")
     parser.add_argument("--stage0-id", default=DEFAULT_STAGE0_ID, help="stage0 vehicle id")
     parser.add_argument("--stage1-id", default=DEFAULT_STAGE1_ID, help="stage1 vehicle id")
-    parser.add_argument("--template-id", default=DEFAULT_TEMPLATE_ID, help="pipeline template id")
+    parser.add_argument(
+        "--template-id",
+        default=DEFAULT_TEMPLATE_ID,
+        help=f"pipeline template id (use '{AUTO_TEMPLATE_TOKEN}' for auto selection)"
+    )
     parser.add_argument("--rounds", type=int, default=DEFAULT_ROUNDS, help="total training rounds")
     parser.add_argument("--micro-batches", type=int, default=DEFAULT_MICRO_BATCHES, help="micro-batches per round")
     parser.add_argument(

@@ -5,6 +5,7 @@ Manages pipeline templates for efficient vehicle-to-vehicle pipeline formation.
 Provides fast template lookup (<5ms) and organized storage using basket-based clustering.
 """
 import time
+import math
 import hashlib
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Set
@@ -22,11 +23,14 @@ from fhdp.core.constants import (
     MAX_TEMPLATE_MEMORY
 )
 
+MEM_UNIT_GB = 2.0
+
 @dataclass
 class TemplateBasket:
-    """Basket for organizing similar templates"""
+    """Basket for organizing templates by memory tier and pipeline length"""
     basket_id: str
-    resource_signature: str  # Hash of resource requirements
+    memory_tier: int
+    pipeline_length: int
     templates: List[PipelineTemplate] = field(default_factory=list)
     avg_success_rate: float = 0.0
     usage_count: int = 0
@@ -192,8 +196,7 @@ class TemplateMatcher:
     
     def __init__(self):
         self.baskets: Dict[str, TemplateBasket] = {}
-        self.resource_index = defaultdict(set)  # resource_signature -> basket_ids
-        self.length_index = defaultdict(set)  # pipeline_length -> basket_ids
+        self.basket_index: Dict[Tuple[int, int], str] = {}  # (memory_tier, length) -> basket_id
         self.template_id_to_basket_id = {}  # template_id -> basket_id for fast lookup
         self.success_cache = {}  # LRU cache for successful matches
         self.cache_size = 1000
@@ -202,34 +205,94 @@ class TemplateMatcher:
         self.cache_hits = 0
         self.cache_lookups = 0
         
-    def _create_resource_signature(self, resource_requirements: List[ResourceClass]) -> str:
-        """Create hash signature for resource requirements"""
-        return hashlib.md5(''.join([r.value for r in resource_requirements]).encode()).hexdigest()
+    def _estimate_stage0_memory_gb(self, template: PipelineTemplate) -> float:
+        model_partition = template.model_partition or {}
+        resource_estimates = model_partition.get("resource_estimates", {})
+        stage0 = resource_estimates.get("stage0", {})
+        if "memory_gb" in stage0:
+            return float(stage0["memory_gb"])
+        if template.model_fragment_size > 0:
+            return max(0.5, (template.model_fragment_size * 6) / (1024 ** 3))
+        return 2.0
+
+    def _template_memory_tier(self, template: PipelineTemplate) -> int:
+        memory_gb = self._estimate_stage0_memory_gb(template)
+        return max(1, int(math.ceil(memory_gb / MEM_UNIT_GB)))
+
+    def _vehicle_memory_tier(self, vehicle: VehicleInfo) -> int:
+        memory_gb = vehicle.resources.get("memory_gb", vehicle.resources.get("memory", 0))
+        try:
+            memory_gb = float(memory_gb)
+        except (TypeError, ValueError):
+            memory_gb = 0.0
+        return max(1, int(math.floor(memory_gb / MEM_UNIT_GB)))
+
+    def _classify_vehicle_resource(self, vehicle: VehicleInfo) -> ResourceClass:
+        """Classify vehicle resource level based on capabilities"""
+        resources = vehicle.resources
+
+        # Get memory in GB
+        memory_gb = resources.get("memory_gb", resources.get("memory", 0))
+        if isinstance(memory_gb, (int, float)):
+            memory_gb = float(memory_gb)
+        else:
+            memory_gb = 0.0
+
+        # Get compute capability (GPU type, FLOPS, etc.)
+        gpu_type = resources.get("gpu_type", "").lower()
+        compute_score = resources.get("compute_score", 0.5)
+
+        # Classification logic for Jetson devices:
+        # HIGH: Jetson AGX Orin (64GB), Orin NX (16GB), AGX Xavier (32GB)
+        # MEDIUM: Orin Nano (8GB), AGX Xavier (16GB), Xavier NX (8GB)
+        # LOW: Jetson Nano (4GB), older devices
+
+        # Check for specific Jetson models
+        if "orin" in gpu_type:
+            # Orin devices
+            if memory_gb >= 32 or "agx" in gpu_type:
+                return ResourceClass.HIGH  # AGX Orin 64GB
+            elif memory_gb >= 16:
+                return ResourceClass.HIGH  # Orin NX 16GB
+            else:
+                return ResourceClass.MEDIUM  # Orin Nano 8GB
+        elif "xavier" in gpu_type:
+            # Xavier devices
+            if "agx" in gpu_type and memory_gb >= 32:
+                return ResourceClass.HIGH  # AGX Xavier 32GB
+            elif memory_gb >= 16:
+                return ResourceClass.MEDIUM  # AGX Xavier 16GB, Xavier NX
+            else:
+                return ResourceClass.MEDIUM  # Xavier NX 8GB
+        elif "nano" in gpu_type:
+            return ResourceClass.LOW  # Jetson Nano 4GB
+        else:
+            # Generic classification based on memory and compute score
+            if memory_gb >= 32 or compute_score >= 0.8:
+                return ResourceClass.HIGH
+            elif memory_gb >= 8 or compute_score >= 0.5:
+                return ResourceClass.MEDIUM
+            else:
+                return ResourceClass.LOW
     
     def add_template(self, template: PipelineTemplate):
         """Add template to appropriate basket"""
-        signature = self._create_resource_signature(template.resource_requirements)
-        basket_id = f"{signature}_{len(template.resource_requirements)}"
+        memory_tier = self._template_memory_tier(template)
+        length = len(template.resource_requirements)
+        basket_key = (memory_tier, length)
+        basket_id = f"mt{memory_tier}_s{length}"
         
         if basket_id not in self.baskets:
-            # Create new basket
             basket = TemplateBasket(
                 basket_id=basket_id,
-                resource_signature=signature
+                memory_tier=memory_tier,
+                pipeline_length=length
             )
             self.baskets[basket_id] = basket
-            
-            # Update indexes
-            self.resource_index[signature].add(basket_id)
-            self.length_index[len(template.resource_requirements)].add(basket_id)
+            self.basket_index[basket_key] = basket_id
         
-        # Add template to basket
         self.baskets[basket_id].templates.append(template)
-        
-        # Update template to basket index
         self.template_id_to_basket_id[template.template_id] = basket_id
-        
-        # Sort templates by expected duration (faster templates first)
         self.baskets[basket_id].templates.sort(key=lambda t: t.expected_duration)
     
     def find_best_template(self, available_vehicles: List[VehicleInfo], 
@@ -240,28 +303,22 @@ class TemplateMatcher:
         # Extract vehicle resources
         vehicle_resources = []
         for vehicle in available_vehicles:
-            cpu_usage = 1.0 - vehicle.resources.get('cpu', 0.5)
-            memory_usage = 1.0 - vehicle.resources.get('memory', 0.5)
-            battery = vehicle.resources.get('battery', 0.7)
-            
-            if cpu_usage > 0.8 and memory_usage > 0.8 and battery > 0.7:
-                vehicle_resources.append(ResourceClass.HIGH)
-            elif cpu_usage > 0.5 and memory_usage > 0.5 and battery > 0.4:
-                vehicle_resources.append(ResourceClass.MEDIUM)
-            else:
-                vehicle_resources.append(ResourceClass.LOW)
+            vehicle_resources.append(self._classify_vehicle_resource(vehicle))
         
         candidates = []
+        if not available_vehicles:
+            return candidates
+        
+        stage0_tier = self._vehicle_memory_tier(available_vehicles[0])
+        max_stage = min(MAX_PIPELINE_LENGTH, 4)
         
         # Check cache first
-        # Make cache key order-independent by counting resource classes
         resource_counts = {}
         for r in vehicle_resources:
             resource_counts[r.value] = resource_counts.get(r.value, 0) + 1
-        # Create cache key from sorted resource counts
-        cache_key = ''.join([f"{k}:{v}," for k, v in sorted(resource_counts.items())])
+        cache_key = f"mt{stage0_tier}|" + ''.join([f"{k}:{v}," for k, v in sorted(resource_counts.items())])
+        cache_key += "|v2"
         
-        # Track cache statistics
         self.cache_lookups += 1
         
         if cache_key in self.success_cache:
@@ -269,52 +326,28 @@ class TemplateMatcher:
             cached_result = self.success_cache[cache_key]
             candidates.extend(cached_result)
             
-            # Check time constraint
             if time.time() - start_time > TEMPLATE_LOOKUP_LATENCY_THRESHOLD:
                 return candidates[:max_candidates]
         
-        # Search for matching templates
         n_vehicles = len(available_vehicles)
+        candidate_baskets: List[Tuple[int, str]] = []
+        for length in range(MIN_PIPELINE_PARTICIPANTS, max_stage + 1):
+            basket_id = self.basket_index.get((stage0_tier, length))
+            if basket_id:
+                candidate_baskets.append((length, basket_id))
+        candidate_baskets.sort(key=lambda x: 0 if x[0] == n_vehicles else 1)
         
-        # First try exact length matches
-        matching_baskets = self.length_index.get(n_vehicles, set())
-        
-        for basket_id in matching_baskets:
+        for length, basket_id in candidate_baskets:
             basket = self.baskets[basket_id]
-            
+            flexible = length != n_vehicles
             for template in basket.templates:
-                score = self._calculate_match_score(template, vehicle_resources)
-                if score > 0.3:  # Minimum match threshold
-                    candidates.append((template, score))
-                
-                # Check time constraint
+                score = self._calculate_match_score(template, vehicle_resources, flexible=flexible)
+                if score > (0.3 if not flexible else 0.2):
+                    candidates.append((template, score if not flexible else score * 0.8))
                 if time.time() - start_time > TEMPLATE_LOOKUP_LATENCY_THRESHOLD:
                     break
-            
             if time.time() - start_time > TEMPLATE_LOOKUP_LATENCY_THRESHOLD:
                 break
-        
-        # If no exact matches, try flexible length matching
-        if not candidates and n_vehicles > MIN_PIPELINE_PARTICIPANTS:
-            for length in range(MIN_PIPELINE_PARTICIPANTS, min(n_vehicles, MAX_PIPELINE_LENGTH) + 1):
-                if length == n_vehicles:
-                    continue
-                    
-                matching_baskets = self.length_index.get(length, set())
-                
-                for basket_id in matching_baskets:
-                    basket = self.baskets[basket_id]
-                    
-                    for template in basket.templates:
-                        score = self._calculate_match_score(template, vehicle_resources, flexible=True)
-                        if score > 0.2:
-                            candidates.append((template, score * 0.8))  # Penalty for length mismatch
-                    
-                    if time.time() - start_time > TEMPLATE_LOOKUP_LATENCY_THRESHOLD:
-                        break
-                
-                if time.time() - start_time > TEMPLATE_LOOKUP_LATENCY_THRESHOLD:
-                    break
         
         # Sort by score and return top candidates
         candidates.sort(key=lambda x: x[1], reverse=True)
@@ -361,13 +394,10 @@ class TemplateMatcher:
         score /= len(template_resources)
         
         # Apply basket success rate bonus
-        signature = self._create_resource_signature(template.resource_requirements)
-        # Find the basket that contains this template
-        for basket_id in self.resource_index[signature]:
+        basket_id = self.template_id_to_basket_id.get(template.template_id)
+        if basket_id and basket_id in self.baskets:
             basket = self.baskets[basket_id]
-            if template in basket.templates:
-                score *= (1.0 + basket.avg_success_rate * 0.2)
-                break  # Apply bonus only once from the correct basket
+            score *= (1.0 + basket.avg_success_rate * 0.2)
         
         return score
     
@@ -419,51 +449,7 @@ class TemplateManager:
     
     def _classify_vehicle_resource(self, vehicle: VehicleInfo) -> ResourceClass:
         """Classify vehicle resource level based on capabilities"""
-        resources = vehicle.resources
-        
-        # Get memory in GB
-        memory_gb = resources.get("memory_gb", resources.get("memory", 0))
-        if isinstance(memory_gb, (int, float)):
-            memory_gb = float(memory_gb)
-        else:
-            memory_gb = 0.0
-        
-        # Get compute capability (GPU type, FLOPS, etc.)
-        gpu_type = resources.get("gpu_type", "").lower()
-        compute_score = resources.get("compute_score", 0.5)
-        
-        # Classification logic for Jetson devices:
-        # HIGH: Jetson AGX Orin (64GB), Orin NX (16GB), AGX Xavier (32GB)
-        # MEDIUM: Orin Nano (8GB), AGX Xavier (16GB), Xavier NX (8GB)
-        # LOW: Jetson Nano (4GB), older devices
-        
-        # Check for specific Jetson models
-        if "orin" in gpu_type:
-            # Orin devices
-            if memory_gb >= 32 or "agx" in gpu_type:
-                return ResourceClass.HIGH  # AGX Orin 64GB
-            elif memory_gb >= 16:
-                return ResourceClass.HIGH  # Orin NX 16GB
-            else:
-                return ResourceClass.MEDIUM  # Orin Nano 8GB
-        elif "xavier" in gpu_type:
-            # Xavier devices
-            if "agx" in gpu_type and memory_gb >= 32:
-                return ResourceClass.HIGH  # AGX Xavier 32GB
-            elif memory_gb >= 16:
-                return ResourceClass.MEDIUM  # AGX Xavier 16GB, Xavier NX
-            else:
-                return ResourceClass.MEDIUM  # Xavier NX 8GB
-        elif "nano" in gpu_type:
-            return ResourceClass.LOW  # Jetson Nano 4GB
-        else:
-            # Generic classification based on memory and compute score
-            if memory_gb >= 32 or compute_score >= 0.8:
-                return ResourceClass.HIGH
-            elif memory_gb >= 8 or compute_score >= 0.5:
-                return ResourceClass.MEDIUM
-            else:
-                return ResourceClass.LOW
+        return self.matcher._classify_vehicle_resource(vehicle)
     
     def find_template_for_vehicles(self, vehicles: List[VehicleInfo]) -> Optional[PipelineTemplate]:
         """Find best template for given vehicles based on their resources"""
@@ -472,10 +458,16 @@ class TemplateManager:
         if not vehicles:
             return None
         
-        # Classify each vehicle's resource level
-        vehicle_resources = [self._classify_vehicle_resource(v) for v in vehicles]
+        # First use basket-based matcher for fast candidate lookup
+        candidates = self.matcher.find_best_template(vehicles)
+        if candidates:
+            for template, _ in candidates:
+                if len(template.resource_requirements) == len(vehicles) and template.model_partition:
+                    return template
+            return candidates[0][0]
         
-        # First, try to find exact match in registry
+        # Fallback to registry scoring when no candidates found
+        vehicle_resources = [self._classify_vehicle_resource(v) for v in vehicles]
         best_template = None
         best_score = -1
         
@@ -483,23 +475,19 @@ class TemplateManager:
             if len(template.resource_requirements) != len(vehicles):
                 continue
             
-            # Calculate match score
             score = 0
             for i, (req, actual) in enumerate(zip(template.resource_requirements, vehicle_resources)):
                 if req == actual:
-                    score += 2  # Exact match
+                    score += 2
                 elif (req == ResourceClass.HIGH and actual == ResourceClass.MEDIUM) or \
                      (req == ResourceClass.MEDIUM and actual == ResourceClass.HIGH):
-                    score += 1  # Close match
+                    score += 1
                 elif (req == ResourceClass.MEDIUM and actual == ResourceClass.LOW) or \
                      (req == ResourceClass.LOW and actual == ResourceClass.MEDIUM):
-                    score += 0.5  # Acceptable match
+                    score += 0.5
             
-            # Prefer templates with model_partition
             if template.model_partition:
                 score += 3
-                
-                # Add score based on resource estimates matching
                 resource_estimates = template.model_partition.get("resource_estimates", {})
                 for i, vehicle in enumerate(vehicles):
                     stage_key = f"stage{i}"
@@ -507,14 +495,10 @@ class TemplateManager:
                         est = resource_estimates[stage_key]
                         vehicle_mem = vehicle.resources.get("memory_gb", 0)
                         vehicle_score = vehicle.resources.get("compute_score", 0)
-                        
-                        # Check if memory is sufficient
                         if vehicle_mem >= est.get("memory_gb", 0):
                             score += 1.5
                         elif vehicle_mem >= est.get("memory_gb", 0) * 0.8:
                             score += 1.0
-                        
-                        # Check if compute score is sufficient
                         if vehicle_score >= est.get("compute_score", 0):
                             score += 1.5
                         elif vehicle_score >= est.get("compute_score", 0) * 0.8:
@@ -524,15 +508,7 @@ class TemplateManager:
                 best_score = score
                 best_template = template
         
-        if best_template:
-            return best_template
-        
-        # Fallback to matcher-based search
-        candidates = self.matcher.find_best_template(vehicles)
-        if candidates:
-            return candidates[0][0]
-        
-        return None
+        return best_template
     
     def register_successful_pipeline(self, pipeline: Pipeline, success: bool, duration: float):
         """Register pipeline execution for template learning"""

@@ -75,6 +75,59 @@ from collections import deque
 
 import torch
 
+_RECV_STATS_LOCK = threading.Lock()
+_RECV_STATS = {
+    "calls": 0,
+    "bytes": 0,
+    "timeouts": 0,
+    "slow_calls": 0,
+    "slow_time": 0.0,
+}
+_RECV_STATS_LOG_EVERY = 2000
+_RECV_SLOW_SMALL_BYTES = 8
+_RECV_SLOW_THRESHOLD_SEC_SMALL = 0.01
+_RECV_SLOW_THRESHOLD_SEC = 0.05
+
+_SEND_SLOW_THRESHOLD_SEC = 0.5
+
+
+def _update_recv_stats(n: int, elapsed: float, timed_out: bool, is_slow: bool) -> None:
+    calls = 0
+    bytes_total = 0
+    timeouts = 0
+    slow_calls = 0
+    slow_time = 0.0
+    should_log = False
+    with _RECV_STATS_LOCK:
+        _RECV_STATS["calls"] += 1
+        _RECV_STATS["bytes"] += n
+        if timed_out:
+            _RECV_STATS["timeouts"] += 1
+        if is_slow:
+            _RECV_STATS["slow_calls"] += 1
+            _RECV_STATS["slow_time"] += elapsed
+        should_log = (_RECV_STATS["calls"] % _RECV_STATS_LOG_EVERY) == 0
+        if should_log:
+            calls = _RECV_STATS["calls"]
+            bytes_total = _RECV_STATS["bytes"]
+            timeouts = _RECV_STATS["timeouts"]
+            slow_calls = _RECV_STATS["slow_calls"]
+            slow_time = _RECV_STATS["slow_time"]
+    if should_log:
+        timeout_rate = (timeouts / calls * 100.0) if calls else 0.0
+        avg_bytes = (bytes_total / calls) if calls else 0.0
+        avg_slow_ms = (slow_time / slow_calls * 1000.0) if slow_calls else 0.0
+        logging.info(
+            "Recv stats: calls=%d, bytes=%d, timeouts=%d, timeout_rate=%.2f%%, slow_calls=%d, avg_slow_ms=%.2f, avg_bytes_per_call=%.1f",
+            calls,
+            bytes_total,
+            timeouts,
+            timeout_rate,
+            slow_calls,
+            avg_slow_ms,
+            avg_bytes,
+        )
+
 from .hardware_adapter import HardwarePlatform, HardwareCapabilities, NetworkInterface
 from .types import CommunicationBundle, CommunicationProtocol
 import sys
@@ -648,19 +701,42 @@ class PipelineCommunicationManager:
                 
             conn, recv_lock = result
             
+            send_start = time.perf_counter()
+            serialize_start = send_start
             # Serialize message
             message_dict = cp_message.to_dict()
-            serialized_data = self.message_router.serialization_manager.serialize(message_dict, cp_message.serialization_format)
-            
+            serialized_data = self.message_router.serialization_manager.serialize(
+                message_dict, cp_message.serialization_format
+            )
+            serialize_end = time.perf_counter()
+
+            compress_start = serialize_end
             # Compress if needed
             if cp_message.compression_type != CompressionType.NONE:
                 serialized_data, compression_ratio = self.message_router.compression_manager.compress(
                     serialized_data, cp_message.compression_type
                 )
-            
+            compress_end = time.perf_counter()
+
             # Send message
             msg_len = len(serialized_data).to_bytes(4, byteorder='big')
             conn.sendall(msg_len + serialized_data)
+            send_end = time.perf_counter()
+
+            serialize_ms = (serialize_end - serialize_start) * 1000.0
+            compress_ms = (compress_end - compress_start) * 1000.0
+            send_ms = (send_end - compress_end) * 1000.0
+            total_ms = (send_end - send_start) * 1000.0
+            if (total_ms / 1000.0) >= _SEND_SLOW_THRESHOLD_SEC:
+                logging.warning(
+                    "Slow pipeline send %s bytes (serialize=%.2fms, compress=%.2fms, send=%.2fms, total=%.2fms, endpoint=%s)",
+                    len(serialized_data),
+                    serialize_ms,
+                    compress_ms,
+                    send_ms,
+                    total_ms,
+                    target_endpoint,
+                )
             
             # Non-blocking ACK handling if requested
             if cp_message.requires_ack:
@@ -1750,7 +1826,12 @@ class MessageRouter:
             self.connection_pool.release_connection(endpoint)
 
     @staticmethod
-    def _recv_exact(conn: socket.socket, n: int, timeout: Optional[float] = None) -> Optional[bytes]:
+    def _recv_exact(
+        conn: socket.socket,
+        n: int,
+        timeout: Optional[float] = None,
+        raise_on_timeout: bool = False,
+    ) -> Optional[bytes]:
         """
         优化的零拷贝接收：使用 bytearray + recv_into 预分配，
         避免频繁的 bytes 对象分配和拼接。
@@ -1761,10 +1842,18 @@ class MessageRouter:
             timeout: Optional timeout in seconds for the entire recv operation
                     If None, use the socket's current timeout setting
                     Default: 30.0 seconds if no timeout is set
+            raise_on_timeout: If True, re-raise socket.timeout for caller to handle
         """
         buf = bytearray(n)
         view = memoryview(buf)
         offset = 0
+        start_time = time.monotonic()
+        timed_out = False
+        slow_threshold = (
+            _RECV_SLOW_THRESHOLD_SEC_SMALL
+            if n <= _RECV_SLOW_SMALL_BYTES
+            else _RECV_SLOW_THRESHOLD_SEC
+        )
         
         # Get current timeout setting
         original_timeout = conn.gettimeout()
@@ -1782,11 +1871,41 @@ class MessageRouter:
                         return None
                     offset += received
                 except socket.timeout:
-                    logging.warning(f"Timeout waiting to receive {n} bytes")
+                    timed_out = True
+                    if raise_on_timeout:
+                        raise
+                    elapsed = time.monotonic() - start_time
+                    try:
+                        peer = conn.getpeername()
+                    except OSError:
+                        peer = "unknown"
+                    logging.warning(
+                        "Timeout waiting to receive %d bytes (received=%d, elapsed=%.3fs, timeout=%s, peer=%s)",
+                        n,
+                        offset,
+                        elapsed,
+                        conn.gettimeout(),
+                        peer,
+                    )
                     return None
         finally:
             # Restore original timeout
             conn.settimeout(original_timeout)
+            elapsed = time.monotonic() - start_time
+            is_slow = (offset == n) and (elapsed >= slow_threshold)
+            _update_recv_stats(n, elapsed, timed_out, is_slow)
+            if is_slow and not timed_out:
+                try:
+                    peer = conn.getpeername()
+                except OSError:
+                    peer = "unknown"
+                logging.info(
+                    "Slow recv %d bytes (elapsed=%.3fs, peer=%s, timeout=%s)",
+                    n,
+                    elapsed,
+                    peer,
+                    original_timeout,
+                )
             
         return bytes(buf)
 
@@ -2130,14 +2249,14 @@ class MessageRouter:
                 try:
                     while self._listener_running.get(node_id, False):
                         try:
-                            len_data = self._recv_exact(conn, 4)
+                            len_data = self._recv_exact(conn, 4, raise_on_timeout=True)
                             if not len_data:
                                 logging.info(
                                     f"Server {node_id} closed connection, reconnecting...")
                                 break
 
                             msg_len = int.from_bytes(len_data, byteorder='big')
-                            msg_data = self._recv_exact(conn, msg_len)
+                            msg_data = self._recv_exact(conn, msg_len, raise_on_timeout=True)
                             if msg_data is None:
                                 break
 
