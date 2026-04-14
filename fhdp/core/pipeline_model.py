@@ -78,9 +78,28 @@ class _ViTStage1(nn.Module):
         return x
 
 
-def _split_vit_b16_2stage_v1(num_classes: int) -> Tuple[nn.Module, nn.Module]:
+def _split_vit_b16_2stage_light(num_classes: int) -> Tuple[nn.Module, nn.Module]:
+    """Split ViT at block 4 - lighter first stage for medium resources"""
+    model = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=num_classes)
+    split_idx = 4
+    stage0 = _ViTStage0(model, split_idx)
+    stage1 = _ViTStage1(model, split_idx)
+    return stage0, stage1
+
+
+def _split_vit_b16_2stage_medium(num_classes: int) -> Tuple[nn.Module, nn.Module]:
+    """Split ViT at block 6 - balanced split"""
     model = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=num_classes)
     split_idx = 6
+    stage0 = _ViTStage0(model, split_idx)
+    stage1 = _ViTStage1(model, split_idx)
+    return stage0, stage1
+
+
+def _split_vit_b16_2stage_heavy(num_classes: int) -> Tuple[nn.Module, nn.Module]:
+    """Split ViT at block 8 - heavier first stage for high resources"""
+    model = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=num_classes)
+    split_idx = 8
     stage0 = _ViTStage0(model, split_idx)
     stage1 = _ViTStage1(model, split_idx)
     return stage0, stage1
@@ -89,10 +108,91 @@ def _split_vit_b16_2stage_v1(num_classes: int) -> Tuple[nn.Module, nn.Module]:
 MODEL_SPLIT_REGISTRY: Dict[str, ModelSplitFn] = {
     "resnet18_2stage_v1": _split_resnet18_2stage_v1,
     "resnet18_2stage_v2": _split_resnet18_2stage_v2,
-    "vit_b16_2stage_v1": _split_vit_b16_2stage_v1,
+    "vit_b16_2stage_light": _split_vit_b16_2stage_light,
+    "vit_b16_2stage_medium": _split_vit_b16_2stage_medium,
+    "vit_b16_2stage_heavy": _split_vit_b16_2stage_heavy,
+    "vit_b16_2stage_v1": _split_vit_b16_2stage_medium,  # Legacy alias
 }
 
 PIPELINE_TEMPLATE_REGISTRY: Dict[str, PipelineTemplate] = {
+    # ResNet18 templates with different resource requirements
+    "resnet18_2stage_high_high": PipelineTemplate(
+        template_id="resnet18_2stage_high_high",
+        resource_requirements=[ResourceClass.HIGH, ResourceClass.HIGH],
+        expected_duration=8.0,
+        communication_pattern=[(0, 1)],
+        training_config=TrainingConfig(
+            epochs=1,
+            batch_size=DEFAULT_TEMPLATE_BATCH_SIZE,
+            learning_rate=0.01,
+            local_data_size=DEFAULT_TEMPLATE_BATCH_SIZE
+        ),
+        model_fragment_size=0,
+        model_partition={
+            "model_name": "resnet18",
+            "split_key": "resnet18_2stage_v1",
+            "stages": ["stage0", "stage1"],
+            "description": "ResNet18 split at layer2, both stages need high resources"
+        }
+    ),
+    "resnet18_2stage_high_medium": PipelineTemplate(
+        template_id="resnet18_2stage_high_medium",
+        resource_requirements=[ResourceClass.HIGH, ResourceClass.MEDIUM],
+        expected_duration=10.0,
+        communication_pattern=[(0, 1)],
+        training_config=TrainingConfig(
+            epochs=1,
+            batch_size=DEFAULT_TEMPLATE_BATCH_SIZE,
+            learning_rate=0.01,
+            local_data_size=DEFAULT_TEMPLATE_BATCH_SIZE
+        ),
+        model_fragment_size=0,
+        model_partition={
+            "model_name": "resnet18",
+            "split_key": "resnet18_2stage_v1",
+            "stages": ["stage0", "stage1"],
+            "description": "ResNet18 split at layer2, stage0 high, stage1 medium"
+        }
+    ),
+    "resnet18_2stage_medium_high": PipelineTemplate(
+        template_id="resnet18_2stage_medium_high",
+        resource_requirements=[ResourceClass.MEDIUM, ResourceClass.HIGH],
+        expected_duration=10.0,
+        communication_pattern=[(0, 1)],
+        training_config=TrainingConfig(
+            epochs=1,
+            batch_size=DEFAULT_TEMPLATE_BATCH_SIZE,
+            learning_rate=0.01,
+            local_data_size=DEFAULT_TEMPLATE_BATCH_SIZE
+        ),
+        model_fragment_size=0,
+        model_partition={
+            "model_name": "resnet18",
+            "split_key": "resnet18_2stage_v2",
+            "stages": ["stage0", "stage1"],
+            "description": "ResNet18 split at layer1, stage0 medium, stage1 high"
+        }
+    ),
+    "resnet18_2stage_medium_medium": PipelineTemplate(
+        template_id="resnet18_2stage_medium_medium",
+        resource_requirements=[ResourceClass.MEDIUM, ResourceClass.MEDIUM],
+        expected_duration=12.0,
+        communication_pattern=[(0, 1)],
+        training_config=TrainingConfig(
+            epochs=1,
+            batch_size=DEFAULT_TEMPLATE_BATCH_SIZE,
+            learning_rate=0.01,
+            local_data_size=DEFAULT_TEMPLATE_BATCH_SIZE
+        ),
+        model_fragment_size=0,
+        model_partition={
+            "model_name": "resnet18",
+            "split_key": "resnet18_2stage_v2",
+            "stages": ["stage0", "stage1"],
+            "description": "ResNet18 split at layer1, both stages medium resources"
+        }
+    ),
+    # Legacy aliases for backward compatibility
     "resnet18_2stage_v1": PipelineTemplate(
         template_id="resnet18_2stage_v1",
         resource_requirements=[ResourceClass.HIGH, ResourceClass.MEDIUM],
@@ -113,7 +213,7 @@ PIPELINE_TEMPLATE_REGISTRY: Dict[str, PipelineTemplate] = {
     ),
     "resnet18_2stage_v2": PipelineTemplate(
         template_id="resnet18_2stage_v2",
-        resource_requirements=[ResourceClass.HIGH, ResourceClass.MEDIUM],
+        resource_requirements=[ResourceClass.MEDIUM, ResourceClass.HIGH],
         expected_duration=10.0,
         communication_pattern=[(0, 1)],
         training_config=TrainingConfig(
@@ -129,6 +229,77 @@ PIPELINE_TEMPLATE_REGISTRY: Dict[str, PipelineTemplate] = {
             "stages": ["stage0", "stage1"]
         }
     ),
+    # ViT templates with different resource requirements
+    "vit_b16_2stage_high_high": PipelineTemplate(
+        template_id="vit_b16_2stage_high_high",
+        resource_requirements=[ResourceClass.HIGH, ResourceClass.HIGH],
+        expected_duration=15.0,
+        communication_pattern=[(0, 1)],
+        training_config=TrainingConfig(
+            epochs=1,
+            batch_size=DEFAULT_TEMPLATE_BATCH_SIZE,
+            learning_rate=0.01,
+            local_data_size=DEFAULT_TEMPLATE_BATCH_SIZE
+        ),
+        model_fragment_size=0,
+        model_partition={
+            "model_name": "vit_base_patch16_224",
+            "split_key": "vit_b16_2stage_heavy",
+            "stages": ["stage0", "stage1"],
+            "description": "ViT split at block 8, both stages need high resources",
+            "resource_estimates": {
+                "stage0": {"memory_gb": 4.5, "compute_score": 0.85},
+                "stage1": {"memory_gb": 3.5, "compute_score": 0.75}
+            }
+        }
+    ),
+    "vit_b16_2stage_high_medium": PipelineTemplate(
+        template_id="vit_b16_2stage_high_medium",
+        resource_requirements=[ResourceClass.HIGH, ResourceClass.MEDIUM],
+        expected_duration=20.0,
+        communication_pattern=[(0, 1)],
+        training_config=TrainingConfig(
+            epochs=1,
+            batch_size=DEFAULT_TEMPLATE_BATCH_SIZE,
+            learning_rate=0.01,
+            local_data_size=DEFAULT_TEMPLATE_BATCH_SIZE
+        ),
+        model_fragment_size=0,
+        model_partition={
+            "model_name": "vit_base_patch16_224",
+            "split_key": "vit_b16_2stage_medium",
+            "stages": ["stage0", "stage1"],
+            "description": "ViT split at block 6, stage0 high, stage1 medium",
+            "resource_estimates": {
+                "stage0": {"memory_gb": 3.5, "compute_score": 0.75},
+                "stage1": {"memory_gb": 4.5, "compute_score": 0.85}
+            }
+        }
+    ),
+    "vit_b16_2stage_medium_high": PipelineTemplate(
+        template_id="vit_b16_2stage_medium_high",
+        resource_requirements=[ResourceClass.MEDIUM, ResourceClass.HIGH],
+        expected_duration=20.0,
+        communication_pattern=[(0, 1)],
+        training_config=TrainingConfig(
+            epochs=1,
+            batch_size=DEFAULT_TEMPLATE_BATCH_SIZE,
+            learning_rate=0.01,
+            local_data_size=DEFAULT_TEMPLATE_BATCH_SIZE
+        ),
+        model_fragment_size=0,
+        model_partition={
+            "model_name": "vit_base_patch16_224",
+            "split_key": "vit_b16_2stage_light",
+            "stages": ["stage0", "stage1"],
+            "description": "ViT split at block 4, stage0 medium, stage1 high",
+            "resource_estimates": {
+                "stage0": {"memory_gb": 2.5, "compute_score": 0.65},
+                "stage1": {"memory_gb": 5.5, "compute_score": 0.95}
+            }
+        }
+    ),
+    # Legacy alias
     "vit_b16_2stage_v1": PipelineTemplate(
         template_id="vit_b16_2stage_v1",
         resource_requirements=[ResourceClass.HIGH, ResourceClass.MEDIUM],

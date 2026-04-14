@@ -401,21 +401,136 @@ class TemplateManager:
         self.last_generation_time = 0.0
         self.total_memory_usage = 0
         
-        # Initialize with synthetic templates
+        # Initialize with templates from registry
         self._initialize_templates()
     
     def _initialize_templates(self):
-        """Initialize template system with synthetic templates"""
-        synthetic_templates = self.generator.generate_synthetic_templates(100)
+        """Initialize template system with templates from registry"""
+        from fhdp.core.pipeline_model import PIPELINE_TEMPLATE_REGISTRY
+        
+        # Add templates from the registry (these have model_partition info)
+        for template in PIPELINE_TEMPLATE_REGISTRY.values():
+            self.matcher.add_template(template)
+        
+        # Also add some synthetic templates for broader coverage
+        synthetic_templates = self.generator.generate_synthetic_templates(50)
         for template in synthetic_templates:
             self.matcher.add_template(template)
     
-    def find_template_for_vehicles(self, vehicles: List[VehicleInfo]) -> Optional[PipelineTemplate]:
-        """Find best template for given vehicles"""
-        candidates = self.matcher.find_best_template(vehicles)
+    def _classify_vehicle_resource(self, vehicle: VehicleInfo) -> ResourceClass:
+        """Classify vehicle resource level based on capabilities"""
+        resources = vehicle.resources
         
+        # Get memory in GB
+        memory_gb = resources.get("memory_gb", resources.get("memory", 0))
+        if isinstance(memory_gb, (int, float)):
+            memory_gb = float(memory_gb)
+        else:
+            memory_gb = 0.0
+        
+        # Get compute capability (GPU type, FLOPS, etc.)
+        gpu_type = resources.get("gpu_type", "").lower()
+        compute_score = resources.get("compute_score", 0.5)
+        
+        # Classification logic for Jetson devices:
+        # HIGH: Jetson AGX Orin (64GB), Orin NX (16GB), AGX Xavier (32GB)
+        # MEDIUM: Orin Nano (8GB), AGX Xavier (16GB), Xavier NX (8GB)
+        # LOW: Jetson Nano (4GB), older devices
+        
+        # Check for specific Jetson models
+        if "orin" in gpu_type:
+            # Orin devices
+            if memory_gb >= 32 or "agx" in gpu_type:
+                return ResourceClass.HIGH  # AGX Orin 64GB
+            elif memory_gb >= 16:
+                return ResourceClass.HIGH  # Orin NX 16GB
+            else:
+                return ResourceClass.MEDIUM  # Orin Nano 8GB
+        elif "xavier" in gpu_type:
+            # Xavier devices
+            if "agx" in gpu_type and memory_gb >= 32:
+                return ResourceClass.HIGH  # AGX Xavier 32GB
+            elif memory_gb >= 16:
+                return ResourceClass.MEDIUM  # AGX Xavier 16GB, Xavier NX
+            else:
+                return ResourceClass.MEDIUM  # Xavier NX 8GB
+        elif "nano" in gpu_type:
+            return ResourceClass.LOW  # Jetson Nano 4GB
+        else:
+            # Generic classification based on memory and compute score
+            if memory_gb >= 32 or compute_score >= 0.8:
+                return ResourceClass.HIGH
+            elif memory_gb >= 8 or compute_score >= 0.5:
+                return ResourceClass.MEDIUM
+            else:
+                return ResourceClass.LOW
+    
+    def find_template_for_vehicles(self, vehicles: List[VehicleInfo]) -> Optional[PipelineTemplate]:
+        """Find best template for given vehicles based on their resources"""
+        from fhdp.core.pipeline_model import PIPELINE_TEMPLATE_REGISTRY
+        
+        if not vehicles:
+            return None
+        
+        # Classify each vehicle's resource level
+        vehicle_resources = [self._classify_vehicle_resource(v) for v in vehicles]
+        
+        # First, try to find exact match in registry
+        best_template = None
+        best_score = -1
+        
+        for template in PIPELINE_TEMPLATE_REGISTRY.values():
+            if len(template.resource_requirements) != len(vehicles):
+                continue
+            
+            # Calculate match score
+            score = 0
+            for i, (req, actual) in enumerate(zip(template.resource_requirements, vehicle_resources)):
+                if req == actual:
+                    score += 2  # Exact match
+                elif (req == ResourceClass.HIGH and actual == ResourceClass.MEDIUM) or \
+                     (req == ResourceClass.MEDIUM and actual == ResourceClass.HIGH):
+                    score += 1  # Close match
+                elif (req == ResourceClass.MEDIUM and actual == ResourceClass.LOW) or \
+                     (req == ResourceClass.LOW and actual == ResourceClass.MEDIUM):
+                    score += 0.5  # Acceptable match
+            
+            # Prefer templates with model_partition
+            if template.model_partition:
+                score += 3
+                
+                # Add score based on resource estimates matching
+                resource_estimates = template.model_partition.get("resource_estimates", {})
+                for i, vehicle in enumerate(vehicles):
+                    stage_key = f"stage{i}"
+                    if stage_key in resource_estimates:
+                        est = resource_estimates[stage_key]
+                        vehicle_mem = vehicle.resources.get("memory_gb", 0)
+                        vehicle_score = vehicle.resources.get("compute_score", 0)
+                        
+                        # Check if memory is sufficient
+                        if vehicle_mem >= est.get("memory_gb", 0):
+                            score += 1.5
+                        elif vehicle_mem >= est.get("memory_gb", 0) * 0.8:
+                            score += 1.0
+                        
+                        # Check if compute score is sufficient
+                        if vehicle_score >= est.get("compute_score", 0):
+                            score += 1.5
+                        elif vehicle_score >= est.get("compute_score", 0) * 0.8:
+                            score += 1.0
+            
+            if score > best_score:
+                best_score = score
+                best_template = template
+        
+        if best_template:
+            return best_template
+        
+        # Fallback to matcher-based search
+        candidates = self.matcher.find_best_template(vehicles)
         if candidates:
-            return candidates[0][0]  # Return best match
+            return candidates[0][0]
         
         return None
     

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 FHDP Pipeline Prototype (ResNet-18, micro-batching + 1F1B schedule)
 
@@ -20,8 +21,49 @@ Usage:
   python pipeline_proto.py --mode vehicle --role stage1 --vehicle-id orin --server-host <server-ip> --server-port 5000
 """
 
+# ---- Resolve project root for imports (MUST BE FIRST) ----
 import os
 import sys
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+possible_roots = [
+    os.path.abspath(os.path.join(script_dir, '..')),      # fhdp/tests/pipeline_test -> fhdp/
+    os.path.abspath(os.path.join(script_dir, '../..')),   # fhdp/tests/pipeline_test -> project root
+    os.path.abspath(os.path.join(script_dir, '../../..')),
+    os.path.abspath(os.path.join(script_dir, '../../../..')),
+]
+project_root = None
+for root in possible_roots:
+    if os.path.exists(os.path.join(root, 'fhdp')):
+        project_root = root
+        break
+    if os.path.exists(os.path.join(root, 'core')):  # root is fhdp package dir
+        project_root = os.path.dirname(root)
+        break
+
+# If still not found, try to find by walking up
+if project_root is None:
+    current = script_dir
+    for _ in range(5):
+        if os.path.exists(os.path.join(current, 'fhdp')):
+            project_root = current
+            break
+        if os.path.exists(os.path.join(current, 'setup.py')):
+            project_root = current
+            break
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+if project_root:
+    sys.path.insert(0, project_root)
+else:
+    # Last resort: add script_dir's parent directories
+    sys.path.insert(0, os.path.abspath(os.path.join(script_dir, '../..')))
+    sys.path.insert(0, os.path.abspath(os.path.join(script_dir, '..')))
+
+# Now import the rest
 import time
 import uuid
 import argparse
@@ -41,24 +83,6 @@ from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import CIFAR10, ImageFolder
 from torchvision import transforms
 
-# ---- Resolve project root for imports ----
-script_dir = os.path.dirname(os.path.abspath(__file__))
-possible_roots = [
-    os.path.abspath(os.path.join(script_dir, '..')),      # fhdp/tests/pipeline_test -> fhdp/
-    os.path.abspath(os.path.join(script_dir, '../..')),   # fhdp/tests/pipeline_test -> project root
-    os.path.abspath(os.path.join(script_dir, '../../..'))
-]
-project_root = None
-for root in possible_roots:
-    if os.path.exists(os.path.join(root, 'fhdp')):
-        project_root = root
-        break
-    if os.path.exists(os.path.join(root, 'core')):  # root is fhdp package dir
-        project_root = os.path.dirname(root)
-        break
-if project_root:
-    sys.path.insert(0, project_root)
-
 from fhdp.core.cross_platform_comm import (
     NetworkEndpoint, CrossPlatformMessage, PlatformBridge,
     TransportProtocol, CompressionType, SerializationFormat,
@@ -77,6 +101,8 @@ from fhdp.core.pipeline_model import (
     serialize_template,
     build_model_split_from_template_payload,
 )
+from fhdp.edge_server.template_manager import TemplateManager, TemplateGenerator, TemplateMatcher
+from fhdp.core.types import VehicleInfo, ResourceClass
 
 
 PIPELINE_ID = "proto_resnet18"
@@ -382,6 +408,9 @@ class PipelineProtoServer:
         self.accepted = set()
         self.current_round = 0
         self.completed_rounds = set()
+        
+        # Initialize template manager
+        self.template_manager = TemplateManager()
 
         self.endpoint = NetworkEndpoint(
             host=host,
@@ -414,9 +443,10 @@ class PipelineProtoServer:
         metadata = message.metadata or {}
         client_host = metadata.get("client_host", "unknown")
         client_port = metadata.get("client_port", 0)
+        resources = message.payload.get("resources", {})
 
         self.registered[vehicle_id] = {
-            "resources": message.payload.get("resources", {}),
+            "resources": resources,
             "host": client_host,
             "port": client_port
         }
@@ -488,15 +518,50 @@ class PipelineProtoServer:
 
     def _send_pipeline_invite(self):
         endpoints = {}
+        vehicles_info = []
+        
         for vehicle_id in [self.stage0_id, self.stage1_id]:
             info = self.registered.get(vehicle_id, {})
             host = info.get("host")
             port = info.get("port")
             if host and port:
                 endpoints[vehicle_id] = {"host": host, "port": port}
+                
+                # Create VehicleInfo object
+                resources = info.get("resources", {})
+                vehicle_info = VehicleInfo(
+                    vehicle_id=vehicle_id,
+                    position=(0, 0),  # placeholder
+                    velocity=0,  # placeholder
+                    direction=0,  # placeholder
+                    resources=resources
+                )
+                vehicles_info.append(vehicle_info)
+                print(f"[Server] Vehicle {vehicle_id} resources: gpu_type={resources.get('gpu_type', 'N/A')}, "
+                      f"memory_gb={resources.get('memory_gb', 'N/A')}, compute_score={resources.get('compute_score', 'N/A')}")
 
-        template = get_pipeline_template(self.template_id, DEFAULT_TEMPLATE_ID)
+        # Use template manager to find best template
+        template = self.template_manager.find_template_for_vehicles(vehicles_info)
+        if not template:
+            # If no suitable template found, use default template
+            template = get_pipeline_template(self.template_id, DEFAULT_TEMPLATE_ID)
+        
         template_payload = serialize_template(template)
+        
+        # Output model partition information
+        print(f"[Server] Selected template: {template.template_id}")
+        print(f"[Server] Model partition info:")
+        model_partition = template.model_partition or {}
+        if model_partition:
+            print(f"  - model_name: {model_partition.get('model_name', 'N/A')}")
+            print(f"  - split_key: {model_partition.get('split_key', 'N/A')}")
+            print(f"  - stages: {model_partition.get('stages', [])}")
+            if "description" in model_partition:
+                print(f"  - description: {model_partition.get('description')}")
+        else:
+            print(f"  - No model partition info in template")
+        print(f"[Server] Resource requirements: {[r.value for r in template.resource_requirements]}")
+        print(f"[Server] Communication pattern: {template.communication_pattern}")
 
         invite = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
@@ -527,6 +592,19 @@ class PipelineProtoServer:
             return
 
         self.current_round += 1
+        
+        # Dynamically adjust micro-batches based on vehicle resources
+        adjusted_micro_batches = self.micro_batches
+        
+        # Check vehicle resource status
+        for vehicle_id in [self.stage0_id, self.stage1_id]:
+            info = self.registered.get(vehicle_id, {})
+            resources = info.get("resources", {})
+            # If resources are low, reduce micro-batch count
+            if resources.get("memory", 1) < 0.5:
+                adjusted_micro_batches = max(1, adjusted_micro_batches // 2)
+                break
+        
         control = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
             source_id="server",
@@ -536,12 +614,12 @@ class PipelineProtoServer:
                 "pipeline_id": PIPELINE_ID,
                 "round": self.current_round,
                 "micro_batch": DEFAULT_MICRO_BATCH,
-                "micro_batches": self.micro_batches
+                "micro_batches": adjusted_micro_batches
             },
             requires_ack=False
         )
         self.bridge.send_cross_platform_message(control)
-        print(f"[Server] Sent start_round to {self.stage0_id} (round {self.current_round}/{self.rounds})")
+        print(f"[Server] Sent start_round to {self.stage0_id} (round {self.current_round}/{self.rounds}, micro_batches={adjusted_micro_batches})")
 
 
 # ----------------- Vehicle -----------------
@@ -619,6 +697,11 @@ class PipelineProtoVehicle:
         self._activation_queue: Queue[PipelineMessage] = Queue()
         self._gradient_queue: Queue[PipelineMessage] = Queue()
         self._eval_queue: Queue[PipelineMessage] = Queue()
+        
+        # CUDA stream for async GPU-CPU transfers
+        self._transfer_stream: Optional[torch.cuda.Stream] = None
+        if torch.cuda.is_available():
+            self._transfer_stream = torch.cuda.Stream()
 
         self._lep_state = ActivationLEPState()
 
@@ -753,18 +836,52 @@ class PipelineProtoVehicle:
             advertise_host,
             self.server_host
         )
+        
+        # Collect actual device resources
+        resources = {
+            "role": self.role,
+            "gpu": 1,
+            "memory": 1,
+        }
+        
+        # Add GPU information if available
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+            
+            resources["gpu_type"] = gpu_name
+            resources["memory_gb"] = round(gpu_memory, 1)
+            
+            # Compute score based on GPU type
+            gpu_name_lower = gpu_name.lower()
+            if "agx" in gpu_name_lower and "orin" in gpu_name_lower:
+                # AGX Orin 64GB - highest performance
+                resources["compute_score"] = 0.95
+            elif "orin" in gpu_name_lower:
+                # Orin NX (16GB) or Orin Nano (8GB)
+                if gpu_memory >= 16:
+                    resources["compute_score"] = 0.85
+                else:
+                    resources["compute_score"] = 0.75  # Orin Nano 8GB
+            elif "agx" in gpu_name_lower and "xavier" in gpu_name_lower:
+                # AGX Xavier
+                resources["compute_score"] = 0.7
+            elif "xavier" in gpu_name_lower:
+                # Xavier NX
+                resources["compute_score"] = 0.6
+            elif "nano" in gpu_name_lower:
+                # Jetson Nano
+                resources["compute_score"] = 0.3
+            else:
+                # Estimate based on memory
+                resources["compute_score"] = min(1.0, gpu_memory / 64.0)
+        
         msg = CrossPlatformMessage(
             message_id=str(uuid.uuid4()),
             source_id=self.vehicle_id,
             target_id="server",
             message_type="register",
-            payload={
-                "resources": {
-                    "role": self.role,
-                    "gpu": 1,
-                    "memory": 1
-                }
-            },
+            payload={"resources": resources},
             metadata={
                 "client_host": advertise_host,
                 "client_port": self.listen_port
@@ -772,6 +889,7 @@ class PipelineProtoVehicle:
             requires_ack=False
         )
         self.bridge.send_cross_platform_message(msg)
+        print(f"[{self.role}] Registered with resources: {resources}")
 
     def _init_model_for_template(self, template_payload: Optional[Dict[str, Any]] = None) -> None:
         if self.model is not None:
@@ -788,17 +906,33 @@ class PipelineProtoVehicle:
 
         self.current_template_id = template_id
         self.current_split_key = split_key
+        
+        # Output model partition details
+        model_partition = template_payload.get("model_partition", {})
+        print(f"[{self.role}] Model partition details:")
+        print(f"  - template_id: {template_id}")
+        print(f"  - split_key: {split_key}")
+        if model_partition:
+            print(f"  - model_name: {model_partition.get('model_name', 'N/A')}")
+            print(f"  - stages: {model_partition.get('stages', [])}")
 
-        self.stage0, self.stage1 = stage0, stage1
-        assert self.stage0 is not None and self.stage1 is not None
+        # Select corresponding model stage based on role
         if self.role == "stage0":
-            self.model = self.stage0.to(self.device)
+            self.model = stage0.to(self.device)
+            print(f"[{self.role}] Initialized stage0 model: template={template_id}, split={split_key}")
+            # Output stage0 model architecture summary
+            total_params = sum(p.numel() for p in self.model.parameters())
+            print(f"[{self.role}] Stage0 model parameters: {total_params:,}")
         else:
-            self.model = self.stage1.to(self.device)
+            self.model = stage1.to(self.device)
+            print(f"[{self.role}] Initialized stage1 model: template={template_id}, split={split_key}")
+            # Output stage1 model architecture summary
+            total_params = sum(p.numel() for p in self.model.parameters())
+            print(f"[{self.role}] Stage1 model parameters: {total_params:,}")
 
         assert self.model is not None
         self.optimizer = optim.SGD(self.model.parameters(), lr=0.01, momentum=0.9)
-        print(f"[{self.role}] Initialized model split: template={template_id}, split={split_key}")
+        print(f"[{self.role}] Initialized model optimizer")
 
     def _handle_pipeline_invite(self, message: CrossPlatformMessage):
         payload = message.payload
@@ -809,6 +943,12 @@ class PipelineProtoVehicle:
         template_payload = payload.get("template") or {"template_id": payload.get("template_id")}
         if self.model is None:
             self._init_model_for_template(template_payload)
+        else:
+            # If model is initialized but template is different, reinitialize
+            current_template = template_payload.get("template_id")
+            if current_template and current_template != self.current_template_id:
+                self._init_model_for_template(template_payload)
+        
         self._log_timing("C_invite_model_ready", invite_start=invite_ts)
         self._log_resource("C_invite_model_ready")
 
@@ -925,16 +1065,34 @@ class PipelineProtoVehicle:
         return torch.as_tensor(value, dtype=dtype).to(device, non_blocking=True)
 
     @staticmethod
-    def _pack_tensor_for_send(value):
+    def _pack_tensor_for_send(value, non_blocking: bool = True):
         if isinstance(value, torch.Tensor):
-            # Use contiguous memory for more efficient transfer
-            return value.detach().contiguous().to("cpu")
+            tensor = value.detach()
+            if tensor.is_cuda:
+                if non_blocking:
+                    tensor = tensor.contiguous()
+                else:
+                    tensor = tensor.contiguous().to("cpu", non_blocking=False)
+            return tensor
         if isinstance(value, dict):
-            return {k: PipelineProtoVehicle._pack_tensor_for_send(v) for k, v in value.items()}
+            return {k: PipelineProtoVehicle._pack_tensor_for_send(v, non_blocking) for k, v in value.items()}
         if isinstance(value, (list, tuple)):
-            packed = [PipelineProtoVehicle._pack_tensor_for_send(v) for v in value]
+            packed = [PipelineProtoVehicle._pack_tensor_for_send(v, non_blocking) for v in value]
             return tuple(packed) if isinstance(value, tuple) else packed
         return value
+
+    def _async_transfer_to_cpu(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Async transfer tensor from GPU to CPU using CUDA stream"""
+        if not tensor.is_cuda:
+            return tensor
+        
+        if self._transfer_stream is not None:
+            with torch.cuda.stream(self._transfer_stream):
+                cpu_tensor = tensor.detach().contiguous().to("cpu", non_blocking=True)
+            self._transfer_stream.synchronize()
+            return cpu_tensor
+        else:
+            return tensor.detach().contiguous().to("cpu", non_blocking=True)
 
     def _run_stage0_round(self, round_num: int, micro_batch: int, micro_batches: int):
         total_micro_batches = max(1, int(micro_batches))
