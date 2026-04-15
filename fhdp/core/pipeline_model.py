@@ -101,7 +101,7 @@ def _split_vit_b16_2stage_medium(num_classes: int) -> Tuple[nn.Module, nn.Module
 def _split_vit_b16_2stage_heavy(num_classes: int) -> Tuple[nn.Module, nn.Module]:
     """Split ViT at block 8 - heavier first stage for high resources"""
     model = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=num_classes)
-    split_idx = 10
+    split_idx = 9
     stage0 = _ViTStage0(model, split_idx)
     stage1 = _ViTStage1(model, split_idx)
     return stage0, stage1

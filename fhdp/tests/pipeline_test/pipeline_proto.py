@@ -88,11 +88,11 @@ DEFAULT_STAGE0_ID = "agx"
 DEFAULT_STAGE1_ID = "orin"
 DEFAULT_NUM_CLASSES = 10
 DEFAULT_IMAGE_SIZE = 224
-DEFAULT_BATCH_SIZE = 12
+DEFAULT_BATCH_SIZE = 16
 DEFAULT_ROUND = 5
 DEFAULT_ROUNDS = 5
-DEFAULT_MICRO_BATCH = 4
-DEFAULT_MICRO_BATCHES = 8
+DEFAULT_MICRO_BATCH = 12
+DEFAULT_MICRO_BATCHES = 12
 DEFAULT_DATA_DIR = os.path.join(script_dir, "data")
 DEFAULT_TEMPLATE_ID = "vit_b16_2stage_v1"
 AUTO_TEMPLATE_TOKEN = "auto"
@@ -116,6 +116,110 @@ PACK_TENSOR_USE_PINNED = False
 PACK_TENSOR_ZERO_COPY = False
 PINNED_BUFFER_CACHE_SIZE = 8
 PINNED_BUFFER_MAX_BYTES = 256 * 1024 * 1024
+
+# ---- Online Corrector (Physics-Guided) ----
+ENABLE_ONLINE_CORRECTOR = True
+CORRECTOR_BATCH_BOUNDS = (4, 64)
+CORRECTOR_MICRO_BATCH_BOUNDS = (1, 16)
+CORRECTOR_BATCH_STEP = 2
+CORRECTOR_MICRO_STEP = 1
+CORRECTOR_WAIT_RATIO_DOWN = 0.6
+CORRECTOR_WAIT_RATIO_UP = 0.3
+
+
+class FHDP_PerformanceCorrector:
+    def __init__(
+        self,
+        batch_bounds: Tuple[int, int] = CORRECTOR_BATCH_BOUNDS,
+        micro_bounds: Tuple[int, int] = CORRECTOR_MICRO_BATCH_BOUNDS,
+        batch_step: int = CORRECTOR_BATCH_STEP,
+        micro_step: int = CORRECTOR_MICRO_STEP,
+        down_threshold: float = CORRECTOR_WAIT_RATIO_DOWN,
+        up_threshold: float = CORRECTOR_WAIT_RATIO_UP,
+        model_alpha: float = 0.105,
+        model_beta: float = 2.35,
+        model_gamma: float = 22.8,
+        model_beta_wait: float = 1.0
+    ):
+        self.wait_ratio_ema = None
+        self.batch_bounds = batch_bounds
+        self.micro_bounds = micro_bounds
+        self.batch_step = max(1, int(batch_step))
+        self.micro_step = max(1, int(micro_step))
+        self.down_threshold = float(down_threshold)
+        self.up_threshold = float(up_threshold)
+        self.model_alpha = float(model_alpha)
+        self.model_beta = float(model_beta)
+        self.model_gamma = float(model_gamma)
+        self.model_beta_wait = float(model_beta_wait)
+
+    def update_online(self, network_wait_ratio: float) -> float:
+        ratio = float(network_wait_ratio)
+        if ratio > 1.0:
+            ratio = ratio / 100.0
+        ratio = max(0.0, min(1.0, ratio))
+        if self.wait_ratio_ema is None:
+            self.wait_ratio_ema = ratio
+        else:
+            self.wait_ratio_ema = 0.8 * self.wait_ratio_ema + 0.2 * ratio
+        return ratio
+
+    def predict_round_time(self, m: int, n: int) -> float:
+        return self.model_alpha * m * n + self.model_beta * n + self.model_gamma
+
+    def predict_wait_ratio(self, m: int, n: int) -> float:
+        t_round = max(self.predict_round_time(m, n), 1e-6)
+        t_wait = self.model_gamma + self.model_beta_wait * n
+        return max(0.0, min(1.0, t_wait / t_round))
+
+    def suggest_params(self, batch_size: int, micro_batches: int) -> Tuple[int, int, str]:
+        current_batch = int(batch_size)
+        current_micro = int(micro_batches)
+        min_b, max_b = self.batch_bounds
+        min_m, max_m = self.micro_bounds
+
+        candidates = set()
+        for dm in (-self.batch_step, 0, self.batch_step):
+            for dn in (-self.micro_step, 0, self.micro_step):
+                cand_b = max(min_b, min(max_b, current_batch + dm))
+                cand_m = max(min_m, min(max_m, current_micro + dn))
+                candidates.add((cand_b, cand_m))
+
+        valid = []
+        for cand_b, cand_m in candidates:
+            t_round = self.predict_round_time(cand_b, cand_m)
+            throughput = (cand_b * cand_m) / max(t_round, 1e-6)
+            wait_ratio_pred = self.predict_wait_ratio(cand_b, cand_m)
+            valid.append((cand_b, cand_m, throughput, wait_ratio_pred))
+
+        ema = self.wait_ratio_ema if self.wait_ratio_ema is not None else 0.0
+
+        if ema > self.down_threshold:
+            # 只有在等待过高时才允许下调/保持
+            candidates = [item for item in valid if item[0] <= current_batch and item[1] <= current_micro]
+            if not candidates:
+                candidates = valid
+            best = min(candidates, key=lambda x: (x[3], -x[2]))
+        elif ema < self.up_threshold:
+            # 只有在等待较低时才允许上调/保持
+            candidates = [item for item in valid if item[0] >= current_batch and item[1] >= current_micro]
+            if not candidates:
+                candidates = valid
+            within = [item for item in candidates if item[3] <= self.down_threshold]
+            pool = within or candidates
+            best = max(pool, key=lambda x: (x[2], -x[3]))
+        else:
+            best = (current_batch, current_micro, 0.0, ema)
+
+        next_batch, next_micro = best[0], best[1]
+        if next_batch < current_batch or next_micro < current_micro:
+            action = "down"
+        elif next_batch > current_batch or next_micro > current_micro:
+            action = "up"
+        else:
+            action = "hold"
+
+        return next_batch, next_micro, action
 
 
 # ----------------- Utilities -----------------
@@ -653,6 +757,11 @@ class PipelineProtoVehicle:
         self.eval_batches = max(0, int(eval_batches))
         self.save_every = max(0, int(save_every))
         self.save_dir = save_dir
+        self.batch_size = max(1, int(DEFAULT_BATCH_SIZE))
+        self._next_batch_size: Optional[int] = None
+        self._next_micro_batches: Optional[int] = None
+        self.corrector: Optional[FHDP_PerformanceCorrector] = None
+        self.corrector_enabled = ENABLE_ONLINE_CORRECTOR
         self.device = _get_device()
         self._timing_start = time.perf_counter()
         self._invite_received_at: Optional[float] = None
@@ -960,6 +1069,21 @@ class PipelineProtoVehicle:
             current_template = template_payload.get("template_id")
             if current_template and current_template != self.current_template_id:
                 self._init_model_for_template(template_payload)
+
+        if self.role == "stage0" and self.corrector is None and self.corrector_enabled:
+            self.corrector = FHDP_PerformanceCorrector(
+                batch_bounds=CORRECTOR_BATCH_BOUNDS,
+                micro_bounds=CORRECTOR_MICRO_BATCH_BOUNDS,
+                batch_step=CORRECTOR_BATCH_STEP,
+                micro_step=CORRECTOR_MICRO_STEP,
+                down_threshold=CORRECTOR_WAIT_RATIO_DOWN,
+                up_threshold=CORRECTOR_WAIT_RATIO_UP
+            )
+            print(
+                f"[stage0][Corrector] init bounds(batch={CORRECTOR_BATCH_BOUNDS}, "
+                f"micro={CORRECTOR_MICRO_BATCH_BOUNDS}) thresholds(down={CORRECTOR_WAIT_RATIO_DOWN}, "
+                f"up={CORRECTOR_WAIT_RATIO_UP})"
+            )
         
         self._log_timing("C_invite_model_ready", invite_start=invite_ts)
         self._log_resource("C_invite_model_ready")
@@ -1036,20 +1160,71 @@ class PipelineProtoVehicle:
             )
 
     def _handle_pipeline_control(self, message: CrossPlatformMessage):
+        payload = message.payload or {}
+        round_num = payload.get("round", DEFAULT_ROUND)
+        micro_batch = payload.get("micro_batch", DEFAULT_MICRO_BATCH)
+        micro_batches = payload.get("micro_batches", self.micro_batches)
+
+        if self.role == "stage1":
+            self.micro_batches = max(1, int(micro_batches))
+            self.sequence_registry.register_for_rounds(
+                "activation",
+                [round_num],
+                self.micro_batches,
+                self._handle_activation_sequence
+            )
+            print(f"[stage1] Sync round {round_num}: micro_batches={self.micro_batches}")
+            return
+
         if self.role != "stage0":
             return
-        payload = message.payload or {}
+
         if self.model is None:
             self._init_model_for_template()
             if self.model is None:
                 print("[stage0] Model not initialized, skip round")
                 return
-        round_num = payload.get("round", DEFAULT_ROUND)
-        micro_batch = payload.get("micro_batch", DEFAULT_MICRO_BATCH)
-        micro_batches = payload.get("micro_batches", self.micro_batches)
+
+        batch_size = self.batch_size
+
+        if self._next_micro_batches is not None:
+            micro_batches = self._next_micro_batches
+            self._next_micro_batches = None
+        if self._next_batch_size is not None:
+            batch_size = self._next_batch_size
+            self._next_batch_size = None
+
+        self.micro_batches = max(1, int(micro_batches))
+        self.batch_size = max(1, int(batch_size))
+
+        if self.stage1_id:
+            control = CrossPlatformMessage(
+                message_id=str(uuid.uuid4()),
+                source_id=self.vehicle_id,
+                target_id=self.stage1_id,
+                message_type="pipeline_control",
+                payload={
+                    "pipeline_id": PIPELINE_ID,
+                    "round": round_num,
+                    "micro_batch": micro_batch,
+                    "micro_batches": self.micro_batches
+                },
+                requires_ack=False
+            )
+            self.bridge.send_cross_platform_message(control)
+            print(
+                f"[stage0] Sync micro_batches={self.micro_batches} to {self.stage1_id} "
+                f"(round {round_num})"
+            )
+
+        print(
+            f"[stage0] Start round {round_num}: batch_size={self.batch_size}, "
+            f"micro_batches={self.micro_batches}"
+        )
+
         threading.Thread(
             target=self._run_stage0_round,
-            args=(round_num, micro_batch, micro_batches),
+            args=(round_num, micro_batch, self.micro_batches, self.batch_size),
             daemon=True
         ).start()
 
@@ -1205,11 +1380,12 @@ class PipelineProtoVehicle:
         else:
             return tensor.detach().contiguous().to("cpu", non_blocking=True)
 
-    def _run_stage0_round(self, round_num: int, micro_batch: int, micro_batches: int):
+    def _run_stage0_round(self, round_num: int, micro_batch: int, micro_batches: int, batch_size: int):
         total_micro_batches = max(1, int(micro_batches))
+        batch_size_per_micro = max(1, int(batch_size))
         loader = _build_data_loader(
             self.dataset,
-            DEFAULT_BATCH_SIZE * total_micro_batches,
+            batch_size_per_micro * total_micro_batches,
             self.image_size,
             num_batches=4,
             data_dir=self.data_dir,
@@ -1365,6 +1541,22 @@ class PipelineProtoVehicle:
                 f"[stage0][METRICS] round={round_num} avg_grad_latency_ms={avg_grad_latency:.2f} "
                 f"avg_apply_ms={avg_apply_ms:.2f} avg_step_ms={avg_step_ms:.2f}"
             )
+
+            if self.role == "stage0" and self.corrector and self.corrector_enabled:
+                wait_ratio_norm = self.corrector.update_online(wait_ratio)
+                next_batch, next_micro, action = self.corrector.suggest_params(
+                    self.batch_size,
+                    self.micro_batches
+                )
+                if next_batch != self.batch_size or next_micro != self.micro_batches:
+                    self._next_batch_size = next_batch
+                    self._next_micro_batches = next_micro
+                print(
+                    f"[stage0][Corrector] round={round_num} wait_ratio_pct={wait_ratio:.2f}% "
+                    f"ratio={wait_ratio_norm:.2f} ema={self.corrector.wait_ratio_ema:.2f} "
+                    f"action={action} next_batch={next_batch} next_micro={next_micro}"
+                )
+
             with self._lock:
                 self._round_metrics.pop(round_num, None)
         print(f"[stage0] 1F1B cooldown: gradients complete (round {round_num})")

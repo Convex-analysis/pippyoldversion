@@ -89,6 +89,7 @@ _RECV_SLOW_THRESHOLD_SEC_SMALL = 0.01
 _RECV_SLOW_THRESHOLD_SEC = 0.05
 
 _SEND_SLOW_THRESHOLD_SEC = 0.5
+_ENABLE_SLOW_SEND_WARNING = False
 
 
 def _update_recv_stats(n: int, elapsed: float, timed_out: bool, is_slow: bool) -> None:
@@ -727,7 +728,7 @@ class PipelineCommunicationManager:
             compress_ms = (compress_end - compress_start) * 1000.0
             send_ms = (send_end - compress_end) * 1000.0
             total_ms = (send_end - send_start) * 1000.0
-            if (total_ms / 1000.0) >= _SEND_SLOW_THRESHOLD_SEC:
+            if _ENABLE_SLOW_SEND_WARNING and (total_ms / 1000.0) >= _SEND_SLOW_THRESHOLD_SEC:
                 logging.warning(
                     "Slow pipeline send %s bytes (serialize=%.2fms, compress=%.2fms, send=%.2fms, total=%.2fms, endpoint=%s)",
                     len(serialized_data),
