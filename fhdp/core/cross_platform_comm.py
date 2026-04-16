@@ -234,31 +234,75 @@ class SerializationManager:
             return self.pickle_loads(data)
         
         try:
-            # Find header delimiter
-            delimiter = b':' 
-            parts = data.split(delimiter, 2)
-            if len(parts) != 3:
+            # The format is: (shape):dtype:binary_data
+            # We need to find the last colon to separate binary data from header
+            last_colon_idx = data.rfind(b':')
+            if last_colon_idx == -1 or last_colon_idx < 3:
+                return self.pickle_loads(data)
+            
+            tensor_data = data[last_colon_idx + 1:]
+            if len(tensor_data) == 0:
+                return self.pickle_loads(data)
+            
+            header = data[:last_colon_idx]
+            
+            # Now find the dtype colon - search from the end of header backwards
+            # The header is (shape):dtype
+            # We need to find the last colon in the header that's not part of the shape
+            colon_idx = -1
+            for i in range(len(header) - 1, -1, -1):
+                if header[i] == ord(':'):
+                    colon_idx = i
+                    break
+            
+            if colon_idx == -1 or colon_idx < 2:
+                return self.pickle_loads(data)
+            
+            # Extract dtype (after the last colon in header)
+            dtype_str = header[colon_idx + 1:]
+            try:
+                dtype_str_decoded = dtype_str.decode('utf-8')
+            except UnicodeDecodeError:
+                return self.pickle_loads(data)
+            
+            # Extract shape (before the last colon in header)
+            shape_str = header[:colon_idx]
+            try:
+                shape_str_decoded = shape_str.decode('utf-8')
+            except UnicodeDecodeError:
                 return self.pickle_loads(data)
             
             # Parse shape
-            shape_str = parts[0].decode('utf-8')
-            shape = tuple(map(int, shape_str.strip('()').split(',')))
-            
-            # Parse dtype
-            dtype_str = parts[1].decode('utf-8')
+            try:
+                shape = tuple(map(int, [x for x in shape_str_decoded.strip('()').split(',') if x.strip()]))
+            except ValueError:
+                return self.pickle_loads(data)
             
             # Get data
-            tensor_data = parts[2]
+            if len(tensor_data) < 1:
+                return self.pickle_loads(data)
             
             # Convert back to numpy array
             import numpy as np
-            array = np.frombuffer(tensor_data, dtype=dtype_str)
+            try:
+                array = np.frombuffer(tensor_data, dtype=dtype_str_decoded)
+            except TypeError:
+                return self.pickle_loads(data)
+            
+            expected_size = 1
+            for dim in shape:
+                expected_size *= dim
+            
+            if array.size != expected_size:
+                return self.pickle_loads(data)
+                
             array = array.reshape(shape)
+            if not array.flags.writeable:
+                array = array.copy()
             
             # Convert to tensor
             return torch.from_numpy(array)
         except Exception as e:
-            logging.warning(f"Zero-copy deserialization failed: {e}, falling back to pickle")
             return self.pickle_loads(data)
     
     def serialize_batch(self, messages: List[Any], format: Optional[SerializationFormat] = None) -> bytes:
@@ -331,19 +375,7 @@ class SerializationManager:
         if format is None:
             # Try to detect format
             try:
-                # First check if it's a zero-copy serialized tensor
-                try:
-                    import torch
-                    # Check if data starts with a shape tuple followed by dtype
-                    if b':' in data:
-                        first_part = data.split(b':', 1)[0]
-                        if first_part.startswith(b'('):
-                            # This might be a zero-copy serialized tensor
-                            return self.deserialize_tensor_zero_copy(data)
-                except ImportError:
-                    pass
-                
-                # Then try JSON
+                # First try JSON
                 return self.json_loads(data)
             except Exception:
                 # Then try msgpack if available
