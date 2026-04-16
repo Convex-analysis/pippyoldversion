@@ -205,6 +205,31 @@ class TemplateMatcher:
         self.cache_hits = 0
         self.cache_lookups = 0
         
+        # Latency logging
+        self.latency_log_file = "level1_latency.csv"
+        self._init_latency_log()
+        
+    def _init_latency_log(self) -> None:
+        """Initialize latency log file"""
+        try:
+            import csv
+            with open(self.latency_log_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['timestamp', 'latency_ms'])
+        except Exception as e:
+            print(f"Error initializing latency log: {e}")
+    
+    def _log_latency(self, latency: float) -> None:
+        """Log latency to CSV file"""
+        try:
+            import csv
+            import time
+            with open(self.latency_log_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([time.time(), latency * 1000])  # Convert to milliseconds
+        except Exception as e:
+            print(f"Error logging latency: {e}")
+
     def _estimate_stage0_memory_gb(self, template: PipelineTemplate) -> float:
         model_partition = template.model_partition or {}
         resource_estimates = model_partition.get("resource_estimates", {})
@@ -307,6 +332,8 @@ class TemplateMatcher:
         
         candidates = []
         if not available_vehicles:
+            latency = time.time() - start_time
+            self._log_latency(latency)
             return candidates
         
         stage0_tier = self._vehicle_memory_tier(available_vehicles[0])
@@ -327,6 +354,8 @@ class TemplateMatcher:
             candidates.extend(cached_result)
             
             if time.time() - start_time > TEMPLATE_LOOKUP_LATENCY_THRESHOLD:
+                latency = time.time() - start_time
+                self._log_latency(latency)
                 return candidates[:max_candidates]
         
         n_vehicles = len(available_vehicles)
@@ -360,6 +389,10 @@ class TemplateMatcher:
                 oldest_key = next(iter(self.success_cache))
                 del self.success_cache[oldest_key]
             self.success_cache[cache_key] = result
+        
+        # Log latency
+        latency = time.time() - start_time
+        self._log_latency(latency)
         
         return result
     

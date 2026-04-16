@@ -39,9 +39,6 @@ from typing import Dict, Any, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Subset
-from torchvision.datasets import CIFAR10, ImageFolder
-from torchvision import transforms
 
 # ---- Resolve project root for imports ----
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,12 +63,13 @@ from fhdp.core.cross_platform_comm import (
     TransportProtocol, CompressionType, SerializationFormat,
     HardwareCapabilities, HardwarePlatform, PipelineMessage
 )
-from fhdp.core.hardware_adapter import ComputeCapability
+from fhdp.core.hardware_adapter import ComputeCapability, build_capabilities
 from fhdp.core.pipeline_runtime import (
     SequenceIdFactory,
     SequenceHandlerRegistry,
     OneFOneBSchedule,
     get_micro_batch_phase,
+    PerformanceCorrector,
 )
 from fhdp.core import ActivationLEPState
 from fhdp.core.types import VehicleInfo
@@ -79,6 +77,17 @@ from fhdp.core.pipeline_model import (
     get_pipeline_template,
     serialize_template,
     build_model_split_from_template_payload,
+)
+from fhdp.core.data_loader import (
+    build_data_loader,
+    build_eval_loader,
+)
+from fhdp.core.resource_monitor import ResourceMonitor, RoundMetrics
+from fhdp.core.tensor_utils import (
+    pack_tensor_for_send,
+    unpack_tensor_payload,
+    decode_tensor_payload,
+    to_tensor,
 )
 from fhdp.edge_server.template_manager import TemplateManager
 
@@ -105,121 +114,8 @@ DEFAULT_CHECKPOINT_DIR = os.path.join(project_root or script_dir, "logs", "check
 PIPELINE_TIMING_SYNC = os.getenv("PIPELINE_TIMING_SYNC", "0") == "1"
 PIPELINE_STEP_TIMEOUT_SEC = float(os.getenv("PIPELINE_STEP_TIMEOUT_SEC", "60"))
 
-# ---- LEP / activation compression (Plan A: FP16 + residual) ----
-ENABLE_ACTIVATION_LEP = True
 LEP_FP16_DTYPE = torch.float16
 LEP_LOG_INTERVAL = 10
-
-# ---- Tensor packing / transfer optimizations ----
-PACK_TENSOR_FASTPATH = True
-PACK_TENSOR_USE_PINNED = False
-PACK_TENSOR_ZERO_COPY = False
-PINNED_BUFFER_CACHE_SIZE = 8
-PINNED_BUFFER_MAX_BYTES = 256 * 1024 * 1024
-
-# ---- Online Corrector (Physics-Guided) ----
-ENABLE_ONLINE_CORRECTOR = True
-CORRECTOR_BATCH_BOUNDS = (4, 64)
-CORRECTOR_MICRO_BATCH_BOUNDS = (1, 16)
-CORRECTOR_BATCH_STEP = 2
-CORRECTOR_MICRO_STEP = 1
-CORRECTOR_WAIT_RATIO_DOWN = 0.6
-CORRECTOR_WAIT_RATIO_UP = 0.3
-
-
-class FHDP_PerformanceCorrector:
-    def __init__(
-        self,
-        batch_bounds: Tuple[int, int] = CORRECTOR_BATCH_BOUNDS,
-        micro_bounds: Tuple[int, int] = CORRECTOR_MICRO_BATCH_BOUNDS,
-        batch_step: int = CORRECTOR_BATCH_STEP,
-        micro_step: int = CORRECTOR_MICRO_STEP,
-        down_threshold: float = CORRECTOR_WAIT_RATIO_DOWN,
-        up_threshold: float = CORRECTOR_WAIT_RATIO_UP,
-        model_alpha: float = 0.105,
-        model_beta: float = 2.35,
-        model_gamma: float = 22.8,
-        model_beta_wait: float = 1.0
-    ):
-        self.wait_ratio_ema = None
-        self.batch_bounds = batch_bounds
-        self.micro_bounds = micro_bounds
-        self.batch_step = max(1, int(batch_step))
-        self.micro_step = max(1, int(micro_step))
-        self.down_threshold = float(down_threshold)
-        self.up_threshold = float(up_threshold)
-        self.model_alpha = float(model_alpha)
-        self.model_beta = float(model_beta)
-        self.model_gamma = float(model_gamma)
-        self.model_beta_wait = float(model_beta_wait)
-
-    def update_online(self, network_wait_ratio: float) -> float:
-        ratio = float(network_wait_ratio)
-        if ratio > 1.0:
-            ratio = ratio / 100.0
-        ratio = max(0.0, min(1.0, ratio))
-        if self.wait_ratio_ema is None:
-            self.wait_ratio_ema = ratio
-        else:
-            self.wait_ratio_ema = 0.8 * self.wait_ratio_ema + 0.2 * ratio
-        return ratio
-
-    def predict_round_time(self, m: int, n: int) -> float:
-        return self.model_alpha * m * n + self.model_beta * n + self.model_gamma
-
-    def predict_wait_ratio(self, m: int, n: int) -> float:
-        t_round = max(self.predict_round_time(m, n), 1e-6)
-        t_wait = self.model_gamma + self.model_beta_wait * n
-        return max(0.0, min(1.0, t_wait / t_round))
-
-    def suggest_params(self, batch_size: int, micro_batches: int) -> Tuple[int, int, str]:
-        current_batch = int(batch_size)
-        current_micro = int(micro_batches)
-        min_b, max_b = self.batch_bounds
-        min_m, max_m = self.micro_bounds
-
-        candidates = set()
-        for dm in (-self.batch_step, 0, self.batch_step):
-            for dn in (-self.micro_step, 0, self.micro_step):
-                cand_b = max(min_b, min(max_b, current_batch + dm))
-                cand_m = max(min_m, min(max_m, current_micro + dn))
-                candidates.add((cand_b, cand_m))
-
-        valid = []
-        for cand_b, cand_m in candidates:
-            t_round = self.predict_round_time(cand_b, cand_m)
-            throughput = (cand_b * cand_m) / max(t_round, 1e-6)
-            wait_ratio_pred = self.predict_wait_ratio(cand_b, cand_m)
-            valid.append((cand_b, cand_m, throughput, wait_ratio_pred))
-
-        ema = self.wait_ratio_ema if self.wait_ratio_ema is not None else 0.0
-
-        if ema > self.down_threshold:
-            # 只有在等待过高时才允许下调/保持
-            candidates = [item for item in valid if item[0] <= current_batch and item[1] <= current_micro]
-            if not candidates:
-                candidates = valid
-            best = min(candidates, key=lambda x: (x[3], -x[2]))
-        elif ema < self.up_threshold:
-            # 只有在等待较低时才允许上调/保持
-            candidates = [item for item in valid if item[0] >= current_batch and item[1] >= current_micro]
-            if not candidates:
-                candidates = valid
-            within = [item for item in candidates if item[3] <= self.down_threshold]
-            pool = within or candidates
-            best = max(pool, key=lambda x: (x[2], -x[3]))
-        else:
-            best = (current_batch, current_micro, 0.0, ema)
-
-        next_batch, next_micro = best[0], best[1]
-        if next_batch < current_batch or next_micro < current_micro:
-            action = "down"
-        elif next_batch > current_batch or next_micro > current_micro:
-            action = "up"
-        else:
-            action = "hold"
-
-        return next_batch, next_micro, action
 
 
 # ----------------- Utilities -----------------
@@ -268,223 +164,6 @@ def _validate_pipeline_utils(rounds: int, micro_batches: int) -> None:
     print(f"[Validate] rounds={rounds}, micro_batches={micro_batches}")
 
 
-def _build_cifar10_loader(
-    batch_size: int,
-    image_size: int,
-    num_batches: int = 1,
-    data_dir: str = DEFAULT_DATA_DIR,
-    download: bool = False,
-    train: bool = True
-) -> DataLoader:
-    transform = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-    ])
-    dataset = CIFAR10(
-        root=data_dir,
-        train=train,
-        download=download,
-        transform=transform
-    )
-    total_samples = batch_size * num_batches
-    if total_samples < len(dataset):
-        dataset = Subset(dataset, list(range(total_samples)))
-    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
-
-def _build_imagenet_loader(
-    batch_size: int,
-    image_size: int,
-    num_batches: int = 1,
-    data_dir: str = DEFAULT_DATA_DIR
-) -> DataLoader:
-    transform = transforms.Compose([
-        transforms.Resize(int(image_size * 256 / 224)),
-        transforms.CenterCrop(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-    ])
-    train_dir = os.path.join(data_dir, "train")
-    dataset_root = train_dir if os.path.isdir(train_dir) else data_dir
-    if not os.path.isdir(dataset_root):
-        raise FileNotFoundError(
-            f"ImageNet dataset not found at {dataset_root}. "
-            "Expected a folder with train/val subdirectories or a train directory."
-        )
-    dataset = ImageFolder(root=dataset_root, transform=transform)
-    total_samples = batch_size * num_batches
-    if total_samples < len(dataset):
-        dataset = Subset(dataset, list(range(total_samples)))
-    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
-
-def _download_file(url: str, dest_path: str) -> None:
-    tmp_path = dest_path + ".tmp"
-    with urllib.request.urlopen(url) as response, open(tmp_path, "wb") as handle:
-        shutil.copyfileobj(response, handle)
-    os.replace(tmp_path, dest_path)
-
-
-def _extract_archive(archive_path: str, dest_dir: str) -> None:
-    if zipfile.is_zipfile(archive_path):
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            archive.extractall(dest_dir)
-        return
-    if tarfile.is_tarfile(archive_path):
-        with tarfile.open(archive_path, "r:*") as archive:
-            archive.extractall(dest_dir)
-        return
-    raise ValueError(f"Unsupported archive format: {archive_path}")
-
-
-def _prepare_tiny_imagenet(data_dir: str, url: str, folder_name: str) -> str:
-    dataset_root = os.path.join(data_dir, folder_name)
-    train_dir = os.path.join(dataset_root, "train")
-    if os.path.isdir(train_dir):
-        return dataset_root
-
-    if not url:
-        raise ValueError("Tiny ImageNet url is required. Use --tiny-imagenet-url to specify a mirror.")
-
-    os.makedirs(data_dir, exist_ok=True)
-    filename = os.path.basename(url.split("?")[0]) or "tiny-imagenet-200.zip"
-    archive_path = os.path.join(data_dir, filename)
-
-    if not os.path.exists(archive_path):
-        print(f"[Data] Downloading Tiny ImageNet from {url} -> {archive_path}")
-        _download_file(url, archive_path)
-    else:
-        print(f"[Data] Using existing archive: {archive_path}")
-
-    print(f"[Data] Extracting Tiny ImageNet: {archive_path}")
-    _extract_archive(archive_path, data_dir)
-
-    default_root = os.path.join(data_dir, DEFAULT_TINY_IMAGENET_DIR)
-    if folder_name != DEFAULT_TINY_IMAGENET_DIR and os.path.isdir(default_root) and not os.path.isdir(dataset_root):
-        os.rename(default_root, dataset_root)
-
-    if not os.path.isdir(train_dir):
-        raise FileNotFoundError(
-            f"Tiny ImageNet dataset not found at {train_dir}. "
-            "Expected a folder with train/val subdirectories."
-        )
-
-    return dataset_root
-
-
-def _build_tiny_imagenet_loader(
-    batch_size: int,
-    image_size: int,
-    num_batches: int = 1,
-    data_dir: str = DEFAULT_DATA_DIR,
-    url: str = DEFAULT_TINY_IMAGENET_URL,
-    folder_name: str = DEFAULT_TINY_IMAGENET_DIR
-) -> DataLoader:
-    transform = transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-    ])
-    dataset_root = _prepare_tiny_imagenet(data_dir, url, folder_name)
-    train_root = os.path.join(dataset_root, "train")
-    dataset = ImageFolder(root=train_root, transform=transform)
-    total_samples = batch_size * num_batches
-    if total_samples < len(dataset):
-        dataset = Subset(dataset, list(range(total_samples)))
-    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
-
-def _build_data_loader(
-    dataset_name: str,
-    batch_size: int,
-    image_size: int,
-    num_batches: int = 1,
-    data_dir: str = DEFAULT_DATA_DIR,
-    download: bool = False,
-    tiny_imagenet_url: str = DEFAULT_TINY_IMAGENET_URL,
-    tiny_imagenet_dir: str = DEFAULT_TINY_IMAGENET_DIR
-) -> DataLoader:
-    dataset_key = (dataset_name or "cifar10").lower().replace("-", "")
-    if dataset_key == "imagenet":
-        return _build_imagenet_loader(batch_size, image_size, num_batches, data_dir)
-    if dataset_key == "tinyimagenet":
-        return _build_tiny_imagenet_loader(
-            batch_size,
-            image_size,
-            num_batches,
-            data_dir,
-            url=tiny_imagenet_url,
-            folder_name=tiny_imagenet_dir
-        )
-    return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download)
-
-
-def _build_eval_loader(
-    dataset_name: str,
-    batch_size: int,
-    image_size: int,
-    num_batches: int = 1,
-    data_dir: str = DEFAULT_DATA_DIR,
-    download: bool = False
-) -> Optional[DataLoader]:
-    dataset_key = (dataset_name or "cifar10").lower().replace("-", "")
-    if dataset_key != "cifar10":
-        print(f"[Eval] Dataset {dataset_name} not supported for eval, skip")
-        return None
-    return _build_cifar10_loader(batch_size, image_size, num_batches, data_dir, download, train=False)
-
-
-def _build_capabilities(role: str) -> HardwareCapabilities:
-    if role == "server":
-        return HardwareCapabilities(
-            platform=HardwarePlatform.X86_LINUX,
-            compute_capability=ComputeCapability.SERVER_CLASS,
-            cpu_cores=32,
-            cpu_freq=3.5,
-            memory_total=64.0,
-            gpu_memory=24.0,
-            npu_memory=0.0,
-            storage_speed='ssd',
-            network_speed=1000.0,
-            power_profile='high_performance',
-            thermal_limit=95.0,
-            accelerated_compute=True
-        )
-    if role == "stage0":
-        return HardwareCapabilities(
-            platform=HardwarePlatform.JETSON_ORIN,
-            compute_capability=ComputeCapability.EDGE_AI,
-            cpu_cores=12,
-            cpu_freq=2.0,
-            memory_total=32.0,
-            gpu_memory=8.0,
-            npu_memory=0.0,
-            storage_speed='emmc',
-            network_speed=1000.0,
-            power_profile='balanced',
-            thermal_limit=85.0,
-            accelerated_compute=True
-        )
-    # stage1
-    return HardwareCapabilities(
-        platform=HardwarePlatform.JETSON_NANO,
-        compute_capability=ComputeCapability.EDGE_AI,
-        cpu_cores=6,
-        cpu_freq=2.0,
-        memory_total=8.0,
-        gpu_memory=2.0,
-        npu_memory=0.0,
-        storage_speed='emmc',
-        network_speed=1000.0,
-        power_profile='balanced',
-        thermal_limit=85.0,
-        accelerated_compute=True
-    )
-
-
-# ----------------- Server -----------------
-
 class PipelineProtoServer:
     def __init__(self, host: str, port: int, stage0_id: str, stage1_id: str,
                  rounds: int, auto_exit: bool, micro_batches: int, template_id: str):
@@ -507,7 +186,7 @@ class PipelineProtoServer:
             protocol=TransportProtocol.TCP,
             compression=CompressionType.NONE
         )
-        self.bridge = PlatformBridge(_build_capabilities("server"), node_id="server")
+        self.bridge = PlatformBridge(build_capabilities("server"), node_id="server")
         self.template_manager = TemplateManager()
         self.shutdown = False
 
@@ -783,7 +462,7 @@ class PipelineProtoVehicle:
             protocol=TransportProtocol.TCP,
             compression=CompressionType.NONE
         )
-        self.bridge = PlatformBridge(_build_capabilities(role), node_id=vehicle_id)
+        self.bridge = PlatformBridge(build_capabilities(role), node_id=vehicle_id)
 
         self.sequence_id_factory = SequenceIdFactory(PIPELINE_ID)
         self.sequence_registry = SequenceHandlerRegistry(
@@ -953,7 +632,7 @@ class PipelineProtoVehicle:
         print(f"[{self.role}] Stopped")
 
     def _connect_to_server(self):
-        remote_capabilities = _build_capabilities("server")
+        remote_capabilities = build_capabilities("server")
         ok = self.bridge.connect_to_platform(
             remote_node_id="server",
             remote_capabilities=remote_capabilities,
@@ -1279,17 +958,6 @@ class PipelineProtoVehicle:
                     return value
             return result
         return value
-
-    @staticmethod
-    def _to_tensor(value, device: str, dtype: torch.dtype) -> torch.Tensor:
-        if isinstance(value, torch.Tensor):
-            tensor = value.detach()
-            if tensor.dtype != dtype:
-                tensor = tensor.to(dtype=dtype)
-            if device:
-                tensor = tensor.to(device, non_blocking=True)
-            return tensor
-        return torch.as_tensor(value, dtype=dtype).to(device, non_blocking=True)
 
     def _get_pinned_buffer(self, shape, dtype: torch.dtype) -> Optional[torch.Tensor]:
         if not PACK_TENSOR_USE_PINNED or not torch.cuda.is_available():
@@ -1798,8 +1466,8 @@ class PipelineProtoVehicle:
                 metrics = self._get_round_metrics(round_num)
                 metrics["activation_bytes_recv"] += self._estimate_payload_bytes(activation_data)
                 metrics["activation_bytes_recv"] += self._estimate_payload_bytes(labels_data)
-            activation = self._to_tensor(activation_data, self.device, torch.float32)
-            labels = self._to_tensor(labels_data, self.device, torch.long)
+            activation = to_tensor(activation_data, self.device, torch.float32)
+            labels = to_tensor(labels_data, self.device, torch.long)
 
             with torch.no_grad():
                 outputs = self.model(activation)
@@ -1860,7 +1528,7 @@ class PipelineProtoVehicle:
 
             assert self.model is not None
             assert self.optimizer is not None
-            grad = self._to_tensor(grad_data, self.device, torch.float32)
+            grad = to_tensor(grad_data, self.device, torch.float32)
 
             micro_batch = data.get("micro_batch", DEFAULT_MICRO_BATCH)
             micro_batches = data.get("micro_batches", self.micro_batches)

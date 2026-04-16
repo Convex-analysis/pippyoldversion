@@ -102,6 +102,9 @@ class AsynchronousAggregator:
         self.aggregation_buffer = AggregationBuffer()
         self.weight_calculator = WeightCalculator()
         
+        # Current global round
+        self.current_round = 0
+        
         # Threading for async processing
         self.aggregation_thread = None
         self.stop_event = threading.Event()
@@ -265,6 +268,21 @@ class AsynchronousAggregator:
         except Exception as e:
             print(f"Aggregation failed: {e}")
     
+    def _apply_staleness_penalty(self, update: ModelUpdate) -> float:
+        """Apply staleness penalty to model update"""
+        # Get pipeline's starting global round
+        pipe_round = update.metadata.get('pipeline_start_round', 0)
+        
+        # Calculate round difference
+        delta_r = self.current_round - pipe_round
+        
+        # Apply decay factor if delta_r > 0
+        if delta_r > 0:
+            # Exponential decay factor
+            decay_factor = np.exp(-0.1 * delta_r)
+            return decay_factor
+        return 1.0
+
     def _aggregate_models(self, updates: List[ModelUpdate], weights: Dict[str, float]) -> Optional[Dict[str, torch.Tensor]]:
         """Perform weighted model aggregation"""
         if not updates:
@@ -284,7 +302,9 @@ class AsynchronousAggregator:
                     if isinstance(update.update_data, dict) and key in update.update_data:
                         weight = weights.get(update.source_id, 0.0)
                         if weight > 0:
-                            weighted_params.append(update.update_data[key] * weight)
+                            # Apply staleness penalty
+                            penalty = self._apply_staleness_penalty(update)
+                            weighted_params.append(update.update_data[key] * weight * penalty)
                 
                 if weighted_params:
                     aggregated_model[key] = torch.stack(weighted_params).sum(dim=0)
@@ -296,10 +316,15 @@ class AsynchronousAggregator:
                 if isinstance(update.update_data, torch.Tensor):
                     weight = weights.get(update.source_id, 0.0)
                     if weight > 0:
-                        weighted_params.append(update.update_data * weight)
+                        # Apply staleness penalty
+                        penalty = self._apply_staleness_penalty(update)
+                        weighted_params.append(update.update_data * weight * penalty)
             
             if weighted_params:
                 aggregated_model = torch.stack(weighted_params).sum(dim=0)
+        
+        # Increment global round after aggregation
+        self.current_round += 1
         
         return aggregated_model
     

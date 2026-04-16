@@ -106,6 +106,54 @@ class FHDPipelineCoordinator:
             'thermal_state': resources.get('thermal_state', 'normal')
         }
     
+    def _is_high_resource_device(self, vehicle_info: VehicleInfo) -> bool:
+        """Check if vehicle is a high-resource device (Jetson AGX or Ghost node)"""
+        resources = vehicle_info.resources
+        
+        # Check for Jetson AGX or Ghost node characteristics
+        if resources.get('gpu_available', False):
+            gpu_memory = resources.get('gpu_memory_gb', 0)
+            compute_score = resources.get('compute_score', 0)
+            
+            # Jetson AGX has >= 16GB GPU memory
+            if gpu_memory >= 16:
+                return True
+            
+            # Ghost node has high compute score
+            if compute_score >= 0.9:
+                return True
+        
+        return False
+    
+    def _map_stages_to_vehicles(self, vehicles: List[VehicleInfo]) -> Dict[int, str]:
+        """Map pipeline stages to vehicles, with Stage 1 on high-resource device"""
+        stage_mapping = {}
+        
+        # Separate high and low resource vehicles
+        high_resource_vehicles = [v for v in vehicles if self._is_high_resource_device(v)]
+        other_vehicles = [v for v in vehicles if not self._is_high_resource_device(v)]
+        
+        # Ensure we have at least one vehicle for Stage 1
+        if not high_resource_vehicles:
+            # If no high resource vehicles, use the vehicle with highest compute score
+            high_resource_vehicles = sorted(vehicles, 
+                                         key=lambda v: v.resources.get('compute_score', 0), 
+                                         reverse=True)[:1]
+        
+        # Map Stage 1 to high resource device
+        stage_mapping[1] = high_resource_vehicles[0].vehicle_id
+        
+        # Map remaining stages to other vehicles
+        available_vehicles = other_vehicles + high_resource_vehicles[1:]
+        for stage in range(2, len(vehicles) + 1):
+            if available_vehicles:
+                stage_mapping[stage] = available_vehicles.pop(0).vehicle_id
+            else:
+                # If not enough vehicles, reuse existing ones
+                stage_mapping[stage] = high_resource_vehicles[0].vehicle_id
+        
+        return stage_mapping
+    
     def start_pipeline_training(self, vehicle_ids: List[str], 
                              pipeline_config: Optional[Dict] = None) -> bool:
         """Start pipeline training using FHDP's native pipeline formation"""
@@ -123,6 +171,12 @@ class FHDPipelineCoordinator:
                 logging.error("No valid vehicles for pipeline training")
                 return False
             
+            # Map stages to vehicles with Stage 1 on high-resource device
+            stage_mapping = self._map_stages_to_vehicles(selected_vehicles)
+            
+            # Add stage mapping to pipeline config
+            pipeline_config['stage_mapping'] = stage_mapping
+            
             # Create pipeline using FHDP's native pipeline formation
             pipeline_id = f"evo1_pipeline_{int(time.time())}"
             
@@ -138,9 +192,11 @@ class FHDPipelineCoordinator:
                     'vehicles': vehicle_ids,
                     'config': pipeline_config,
                     'start_time': time.time(),
-                    'status': 'active'
+                    'status': 'active',
+                    'stage_mapping': stage_mapping
                 }
                 logging.info(f"Pipeline training started: {pipeline_id}")
+                logging.info(f"Stage mapping: {stage_mapping}")
             
             return success
             

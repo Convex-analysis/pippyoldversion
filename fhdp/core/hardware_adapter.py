@@ -819,3 +819,51 @@ class GenericResourceAdapter:
             'platform': capabilities.platform.value,
             'compute_capability': capabilities.compute_capability.value
         }
+
+
+def build_capabilities(role: str) -> HardwareCapabilities:
+    """Build hardware capabilities for a given role (server, stage0, stage1)"""
+    if role == "server":
+        return HardwareCapabilities(
+            platform=HardwarePlatform.X86_LINUX,
+            compute_capability=ComputeCapability.SERVER_CLASS,
+            cpu_cores=32,
+            cpu_freq=3.5,
+            memory_total=64.0,
+            gpu_memory=24.0,
+            npu_memory=0.0,
+            storage_speed='ssd',
+            network_speed=1000.0,
+            power_profile='high_performance',
+            thermal_limit=95.0,
+            accelerated_compute=True
+        )
+    if role == "stage0":
+        return HardwareCapabilities(
+            platform=HardwarePlatform.JETSON_ORIN,
+            compute_capability=ComputeCapability.EDGE_AI,
+            cpu_cores=12,
+            cpu_freq=2.0,
+            memory_total=32.0,
+            gpu_memory=8.0,
+            npu_memory=0.0,
+            storage_speed='emmc',
+            network_speed=1000.0,
+            power_profile='balanced',
+            thermal_limit=85.0,
+            accelerated_compute=True
+        )
+    return HardwareCapabilities(
+        platform=HardwarePlatform.JETSON_NANO,
+        compute_capability=ComputeCapability.EDGE_AI,
+        cpu_cores=6,
+        cpu_freq=2.0,
+        memory_total=8.0,
+        gpu_memory=2.0,
+        npu_memory=0.0,
+        storage_speed='emmc',
+        network_speed=1000.0,
+        power_profile='balanced',
+        thermal_limit=85.0,
+        accelerated_compute=True
+    )
